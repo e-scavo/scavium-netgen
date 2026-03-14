@@ -9,7 +9,8 @@ CMDS := \
 	tx-send \
 	tx-receipt \
 	faucet-send \
-	scavium-net-inspect
+	scavium-net-inspect \
+	scavium-faucet
 
 GO := go
 GOFMT := gofmt
