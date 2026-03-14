@@ -1,0 +1,47 @@
+{
+  "chain_name": "SCAVIUM",
+  "network_name": "testnet",
+  "chain_id": 1987374788,
+  "faucet_name": "faucet",
+  "faucet_address": "0x5FA808aD3C53c8b7554bcc033F0e10c2b039bBD4",
+  "deployer_name": "deployer",
+  "deployer_address": "0xaee0b63ad1e319349cCB72b8c03b0cE522B38F16",
+  "accounts": [
+    {
+      "name": "faucet",
+      "address": "0x5FA808aD3C53c8b7554bcc033F0e10c2b039bBD4",
+      "balance_dec": "10000000",
+      "balance_hex": "0x84595161401484A000000"
+    },
+    {
+      "name": "deployer",
+      "address": "0xaee0b63ad1e319349cCB72b8c03b0cE522B38F16",
+      "balance_dec": "1000000",
+      "balance_hex": "0xD3C21BCECCEDA1000000"
+    },
+    {
+      "name": "treasury",
+      "address": "0x8608620896DC2A07126de38963F8dA30Dc7B5B35",
+      "balance_dec": "100000000",
+      "balance_hex": "0x52B7D2DCC80CD2E4000000"
+    },
+    {
+      "name": "ops",
+      "address": "0xf0402B7B6751Eefd7A3b1FA3Ea12462Ffd1604D0",
+      "balance_dec": "1000000",
+      "balance_hex": "0xD3C21BCECCEDA1000000"
+    },
+    {
+      "name": "tester_01",
+      "address": "0x3B7be0b966AA1a789fcD3DF0EE22faec665cA038",
+      "balance_dec": "100000",
+      "balance_hex": "0x152D02C7E14AF6800000"
+    },
+    {
+      "name": "tester_02",
+      "address": "0xb6051ea7F9D07E4B6dd3af56297F8ED4DD7fb8AC",
+      "balance_dec": "100000",
+      "balance_hex": "0x152D02C7E14AF6800000"
+    }
+  ]
+}

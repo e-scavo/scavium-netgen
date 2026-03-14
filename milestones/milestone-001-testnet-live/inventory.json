@@ -1,0 +1,151 @@
+{
+  "chain_name": "SCAVIUM",
+  "network_name": "testnet",
+  "chain_id": 1987374788,
+  "gateway_ip": "191.102.248.190",
+  "p2p_port": 31303,
+  "rpc_port": 18545,
+  "ws_port": 18546,
+  "metrics_port": 19545,
+  "nodes": [
+    {
+      "name": "B01",
+      "role": "bootnode",
+      "ip": "191.102.248.161",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "556d4d1f77b17a9750ca155b7952d0e8de9bc38eceab4f020eb067925a3f9e36d2ed8da2a39d91421deeef5bd9038f1a99e503f17b09feba20c0d3d48948e8ec",
+      "address": "0x9F24540271ED14623F72Fea654b8997eF5a0C76F"
+    },
+    {
+      "name": "B02",
+      "role": "bootnode",
+      "ip": "191.102.248.162",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "c8b2ec28852b7c793cbbd8d367da25678afbf26faea3aa9ee600d4c176f31c9c9140ba579b96e6946cd48d2ebaf4387caed8930a18a42bdd93c36d10a1e37333",
+      "address": "0xADCaC4bE93b59D1Cd67FDBc98523233c48ccbB22"
+    },
+    {
+      "name": "V01",
+      "role": "validator",
+      "ip": "191.102.248.163",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "ab1990498a605d5574cedce3339092d414d61a9513076d13af2c131156caddcbbba3aed45e65fbdd4ceae22dfa19c08a6cb05fd942f66f46dc5156a4c38f5663",
+      "address": "0x02490E734B3881927B3281174d1958683ada361A"
+    },
+    {
+      "name": "V02",
+      "role": "validator",
+      "ip": "191.102.248.164",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "94502abc64a3b6dbb21e43624302ded3de6735d15307769c1b2c1cf54f6635f90b474a00edc2189f5c03f74534726867d83696b52c5b99b62d160697700afdc2",
+      "address": "0x62fB4a8d9f39940aC33d2777b162d72EF3319Fd2"
+    },
+    {
+      "name": "V03",
+      "role": "validator",
+      "ip": "191.102.248.165",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "edcb8eeb4a9262e1beae91386e9455acbff3b88e196eaef58f635926786760f8ca911689f1b2f0c3898af95b32188d43f094883befc17c1a90afa4985aba8276",
+      "address": "0x75831BeD1bc70A5421930d9Fc8908E3dF075bB48"
+    },
+    {
+      "name": "V04",
+      "role": "validator",
+      "ip": "191.102.248.166",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "5c62271a1758c7e873663f86c17ce90fca0e1cb3d4849be267debb5ca31fdfe497227c3039ac1a5ec15a0cb455d5ae200811c57e9df3700622552a4d3e7a2ead",
+      "address": "0x1a9d63c69946eb14498EacdD4EbaA7Ed2D7cc81C"
+    },
+    {
+      "name": "V05",
+      "role": "validator",
+      "ip": "191.102.248.167",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "ec323d0d64f7727aa77e565802725fa3fa75e784d86f19556e1b5a35db97d01ee0156c3c5d107345971edaa0ec1f0a2787bcbc1abce84ab2842cf616fa158f55",
+      "address": "0xcB29a01c2CFBC0F06888C6a0B47ad19cb7a13782"
+    },
+    {
+      "name": "V06",
+      "role": "validator",
+      "ip": "191.102.248.168",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "ee0df6e9b2ff05af719ead1f84d8f207de04313926cf2b05bd21b1c6d3e7a316a912f6262b8203548df15d0997fdff049db6d73bfe1c145d30208c394a81d454",
+      "address": "0x1535B4E88EE1ee9bB01F0eBBEF167aDB42D98849"
+    },
+    {
+      "name": "V07",
+      "role": "validator",
+      "ip": "191.102.248.169",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "ba072f64c2bd814172769aa01f517a71b4de1f61825735c47308a58911479e75ee0257ee49a3736b2035f98356e360908320f930fc1379ffbd22941228bdc719",
+      "address": "0x69C9744eC42014CE2d6417a3337a6DA83A6A4FdD"
+    },
+    {
+      "name": "V08",
+      "role": "validator",
+      "ip": "191.102.248.170",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "0f52c675788a847a2b67c65f3eaf9fc6bdf2f6c57ec034c8d8ce0a1a732884cc07e32a763a90eafa472f7384ec267a50e64412de256b336e861e2a9aa1ae9d5b",
+      "address": "0x727acf9ab18c54D7602446aC9EE7Ef57da1bFAdE"
+    },
+    {
+      "name": "V09",
+      "role": "validator",
+      "ip": "191.102.248.171",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "c7c865dcc3f88302e681b323fb49b3358b467623179146e3897d71b316d4647d5a4ee55dc5866df23afa53658f218f8915265153b18e229a8bd0e572403c7157",
+      "address": "0xE48037FF55b43F8FaAbb9563F13153BFA62C13b0"
+    },
+    {
+      "name": "V10",
+      "role": "validator",
+      "ip": "191.102.248.172",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "9610e4e49c1bbb48262e2bfa1e70305afe12e98cdec991c8666e06ce9a4ba5fec9578c0d481930109757dbe50a82f6c8c9d38e5e1263d48f5a0393ecc364ee64",
+      "address": "0xCb4D412EF6905D3ddEA88225Be77B25660F0F7d3"
+    },
+    {
+      "name": "V11",
+      "role": "validator",
+      "ip": "191.102.248.173",
+      "p2p_port": 31303,
+      "metrics_port": 19545,
+      "enode_pub": "afbd6239676ebfa6c49481f08260570c5c9684925a8e800c4fc40b8e90e7aaa20e69bb23341b730eac24d171ee1cc866d6ae47abdb76decd47632fd373423f4b",
+      "address": "0x2B2325Fe4087970af0D24bA1902e92345A40eE90"
+    },
+    {
+      "name": "R01",
+      "role": "rpc",
+      "ip": "191.102.248.174",
+      "p2p_port": 31303,
+      "rpc_port": 18545,
+      "ws_port": 18546,
+      "metrics_port": 19545,
+      "enode_pub": "4f47e3aa2fd78034a8acf8d15d1cd61b9b7f72b06d8a66113ed4417467dc580ac1531981a395fdd61b3fced5960b2e2f36bd3abfa1c300ad7f092015237da845",
+      "address": "0x08BF7b8F9A74Dd62177DDb89451A9126B117c0b0"
+    },
+    {
+      "name": "R02",
+      "role": "rpc",
+      "ip": "191.102.248.175",
+      "p2p_port": 31303,
+      "rpc_port": 18545,
+      "ws_port": 18546,
+      "metrics_port": 19545,
+      "enode_pub": "7445d6cfb2b6d1daeed725dfb724cfdddb0900920cc178cb2dd6b40691b0cb682594fff8010656358dc3bf2d588c87189847e94800a864936cc739c05bb53287",
+      "address": "0xc5e6895a7446292730569b1B21D95FE7ec611dFD"
+    }
+  ]
+}

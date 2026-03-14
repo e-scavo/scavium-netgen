@@ -1,0 +1,40 @@
+# Binaries
+scavium-netgen
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+/bin/
+/dist/
+/build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime / generated local network data
+/opt/
+/tmp/
+/out/
+/artifacts/
+
+# Sensitive keys / generated chain material
+*.key
+*.pem
+*.pk
+*.seed
+
+# Node runtime data
+data/
+nodes/**/data/
+accounts/*.key
+
+# Logs
+*.log
