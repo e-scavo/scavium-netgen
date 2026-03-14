@@ -8,7 +8,8 @@ CMDS := \
 	wallet-balance \
 	tx-send \
 	tx-receipt \
-	faucet-send
+	faucet-send \
+	scavium-net-inspect
 
 GO := go
 GOFMT := gofmt
