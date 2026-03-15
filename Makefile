@@ -10,7 +10,8 @@ CMDS := \
 	tx-receipt \
 	faucet-send \
 	scavium-net-inspect \
-	scavium-faucet
+	scavium-faucet \
+	scavium-stress-test
 
 GO := go
 GOFMT := gofmt
