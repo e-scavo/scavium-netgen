@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RPC="${1:-http://191.102.248.175:18845}"
+RPC="${1:-http://191.102.248.175:18545}"
 PRIVATE_KEY="${2:-}"
 WALLETS_FILE="${3:-wallets.txt}"
 VALUE_WEI="${4:-1000000000000000000}"   # 1 SCV default
