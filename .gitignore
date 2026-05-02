@@ -38,3 +38,6 @@ accounts/*.key
 
 # Logs
 *.log
+
+# ZIP
+*.zip
