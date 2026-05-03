@@ -4,8 +4,12 @@ package ready
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/big"
 	"sort"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Status is the aggregate health state reported by readiness checks.
@@ -53,6 +57,78 @@ func DefaultChecks() []Check {
 // StubOK is a placeholder check that always succeeds.
 func StubOK(context.Context) error {
 	return nil
+}
+
+type DBPinger interface {
+	Ping(context.Context) error
+}
+
+type QueuePinger interface {
+	PingQueue(context.Context) error
+}
+
+type RPCClient interface {
+	ChainID(context.Context) (*big.Int, error)
+}
+
+type BalanceClient interface {
+	BalanceAt(context.Context, common.Address, *big.Int) (*big.Int, error)
+}
+
+type AddressProvider interface {
+	Address() common.Address
+}
+
+func DBCheck(db DBPinger) Check {
+	return Check{Name: "db", Run: func(ctx context.Context) error {
+		if db == nil {
+			return ErrDegraded("db check is not configured")
+		}
+		if err := db.Ping(ctx); err != nil {
+			return fmt.Errorf("db ping failed: %w", err)
+		}
+		return nil
+	}}
+}
+
+func QueueCheck(queue QueuePinger) Check {
+	return Check{Name: "queue", Run: func(ctx context.Context) error {
+		if queue == nil {
+			return ErrDegraded("queue check is not configured")
+		}
+		if err := queue.PingQueue(ctx); err != nil {
+			return fmt.Errorf("queue check failed: %w", err)
+		}
+		return nil
+	}}
+}
+
+func RPCCheck(client RPCClient) Check {
+	return Check{Name: "rpc", Run: func(ctx context.Context) error {
+		if client == nil {
+			return ErrDegraded("rpc check is not configured")
+		}
+		if _, err := client.ChainID(ctx); err != nil {
+			return fmt.Errorf("rpc chain id failed: %w", err)
+		}
+		return nil
+	}}
+}
+
+func WalletCheck(client BalanceClient, signer AddressProvider) Check {
+	return Check{Name: "wallet", Run: func(ctx context.Context) error {
+		if client == nil || signer == nil {
+			return ErrDegraded("wallet check is not configured")
+		}
+		balance, err := client.BalanceAt(ctx, signer.Address(), nil)
+		if err != nil {
+			return fmt.Errorf("wallet balance failed: %w", err)
+		}
+		if balance == nil {
+			return ErrDegraded("wallet balance unavailable")
+		}
+		return nil
+	}}
 }
 
 // Evaluate runs all checks, sorts them by name, and derives the overall status.

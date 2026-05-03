@@ -11,6 +11,7 @@ import (
 
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
 	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
+	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 )
 
 func TestCloseCancelsRuntimeContext(t *testing.T) {
@@ -117,6 +118,45 @@ func TestDryRunStartsWithoutRPCOrPrivateKey(t *testing.T) {
 	}
 }
 
+func TestDryRunReadinessOKWithoutRPCOrPrivateKey(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.DryRun = true
+	cfg.RPCURL = "http://127.0.0.1:1"
+	cfg.PrivateKeyHex = ""
+
+	application := newTestApp(t, cfg)
+	defer application.Close(context.Background()) //nolint:errcheck
+
+	rec, result := getReady(t, application)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if result.Status != ready.StatusOK {
+		t.Fatalf("ready status = %q, want ok", result.Status)
+	}
+	if got := checkNames(result); len(got) != 2 || got[0] != "db" || got[1] != "queue" {
+		t.Fatalf("check names = %v, want [db queue]", got)
+	}
+}
+
+func TestReadinessDegradesAfterDBClose(t *testing.T) {
+	application := newTestApp(t, testConfig(t))
+	if err := application.Close(context.Background()); err != nil {
+		t.Fatalf("close app: %v", err)
+	}
+
+	rec, result := getReady(t, application)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	if result.Status != ready.StatusDegraded {
+		t.Fatalf("ready status = %q, want degraded", result.Status)
+	}
+	if got := checkNames(result); len(got) != 2 || got[0] != "db" || got[1] != "queue" {
+		t.Fatalf("check names = %v, want [db queue]", got)
+	}
+}
+
 func newTestApp(t *testing.T, cfg config.Config) *App {
 	t.Helper()
 	application, err := New(cfg)
@@ -155,4 +195,25 @@ func createClaim(t *testing.T, application *App, address string) faucet.ClaimRes
 		t.Fatal("created claim id is empty")
 	}
 	return created
+}
+
+func getReady(t *testing.T, application *App) (*httptest.ResponseRecorder, ready.Result) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+	application.Handler.ServeHTTP(rec, req)
+
+	var result ready.Result
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode ready: %v", err)
+	}
+	return rec, result
+}
+
+func checkNames(result ready.Result) []string {
+	names := make([]string, 0, len(result.Checks))
+	for _, check := range result.Checks {
+		names = append(names, check.Name)
+	}
+	return names
 }
