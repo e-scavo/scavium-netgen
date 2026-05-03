@@ -1,6 +1,6 @@
 # Runbook
 
-This runbook covers the faucet binary that exists today: one Go process, embedded frontend, public JSON API, and in-memory claim state.
+This runbook covers the faucet binary that exists today: one Go process, embedded frontend, public JSON API, SQLite-backed persistent claim state, a background worker, and real readiness probes.
 
 ## Build and run
 
@@ -9,11 +9,12 @@ go build ./cmd/scavium-faucet
 
 SCAVIUM_FAUCET_BIND_ADDR=127.0.0.1:18080 \
 SCAVIUM_FAUCET_RPC_URL=http://127.0.0.1:18545 \
+SCAVIUM_FAUCET_DATABASE_PATH=/tmp/scavium-faucet-dev.db \
 SCAVIUM_FAUCET_DRY_RUN=true \
 ./scavium-faucet
 ```
 
-The binary logs structured JSON to stdout.
+The binary logs structured JSON to stdout. The database file and its parent directory are created automatically if they do not exist. Migrations run on every startup.
 
 ## Health checks
 
@@ -27,34 +28,47 @@ curl -s http://127.0.0.1:18080/api/v1/version
 
 What to expect:
 
-- `/health` should return `{"status":"ok",...}`
-- `/ready` should usually return `status: "ok"` with stub checks
-- `/api/v1/status` should return the configured network name, symbol, and `dry_run`
+- `/health` returns `{"status":"ok",...}`
+- `/ready` returns `status: "ok"` with real DB and queue probes; in non-dry-run mode also includes RPC and wallet probes
+- `/api/v1/status` returns the configured network name, symbol, and `dry_run` flag
 
 ## Manual API smoke test
 
-Create a claim:
+Start the service in a separate terminal:
 
 ```bash
-curl -s -X POST http://127.0.0.1:18080/api/v1/claim \
-  -H 'Content-Type: application/json' \
-  -d '{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}'
+SCAVIUM_FAUCET_DRY_RUN=true \
+SCAVIUM_FAUCET_DATABASE_PATH=/tmp/scavium-faucet-smoke.db \
+go run ./cmd/scavium-faucet
 ```
 
-Then fetch it:
+Then in another terminal:
+
+```bash
+curl -s http://127.0.0.1:18080/health
+curl -s http://127.0.0.1:18080/ready
+curl -s -X POST http://127.0.0.1:18080/api/v1/claim \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: smoke-1' \
+  -d '{"address":"0x0000000000000000000000000000000000000001"}'
+```
+
+The claim response will include an `id`. Fetch the persisted claim:
 
 ```bash
 curl -s http://127.0.0.1:18080/api/v1/claim/<claim-id>
 ```
 
+In dry-run mode the background worker picks up the queued claim and advances its status to `sent` within a few seconds.
+
 ## Operating assumptions
 
-- Claim state is in memory only.
-- Restarting the process clears claims and any admin-service state.
-- `/ready` is not a deep infrastructure probe yet.
-- The shipped binary does not currently enable the admin API because `AdminToken` is not passed through `app.New`.
-
-Because of that, do not treat the current binary as a durable production service yet.
+- Claim state is persisted in SQLite (WAL mode, 5 s busy timeout). Restarting the process does not lose queued or in-flight claims.
+- The background worker processes queued claims automatically (enabled by default, polls every 5 s).
+- `/ready` runs real probes: DB and queue always; RPC and wallet when `DRY_RUN=false`.
+- The admin API (`/api/v1/admin/*`) is active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set.
+- In dry-run mode no on-chain transactions are submitted; the `DryRunSender` simulates success.
+- The watcher (on-chain confirmation poller) is only active when `DRY_RUN=false`.
 
 ## Service manager example
 
@@ -71,7 +85,8 @@ systemctl restart scavium-faucet
 1. Bind the service to loopback.
 2. Put nginx or another reverse proxy in front of it for TLS.
 3. Keep configuration outside the repository.
-4. Set `SCAVIUM_FAUCET_DRY_RUN=false` only when you are ready to fund and use a real faucet wallet in a later wired-up deployment path.
+4. Set `SCAVIUM_FAUCET_DATABASE_PATH` to a durable path outside the release directory so the database survives deployments.
+5. Set `SCAVIUM_FAUCET_DRY_RUN=false` and provide `SCAVIUM_FAUCET_PRIVATE_KEY` when ready for live transactions.
 
 ## Troubleshooting
 
@@ -85,8 +100,8 @@ The API validates checksum-compatible EVM addresses. Re-submit with a proper `0x
 
 ### Claims disappear after restart
 
-That is expected today because the shipped service uses in-memory claim storage only.
+This should not happen with the current binary. Claims are persisted in SQLite. If claims are missing after restart, verify that `SCAVIUM_FAUCET_DATABASE_PATH` points to the same durable file across restarts and that the file was not deleted.
 
 ### `/api/v1/admin/*` returns `503`
 
-That is expected in the shipped app. The handler supports admin routes, but `app.New` does not wire `SCAVIUM_FAUCET_ADMIN_TOKEN` into the runtime handler yet.
+`503` means `SCAVIUM_FAUCET_ADMIN_TOKEN` is empty or not set. Set the token in the environment file and restart the service.

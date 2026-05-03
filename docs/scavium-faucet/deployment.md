@@ -6,14 +6,14 @@ It does **not** assume automatic production execution from this repository. All 
 
 ## Current runtime constraints
 
-Keep the deployment aligned with the current binary, not the future roadmap:
+Keep the deployment aligned with the current binary:
 
-- claim state is in memory only
-- restarting the process clears in-memory claims
-- admin routes are still disabled in the shipped binary
-- readiness checks are shallow
+- claim state is persisted in SQLite; restarting the process does not lose queued claims
+- admin routes are active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set
+- readiness checks are real DB/queue probes; RPC/wallet probes activate in non-dry-run mode
+- the background worker processes the claim queue automatically (enabled by default)
 
-Because of that, treat this as a careful MVP deployment with strong outer controls.
+Store the SQLite database outside the release directory so it survives deployments.
 
 ## Suggested server layout
 
