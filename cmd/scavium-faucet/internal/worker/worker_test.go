@@ -47,7 +47,7 @@ func (q *fakeQueue) DequeueBatch(_ context.Context, n int) ([]domain.Claim, erro
 	return batch, nil
 }
 
-func (q *fakeQueue) Ack(_ context.Context, claimID string) error {
+func (q *fakeQueue) Ack(_ context.Context, claimID string, _ domain.Transaction) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.acked = append(q.acked, claimID)

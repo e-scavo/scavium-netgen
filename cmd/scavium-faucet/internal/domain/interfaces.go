@@ -32,8 +32,8 @@ type QueueStore interface {
 	// DequeueBatch picks up to n claims in 'queued' state whose next_attempt_at is not in the
 	// future, transitions them to 'sending', and returns them.
 	DequeueBatch(ctx context.Context, n int) ([]Claim, error)
-	// Ack transitions a claim from 'sending' to 'sent'.
-	Ack(ctx context.Context, claimID string) error
+	// Ack transitions a claim from 'sending' to 'sent' and persists the tx record.
+	Ack(ctx context.Context, claimID string, tx Transaction) error
 	// Fail increments retry_count. If retry_count reaches maxRetries the claim is dead-lettered
 	// ('failed'). Otherwise it is re-queued with an exponential backoff on next_attempt_at.
 	Fail(ctx context.Context, claimID string, reason string, maxRetries int) error

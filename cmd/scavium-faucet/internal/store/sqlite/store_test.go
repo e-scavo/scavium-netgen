@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestMigrateCreatesRequiredTables(t *testing.T) {
@@ -374,7 +376,7 @@ func TestAckTransitionsToSent(t *testing.T) {
 		t.Fatalf("dequeue: %v / len=%d", err, len(batch))
 	}
 
-	if err := store.Ack(context.Background(), "c1"); err != nil {
+	if err := store.Ack(context.Background(), "c1", domain.Transaction{}); err != nil {
 		t.Fatalf("ack: %v", err)
 	}
 
@@ -384,6 +386,45 @@ func TestAckTransitionsToSent(t *testing.T) {
 	}
 	if got.Status != domain.ClaimStatusSent {
 		t.Fatalf("status = %q, want sent", got.Status)
+	}
+}
+
+func TestAckRecordsTransactionRow(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	if _, err := store.CreateClaim(context.Background(), testClaim("tx1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+
+	from := common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
+	to := common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+	txHash := common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab")
+	now := time.Now().UTC()
+	tx := domain.Transaction{
+		Hash:      txHash,
+		From:      from,
+		To:        to,
+		ValueWei:  big.NewInt(1e18),
+		Status:    domain.ClaimStatusSent,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := store.Ack(context.Background(), "tx1", tx); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	var storedHash string
+	err := store.db.QueryRow(`SELECT tx_hash FROM transactions WHERE request_id = ?`, "tx1").Scan(&storedHash)
+	if err != nil {
+		t.Fatalf("query transaction row: %v", err)
+	}
+	if storedHash != txHash.Hex() {
+		t.Fatalf("tx_hash = %q, want %q", storedHash, txHash.Hex())
 	}
 }
 

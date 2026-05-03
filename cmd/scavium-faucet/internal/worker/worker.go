@@ -77,7 +77,7 @@ func (w *Worker) processBatch(ctx context.Context) error {
 	}
 
 	for _, claim := range claims {
-		_, sendErr := w.sender.Send(ctx, claim)
+		tx, sendErr := w.sender.Send(ctx, claim)
 		if sendErr != nil {
 			w.log.Warn("worker: send failed", "claim_id", claim.ID, "error", sendErr)
 			if failErr := w.queue.Fail(ctx, claim.ID, sendErr.Error(), w.cfg.MaxRetries); failErr != nil {
@@ -85,7 +85,7 @@ func (w *Worker) processBatch(ctx context.Context) error {
 			}
 			continue
 		}
-		if ackErr := w.queue.Ack(ctx, claim.ID); ackErr != nil {
+		if ackErr := w.queue.Ack(ctx, claim.ID, tx); ackErr != nil {
 			w.log.Error("worker: ack claim", "claim_id", claim.ID, "error", ackErr)
 		}
 	}
