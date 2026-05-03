@@ -1,6 +1,6 @@
 # Binaries
-scavium-faucet
-scavium-netgen
+/scavium-faucet
+/scavium-netgen
 *.exe
 *.exe~
 *.dll
