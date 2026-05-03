@@ -33,6 +33,7 @@ El faucet público SCAVIUM debe implementarse como aplicación Go dentro de `cmd
 15. Si una feature profesional excede el MVP de 24 h, dejar contrato/interfaces y TODO documentado, no improvisar implementación incompleta.
 16. No documentar en `docs/` durante los steps de código, salvo que el step lo indique explícitamente.
 17. No reescribir documentación troncal; cuando llegue documentación, actualizar incrementalmente.
+18. No leer, copiar ni derivar implementaciones de `cmd/scavium-faucet-v0` solo bajo instrucciones explícitas.
 
 ## Estilo de arquitectura
 
