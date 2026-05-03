@@ -28,6 +28,17 @@ const (
 	// EnvPrivateKey holds the hex-encoded private key used to sign transactions.
 	// Never log this value.
 	EnvPrivateKey = "SCAVIUM_FAUCET_PRIVATE_KEY"
+
+	// Captcha configuration.
+	// EnvCaptchaProvider selects the captcha backend: "disabled", "dev",
+	// "hcaptcha", "recaptcha", or "turnstile".
+	EnvCaptchaProvider  = "SCAVIUM_FAUCET_CAPTCHA_PROVIDER"
+	EnvCaptchaSecret    = "SCAVIUM_FAUCET_CAPTCHA_SECRET"
+	EnvCaptchaVerifyURL = "SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL"
+
+	// EnvFaucetMode controls the operational mode: "active", "paused", or
+	// "maintenance".
+	EnvFaucetMode = "SCAVIUM_FAUCET_MODE"
 )
 
 type Config struct {
@@ -48,6 +59,18 @@ type Config struct {
 	// PrivateKeyHex is the hex-encoded signer key. Not required when DryRun=true.
 	// Never log this value.
 	PrivateKeyHex string
+
+	// Captcha settings.
+	// CaptchaProvider selects the backend.  Defaults to "disabled".
+	CaptchaProvider string
+	// CaptchaSecret is the server-side secret for the chosen provider.
+	// Never log this value.
+	CaptchaSecret    string
+	CaptchaVerifyURL string
+
+	// FaucetMode is the operational mode of the faucet ("active", "paused", or
+	// "maintenance").  Defaults to "active".
+	FaucetMode string
 }
 
 func LoadFromEnv() (Config, error) {
@@ -127,6 +150,11 @@ func FromEnv(lookup func(string) string) (Config, error) {
 	cfg.TrustedProxy = strings.TrimSpace(lookup(EnvTrustedProxy))
 	cfg.PrivateKeyHex = strings.TrimSpace(lookup(EnvPrivateKey))
 
+	cfg.CaptchaProvider = envOrDefault(lookup, EnvCaptchaProvider, cfg.CaptchaProvider)
+	cfg.CaptchaSecret = strings.TrimSpace(lookup(EnvCaptchaSecret))
+	cfg.CaptchaVerifyURL = envOrDefault(lookup, EnvCaptchaVerifyURL, cfg.CaptchaVerifyURL)
+	cfg.FaucetMode = envOrDefault(lookup, EnvFaucetMode, cfg.FaucetMode)
+
 	return cfg, nil
 }
 
@@ -146,6 +174,9 @@ func Defaults() Config {
 		RateLimitAddrPerDay: 3,
 		DailyBudgetWei:      nil,
 		TrustedProxy:        "",
+		CaptchaProvider:     "disabled",
+		CaptchaVerifyURL:    "",
+		FaucetMode:          "active",
 	}
 }
 
