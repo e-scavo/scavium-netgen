@@ -50,6 +50,7 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvCaptchaSecret:       "0x-test-secret",
 		EnvCaptchaVerifyURL:    "https://hcaptcha.example.test/siteverify",
 		EnvFaucetMode:          "paused",
+		EnvAdminToken:          "test-admin-token-xyz",
 	}
 
 	cfg, err := FromEnv(func(key string) string { return values[key] })
@@ -116,6 +117,9 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	}
 	if cfg.FaucetMode != "paused" {
 		t.Fatalf("faucet mode = %q, want paused", cfg.FaucetMode)
+	}
+	if cfg.AdminToken != "test-admin-token-xyz" {
+		t.Fatal("admin token not set")
 	}
 }
 

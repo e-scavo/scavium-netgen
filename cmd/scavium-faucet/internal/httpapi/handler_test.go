@@ -4,16 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/admin"
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
+	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/version"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestHealth(t *testing.T) {
@@ -596,4 +601,206 @@ func testClaimService() *faucet.InMemoryReadService {
 	service := testReadService().(*faucet.InMemoryReadService)
 	service.SetClaimIDGenerator(func() (string, error) { return "claim_test", nil })
 	return service
+}
+
+// --- Admin test helpers ---
+
+const testAdminToken = "test-admin-token-for-tests"
+
+func testAdminDeps() Dependencies {
+	return Dependencies{
+		ReadService:  testReadService(),
+		AdminService: admin.NewInMemoryAdminService(),
+		AdminToken:   testAdminToken,
+	}
+}
+
+func adminRequest(method, path string, body any) *http.Request {
+	var req *http.Request
+	if body != nil {
+		b, _ := json.Marshal(body)
+		req = httptest.NewRequest(method, path, bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequest(method, path, nil)
+	}
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	return req
+}
+
+func TestAdminRequiresToken(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard", nil)
+	NewHandler(testAdminDeps()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestAdminWrongToken(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	NewHandler(testAdminDeps()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestAdminDisabledWhenNoToken(t *testing.T) {
+	deps := testAdminDeps()
+	deps.AdminToken = ""
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	NewHandler(deps).ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestAdminDashboard(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/dashboard", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["mode"] != "active" {
+		t.Fatalf("mode = %v, want active", body["mode"])
+	}
+}
+
+func TestAdminSetModePaused(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/faucet/mode", map[string]string{"mode": "paused"}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAdminBlocklistAddListRemove(t *testing.T) {
+	deps := testAdminDeps()
+	handler := NewHandler(deps)
+
+	// Add
+	addRec := httptest.NewRecorder()
+	handler.ServeHTTP(addRec, adminRequest(http.MethodPost, "/api/v1/admin/blocklist", map[string]string{
+		"key_type": "ip",
+		"value":    "1.2.3.4",
+		"reason":   "test",
+	}))
+	if addRec.Code != http.StatusCreated {
+		t.Fatalf("add status = %d, want 201", addRec.Code)
+	}
+
+	// List
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, adminRequest(http.MethodGet, "/api/v1/admin/blocklist", nil))
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listRec.Code)
+	}
+	var listBody struct {
+		Entries []any `json:"entries"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listBody); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listBody.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(listBody.Entries))
+	}
+
+	// Remove
+	delRec := httptest.NewRecorder()
+	handler.ServeHTTP(delRec, adminRequest(http.MethodDelete, "/api/v1/admin/blocklist?key_type=ip&value=1.2.3.4", nil))
+	if delRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200", delRec.Code)
+	}
+}
+
+func TestAdminAuditLog(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	// Trigger an action to populate audit log.
+	_ = svc.SetMode(context.Background(), "paused", "test")
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/audit", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Entries []any `json:"entries"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Entries) == 0 {
+		t.Fatal("expected at least one audit entry")
+	}
+}
+
+func TestAdminGetClaimNotFound(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/claim/does-not-exist", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestAdminGetClaim(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	c := domain.Claim{
+		ID:        "claim_abc",
+		Address:   common.HexToAddress("0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"),
+		Status:    domain.ClaimStatusQueued,
+		CreatedAt: time.Now().UTC(),
+	}
+	svc.AddClaim(c)
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, fmt.Sprintf("/api/v1/admin/claim/%s", c.ID), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAdminCancelClaim(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	c := domain.Claim{
+		ID:        "claim_cancel",
+		Address:   common.HexToAddress("0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"),
+		Status:    domain.ClaimStatusQueued,
+		CreatedAt: time.Now().UTC(),
+	}
+	svc.AddClaim(c)
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/claim/claim_cancel/cancel", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAdminRetryClaim(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	c := domain.Claim{
+		ID:        "claim_retry",
+		Address:   common.HexToAddress("0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"),
+		Status:    domain.ClaimStatusFailed,
+		CreatedAt: time.Now().UTC(),
+	}
+	svc.AddClaim(c)
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/claim/claim_retry/retry", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
 }

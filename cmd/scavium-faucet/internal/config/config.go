@@ -39,6 +39,10 @@ const (
 	// EnvFaucetMode controls the operational mode: "active", "paused", or
 	// "maintenance".
 	EnvFaucetMode = "SCAVIUM_FAUCET_MODE"
+
+	// EnvAdminToken is the bearer token required to access admin endpoints.
+	// If empty, admin endpoints are disabled.  Never log this value.
+	EnvAdminToken = "SCAVIUM_FAUCET_ADMIN_TOKEN"
 )
 
 type Config struct {
@@ -71,6 +75,10 @@ type Config struct {
 	// FaucetMode is the operational mode of the faucet ("active", "paused", or
 	// "maintenance").  Defaults to "active".
 	FaucetMode string
+
+	// AdminToken is the bearer token for admin endpoints.
+	// Empty means admin API is disabled.  Never log this value.
+	AdminToken string
 }
 
 func LoadFromEnv() (Config, error) {
@@ -154,6 +162,7 @@ func FromEnv(lookup func(string) string) (Config, error) {
 	cfg.CaptchaSecret = strings.TrimSpace(lookup(EnvCaptchaSecret))
 	cfg.CaptchaVerifyURL = envOrDefault(lookup, EnvCaptchaVerifyURL, cfg.CaptchaVerifyURL)
 	cfg.FaucetMode = envOrDefault(lookup, EnvFaucetMode, cfg.FaucetMode)
+	cfg.AdminToken = strings.TrimSpace(lookup(EnvAdminToken))
 
 	return cfg, nil
 }
