@@ -11,29 +11,37 @@ import (
 )
 
 const (
-	EnvBindAddr        = "SCAVIUM_FAUCET_BIND_ADDR"
-	EnvPublicBaseURL   = "SCAVIUM_FAUCET_PUBLIC_BASE_URL"
-	EnvRPCURL          = "SCAVIUM_FAUCET_RPC_URL"
-	EnvChainID         = "SCAVIUM_FAUCET_CHAIN_ID"
-	EnvNetworkName     = "SCAVIUM_FAUCET_NETWORK_NAME"
-	EnvSymbol          = "SCAVIUM_FAUCET_SYMBOL"
-	EnvExplorerTxURL   = "SCAVIUM_FAUCET_EXPLORER_TX_URL"
-	EnvAmountWei       = "SCAVIUM_FAUCET_AMOUNT_WEI"
-	EnvCooldownSeconds = "SCAVIUM_FAUCET_COOLDOWN_SECONDS"
-	EnvDryRun          = "SCAVIUM_FAUCET_DRY_RUN"
+	EnvBindAddr            = "SCAVIUM_FAUCET_BIND_ADDR"
+	EnvPublicBaseURL       = "SCAVIUM_FAUCET_PUBLIC_BASE_URL"
+	EnvRPCURL              = "SCAVIUM_FAUCET_RPC_URL"
+	EnvChainID             = "SCAVIUM_FAUCET_CHAIN_ID"
+	EnvNetworkName         = "SCAVIUM_FAUCET_NETWORK_NAME"
+	EnvSymbol              = "SCAVIUM_FAUCET_SYMBOL"
+	EnvExplorerTxURL       = "SCAVIUM_FAUCET_EXPLORER_TX_URL"
+	EnvAmountWei           = "SCAVIUM_FAUCET_AMOUNT_WEI"
+	EnvCooldownSeconds     = "SCAVIUM_FAUCET_COOLDOWN_SECONDS"
+	EnvDryRun              = "SCAVIUM_FAUCET_DRY_RUN"
+	EnvRateLimitIPPerHour  = "SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR"
+	EnvRateLimitAddrPerDay = "SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY"
+	EnvDailyBudgetWei      = "SCAVIUM_FAUCET_DAILY_BUDGET_WEI"
+	EnvTrustedProxy        = "SCAVIUM_FAUCET_TRUSTED_PROXY"
 )
 
 type Config struct {
-	BindAddr        string
-	PublicBaseURL   string
-	RPCURL          string
-	ChainID         int64
-	NetworkName     string
-	Symbol          string
-	ExplorerTxURL   string
-	AmountWei       *big.Int
-	CooldownSeconds int
-	DryRun          bool
+	BindAddr            string
+	PublicBaseURL       string
+	RPCURL              string
+	ChainID             int64
+	NetworkName         string
+	Symbol              string
+	ExplorerTxURL       string
+	AmountWei           *big.Int
+	CooldownSeconds     int
+	DryRun              bool
+	RateLimitIPPerHour  int
+	RateLimitAddrPerDay int
+	DailyBudgetWei      *big.Int
+	TrustedProxy        string
 }
 
 func LoadFromEnv() (Config, error) {
@@ -86,21 +94,51 @@ func FromEnv(lookup func(string) string) (Config, error) {
 		cfg.DryRun = dryRun
 	}
 
+	if raw := strings.TrimSpace(lookup(EnvRateLimitIPPerHour)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvRateLimitIPPerHour, err)
+		}
+		cfg.RateLimitIPPerHour = v
+	}
+
+	if raw := strings.TrimSpace(lookup(EnvRateLimitAddrPerDay)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvRateLimitAddrPerDay, err)
+		}
+		cfg.RateLimitAddrPerDay = v
+	}
+
+	if raw := strings.TrimSpace(lookup(EnvDailyBudgetWei)); raw != "" {
+		v, ok := new(big.Int).SetString(raw, 10)
+		if !ok {
+			return Config{}, fmt.Errorf("%s: invalid integer", EnvDailyBudgetWei)
+		}
+		cfg.DailyBudgetWei = v
+	}
+
+	cfg.TrustedProxy = strings.TrimSpace(lookup(EnvTrustedProxy))
+
 	return cfg, nil
 }
 
 func Defaults() Config {
 	return Config{
-		BindAddr:        "127.0.0.1:18080",
-		PublicBaseURL:   "http://127.0.0.1:18080",
-		RPCURL:          "http://127.0.0.1:18545",
-		ChainID:         31337,
-		NetworkName:     "scavium-dev",
-		Symbol:          "SCAV",
-		ExplorerTxURL:   "",
-		AmountWei:       big.NewInt(1_000_000_000_000_000_000),
-		CooldownSeconds: int((24 * time.Hour).Seconds()),
-		DryRun:          true,
+		BindAddr:            "127.0.0.1:18080",
+		PublicBaseURL:       "http://127.0.0.1:18080",
+		RPCURL:              "http://127.0.0.1:18545",
+		ChainID:             31337,
+		NetworkName:         "scavium-dev",
+		Symbol:              "SCAV",
+		ExplorerTxURL:       "",
+		AmountWei:           big.NewInt(1_000_000_000_000_000_000),
+		CooldownSeconds:     int((24 * time.Hour).Seconds()),
+		DryRun:              true,
+		RateLimitIPPerHour:  10,
+		RateLimitAddrPerDay: 3,
+		DailyBudgetWei:      nil,
+		TrustedProxy:        "",
 	}
 }
 
