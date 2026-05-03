@@ -1,4 +1,5 @@
 # Binaries
+scavium-faucet
 scavium-netgen
 *.exe
 *.exe~
