@@ -1,3 +1,4 @@
+// Package app wires faucet configuration into the top-level HTTP application.
 package app
 
 import (
@@ -9,11 +10,13 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 )
 
+// App holds the runtime configuration and root HTTP handler for the faucet.
 type App struct {
 	Config  config.Config
 	Handler http.Handler
 }
 
+// New constructs the faucet application with its configured HTTP handler tree.
 func New(cfg config.Config) *App {
 	return &App{
 		Config: cfg,

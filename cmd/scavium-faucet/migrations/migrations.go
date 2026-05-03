@@ -1,3 +1,4 @@
+// Package migrations embeds the SQLite schema migrations used by the faucet.
 package migrations
 
 import "embed"

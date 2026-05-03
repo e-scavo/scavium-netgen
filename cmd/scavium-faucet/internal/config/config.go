@@ -1,3 +1,4 @@
+// Package config loads and validates faucet runtime configuration.
 package config
 
 import (
@@ -10,6 +11,7 @@ import (
 	"time"
 )
 
+// Environment variable names consumed by the faucet configuration loader.
 const (
 	EnvBindAddr            = "SCAVIUM_FAUCET_BIND_ADDR"
 	EnvPublicBaseURL       = "SCAVIUM_FAUCET_PUBLIC_BASE_URL"
@@ -45,6 +47,7 @@ const (
 	EnvAdminToken = "SCAVIUM_FAUCET_ADMIN_TOKEN"
 )
 
+// Config is the validated runtime configuration required by the faucet service.
 type Config struct {
 	BindAddr            string
 	PublicBaseURL       string
@@ -81,6 +84,7 @@ type Config struct {
 	AdminToken string
 }
 
+// LoadFromEnv loads configuration from the process environment and validates it.
 func LoadFromEnv() (Config, error) {
 	cfg, err := FromEnv(getenv)
 	if err != nil {
@@ -89,6 +93,7 @@ func LoadFromEnv() (Config, error) {
 	return cfg, cfg.Validate()
 }
 
+// FromEnv loads configuration values through lookup, applying Defaults first.
 func FromEnv(lookup func(string) string) (Config, error) {
 	cfg := Defaults()
 
@@ -167,6 +172,7 @@ func FromEnv(lookup func(string) string) (Config, error) {
 	return cfg, nil
 }
 
+// Defaults returns the development-safe faucet configuration baseline.
 func Defaults() Config {
 	return Config{
 		BindAddr:            "127.0.0.1:18080",
@@ -189,6 +195,7 @@ func Defaults() Config {
 	}
 }
 
+// Validate reports configuration errors that would prevent the faucet from running safely.
 func (c Config) Validate() error {
 	var errs []error
 

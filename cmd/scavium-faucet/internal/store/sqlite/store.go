@@ -1,3 +1,4 @@
+// Package sqlite provides a SQLite-backed faucet persistence implementation.
 package sqlite
 
 import (
@@ -22,12 +23,15 @@ var _ domain.ClaimStore = (*Store)(nil)
 var _ domain.RateLimiter = (*Store)(nil)
 var _ domain.QueueStore = (*Store)(nil)
 
+// ErrNotFound reports that the requested record does not exist.
 var ErrNotFound = errors.New("not found")
 
+// Store persists faucet state in SQLite and implements the domain store contracts.
 type Store struct {
 	db *sql.DB
 }
 
+// Open opens a SQLite database file and applies embedded migrations.
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -42,14 +46,17 @@ func Open(path string) (*Store, error) {
 	return store, nil
 }
 
+// New wraps an existing sql.DB as a faucet Store.
 func New(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
+// Close closes the underlying database handle.
 func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// Migrate applies pending embedded schema migrations in lexical order.
 func (s *Store) Migrate(ctx context.Context) error {
 	// Ensure migration-tracking table exists before running any migrations.
 	_, err := s.db.ExecContext(ctx, `

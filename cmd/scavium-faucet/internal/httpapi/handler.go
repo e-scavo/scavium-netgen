@@ -43,6 +43,7 @@ type claimRequest struct {
 	Address string `json:"address"`
 }
 
+// Dependencies groups the services and settings required to build the HTTP API.
 type Dependencies struct {
 	ReadinessChecks []ready.Check
 	ReadService     faucet.ReadService
@@ -54,6 +55,7 @@ type Dependencies struct {
 	AdminToken string
 }
 
+// NewHandler builds the public and admin HTTP routes for the faucet service.
 func NewHandler(deps Dependencies) http.Handler {
 	if deps.ReadinessChecks == nil {
 		deps.ReadinessChecks = ready.DefaultChecks()
@@ -278,6 +280,7 @@ func handleGetClaim(readService faucet.ReadService, prefix string) http.HandlerF
 	}
 }
 
+// RequestIDMiddleware ensures each request carries a stable request ID.
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get(requestIDHeader)
@@ -291,17 +294,20 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// RequestID returns the request ID attached by RequestIDMiddleware.
 func RequestID(r *http.Request) string {
 	requestID, _ := r.Context().Value(requestIDContextKey{}).(string)
 	return requestID
 }
 
+// WriteJSON writes body as JSON with the provided HTTP status code.
 func WriteJSON(w http.ResponseWriter, statusCode int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	_ = json.NewEncoder(w).Encode(body)
 }
 
+// WriteError writes a normalized JSON error response.
 func WriteError(w http.ResponseWriter, r *http.Request, statusCode int, code, message string, details map[string]any) {
 	if details == nil {
 		details = map[string]any{}

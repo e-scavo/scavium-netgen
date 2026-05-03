@@ -1,3 +1,4 @@
+// Package main starts the SCAVIUM faucet HTTP server.
 package main
 
 import (
