@@ -2,14 +2,18 @@
 
 ## Runtime overview
 
-The current binary is much smaller than the long-term faucet design. `main.go` loads config, builds `app.New(cfg)`, and starts one `http.Server` with fixed timeouts. `app.New` then wires a single handler tree with:
+`main.go` loads config, builds `app.New(cfg)`, and starts one `http.Server` with fixed timeouts. `app.New` wires the full persistent runtime:
 
-- `ready.DefaultChecks()` for `/ready`
-- `faucet.NewInMemoryReadService(cfg)` for public read and claim routes
+- opens SQLite (WAL mode, 5 s busy timeout) from `SCAVIUM_FAUCET_DATABASE_PATH` and runs embedded migrations automatically
+- `faucet.NewPersistentReadService(cfg, store, store, store)` for public read and claim routes
+- captcha verifier selected by `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` (`disabled`, `dev`, `hcaptcha`, `recaptcha`, `turnstile`)
+- `runtimeChecks()` — real DB and queue probes; RPC and wallet probes when not in dry-run mode
+- `AdminToken: cfg.AdminToken` passed into `httpapi.Dependencies`, enabling the admin API when the token is set
+- `TrustedProxy` wired for trusted-proxy IP extraction, fingerprint, and user-agent forwarding
+- background worker (enabled by default) processing the SQLite-backed claim queue
+- background watcher polling on-chain confirmations (auto-enabled in non-dry-run mode)
 - `frontend.Handler()` for the embedded web UI
-- default `version.Current()` for `/api/v1/version`
-
-The shipped app does **not** wire the admin token or a persistent store into `httpapi.NewHandler`.
+- `version.Current()` for `/api/v1/version`
 
 ```text
 client
@@ -21,9 +25,15 @@ scavium-faucet http.Server
   |     |
   |     +-- RequestIDMiddleware
   |     +-- httpapi public handlers
-  |     +-- ready.DefaultChecks()         -> stub "ok" checks
-  |     +-- faucet.InMemoryReadService    -> in-memory claims/idempotency
+  |     +-- runtimeChecks()               -> real DB/queue (+ RPC/wallet) probes
+  |     +-- faucet.PersistentReadService  -> SQLite-backed claims/idempotency
+  |     +-- captcha verifier              -> configured provider or nil
+  |     +-- rate limiter                  -> SQLite-backed IP/address limits
+  |     +-- admin middleware              -> bearer token when AdminToken set
   |     `-- version.Current()
+  |
+  +-- background: worker                  -> polls SQLite queue, dispatches sender
+  +-- background: watcher (non-dry-run)   -> polls chain confirmations
   |
   `-- / and non-/api paths
         `-- frontend.Handler() -> embedded static files
@@ -37,18 +47,22 @@ scavium-faucet http.Server
 POST /api/v1/claim
   |
   +-- max 1 MiB JSON body
+  +-- extract RemoteIP (TrustedProxy-aware), UserAgent, CaptchaToken, Fingerprint
   +-- decode {"address": "..."}
   +-- domain.ValidateAddress(...)
   +-- optional Idempotency-Key header lookup
-  +-- create in-memory claim with status "queued"
+  +-- captcha verification (if provider configured)
+  +-- risk evaluation
+  +-- persistent rate-limit check (IP per hour, address per day, fingerprint)
+  +-- persist claim to SQLite with status "queued"
   `-- 202 Accepted with claim payload
 ```
 
-There is no RPC send, worker pickup, captcha verification, or rate-limit enforcement in the shipped binary yet. Claims are accepted into memory only.
+The background worker picks up queued claims, calls the configured sender (real `EthSender` or `DryRunSender`), and advances claim status through `sending` → `sent`. The watcher (non-dry-run only) polls for on-chain confirmations and advances status to `confirmed` or `failed`.
 
 ### Claim lookup
 
-`GET /api/v1/claim/{id}` returns the stored in-memory claim record or a JSON `404`.
+`GET /api/v1/claim/{id}` returns the persisted SQLite claim record or a JSON `404`.
 
 ### Frontend routing
 
@@ -56,16 +70,14 @@ There is no RPC send, worker pickup, captcha verification, or rate-limit enforce
 
 ## State model
 
-The live binary currently keeps state in memory:
+The live binary persists state in SQLite (WAL journal mode, 5 s busy timeout):
 
-- `claimsByID map[string]domain.Claim`
-- `claimIDsByIdem map[string]string`
-- default admin service state if the handler is constructed with it
+- claim records with full lifecycle status (`received` → `queued` → `sending` → `sent` → `confirmed` / `failed`)
+- idempotency key index for duplicate-safe claim submission
+- rate-limit counters per IP (hourly) and per address (daily)
+- queue metadata (`next_attempt_at`, retry count) used by the background worker
 
-That has two immediate consequences:
-
-1. Restarting the process drops claims, blocklist entries, and audit history.
-2. There is no queue recovery or durable audit trail in the shipped app yet.
+Migrations (`001_initial.sql`, `002_queue.sql`) run automatically on startup inside `sqlite.Open()`. Restarting the process does not lose queued or in-flight claims.
 
 ## Package roles
 
@@ -75,14 +87,18 @@ That has two immediate consequences:
 | `internal/config` | Loads and validates environment configuration |
 | `internal/httpapi` | Route registration, JSON helpers, request IDs, admin middleware |
 | `internal/frontend` | Embedded UI served at `/` |
-| `internal/faucet` | In-memory public read/claim service |
-| `internal/ready` | Stub readiness checks and aggregate result shaping |
-| `internal/admin` | In-memory admin service and bearer-token middleware; not wired by `app.New` |
+| `internal/faucet` | SQLite-backed persistent read/claim service (`PersistentReadService`) |
+| `internal/ready` | Real DB/queue probes, optional RPC/wallet probes, and aggregate result shaping |
+| `internal/admin` | In-memory admin service and bearer-token middleware; enabled when `AdminToken` is set |
 | `internal/domain` | Shared claim and status types plus address validation |
 | `internal/observability` | Structured JSON logger |
 | `internal/version` | Build metadata payload for `/api/v1/version` |
-| `internal/iputil` | Trusted-proxy IP helper present in repo but not wired into HTTP handlers yet |
-| `internal/abuse`, `internal/captcha`, `internal/chain`, `internal/store`, `internal/worker` | Supporting packages and future-facing implementation work not active in the shipped runtime |
+| `internal/iputil` | Trusted-proxy IP extraction; wired into claim handler |
+| `internal/captcha` | Captcha verifier selection and HTTP-based verification; wired into `PersistentReadService` |
+| `internal/abuse` | Risk evaluation helpers used during claim creation |
+| `internal/chain` | RPC client, signer, `EthSender`, `DryRunSender`, and `Watcher`; wired at startup based on `DryRun` |
+| `internal/store/sqlite` | SQLite persistence layer: claims, queue, rate limits, migrations |
+| `internal/worker` | Background worker polling SQLite queue and dispatching the configured sender |
 
 ## Startup and shutdown
 
