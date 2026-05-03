@@ -173,6 +173,137 @@ func TestPersistentReadServiceRejectsInactiveMode(t *testing.T) {
 	}
 }
 
+func TestPersistentReadServiceDisabledCaptchaAllowsClaim(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:      persistentTestAddress(),
+		RemoteIP:     "203.0.113.10",
+		CaptchaToken: "",
+	})
+	if err != nil {
+		t.Fatalf("create claim with disabled captcha: %v", err)
+	}
+}
+
+func TestPersistentReadServiceFailedCaptchaRejectsClaim(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+	service.SetCaptchaVerifier(fakeCaptchaVerifier{passed: false, reason: "captcha failed"})
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:      persistentTestAddress(),
+		RemoteIP:     "203.0.113.10",
+		CaptchaToken: "bad-token",
+	})
+	if err == nil {
+		t.Fatal("create claim returned nil error")
+	}
+	if !strings.Contains(err.Error(), "captcha failed") {
+		t.Fatalf("error = %v, want captcha failure", err)
+	}
+}
+
+func TestPersistentReadServiceAddressRateLimit(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.RateLimitAddrPerDay = 1
+	cfg.RateLimitIPPerHour = 100
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+
+	request := ClaimRequest{Address: persistentTestAddress(), RemoteIP: "203.0.113.10"}
+	if _, err := service.CreateClaim(context.Background(), request); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+
+	request.RemoteIP = "203.0.113.11"
+	_, err := service.CreateClaim(context.Background(), request)
+	if err == nil {
+		t.Fatal("second claim returned nil error")
+	}
+	if !strings.Contains(err.Error(), "rate limit") {
+		t.Fatalf("error = %v, want rate limit error", err)
+	}
+}
+
+func TestPersistentReadServiceIPRateLimit(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.RateLimitAddrPerDay = 100
+	cfg.RateLimitIPPerHour = 1
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:  persistentTestAddress(),
+		RemoteIP: "203.0.113.10",
+	}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:  persistentSecondTestAddress(),
+		RemoteIP: "203.0.113.10",
+	})
+	if err == nil {
+		t.Fatal("second claim returned nil error")
+	}
+	if !strings.Contains(err.Error(), "rate limit") {
+		t.Fatalf("error = %v, want rate limit error", err)
+	}
+}
+
+func TestPersistentReadServiceFingerprintRateLimit(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.RateLimitAddrPerDay = 100
+	cfg.RateLimitIPPerHour = 1
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:     persistentTestAddress(),
+		Fingerprint: "browser-1",
+	}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:     persistentSecondTestAddress(),
+		Fingerprint: "browser-1",
+	})
+	if err == nil {
+		t.Fatal("second claim returned nil error")
+	}
+	if !strings.Contains(err.Error(), "rate limit") {
+		t.Fatalf("error = %v, want rate limit error", err)
+	}
+}
+
+func TestPersistentReadServiceRiskEngineRejectsClaim(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+	service.SetRiskEngine(fakeRiskEngine{allowed: false, reason: "risk rejected"})
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:     persistentTestAddress(),
+		RemoteIP:    "203.0.113.10",
+		UserAgent:   "wallet-test/1.0",
+		Fingerprint: "browser-1",
+	})
+	if err == nil {
+		t.Fatal("create claim returned nil error")
+	}
+	if !strings.Contains(err.Error(), "risk rejected") {
+		t.Fatalf("error = %v, want risk rejection", err)
+	}
+}
+
 func openPersistentTestStore(t *testing.T, path string) *sqlite.Store {
 	t.Helper()
 	if path == "" {
@@ -210,4 +341,26 @@ func persistentTestNow() time.Time {
 
 func persistentTestAddress() common.Address {
 	return domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+}
+
+func persistentSecondTestAddress() common.Address {
+	return domain.MustValidateAddress("0x8617E340B3D01FA5F11F306F4090FD50E238070D")
+}
+
+type fakeCaptchaVerifier struct {
+	passed bool
+	reason string
+}
+
+func (v fakeCaptchaVerifier) Verify(context.Context, string, string) (domain.CaptchaDecision, error) {
+	return domain.CaptchaDecision{Passed: v.passed, Reason: v.reason}, nil
+}
+
+type fakeRiskEngine struct {
+	allowed bool
+	reason  string
+}
+
+func (e fakeRiskEngine) Evaluate(context.Context, domain.RiskInput) (domain.RiskDecision, error) {
+	return domain.RiskDecision{Allowed: e.allowed, Reason: e.reason}, nil
 }
