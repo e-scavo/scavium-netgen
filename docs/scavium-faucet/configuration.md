@@ -1,102 +1,71 @@
-# Configuration Reference
+# Configuration reference
 
-All configuration is loaded from the process environment at startup.
-No configuration file is read — use an `EnvironmentFile` in the systemd unit to pass secrets.
+Configuration is loaded from environment variables at startup via `internal/config`. The table below distinguishes between values that affect the shipped binary today and values that are loaded for later stages but not yet wired into runtime behavior.
 
----
+## Variables
 
-## Core
-
-| Variable | Default | Description |
+| Variable | Default | Current effect |
 |---|---|---|
-| `SCAVIUM_FAUCET_BIND_ADDR` | `127.0.0.1:18080` | TCP address the HTTP server listens on. Keep on loopback; let nginx terminate TLS. |
-| `SCAVIUM_FAUCET_PUBLIC_BASE_URL` | `http://127.0.0.1:18080` | Public HTTPS URL of the faucet (used in responses and CORS). |
-| `SCAVIUM_FAUCET_MODE` | `active` | Operational mode: `active`, `paused`, or `maintenance`. |
-| `SCAVIUM_FAUCET_DRY_RUN` | `true` | When `true`, transactions are validated but not broadcast. Safe default for development. |
+| `SCAVIUM_FAUCET_BIND_ADDR` | `127.0.0.1:18080` | Used by `main.go` as the listen address |
+| `SCAVIUM_FAUCET_PUBLIC_BASE_URL` | `http://127.0.0.1:18080` | Loaded and validated; not currently surfaced by the handler |
+| `SCAVIUM_FAUCET_RPC_URL` | `http://127.0.0.1:18545` | Loaded and validated; not actively used because readiness checks are still stubs |
+| `SCAVIUM_FAUCET_CHAIN_ID` | `31337` | Exposed by `/api/v1/config` |
+| `SCAVIUM_FAUCET_NETWORK_NAME` | `scavium-dev` | Exposed by `/api/v1/status` and `/api/v1/config` |
+| `SCAVIUM_FAUCET_SYMBOL` | `SCAV` | Exposed by `/api/v1/status` and `/api/v1/config` |
+| `SCAVIUM_FAUCET_EXPLORER_TX_URL` | empty | Exposed by `/api/v1/config` |
+| `SCAVIUM_FAUCET_AMOUNT_WEI` | `1000000000000000000` | Exposed by `/api/v1/config` and copied into created claims |
+| `SCAVIUM_FAUCET_COOLDOWN_SECONDS` | `86400` | Exposed by `/api/v1/config` and address-status responses |
+| `SCAVIUM_FAUCET_DRY_RUN` | `true` | Exposed by `/api/v1/status` and `/api/v1/config` |
+| `SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR` | `10` | Exposed by `/api/v1/config` and address-status responses; not enforced yet |
+| `SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY` | `3` | Exposed by `/api/v1/config` and address-status responses; not enforced yet |
+| `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` | empty | Loaded but not enforced yet |
+| `SCAVIUM_FAUCET_TRUSTED_PROXY` | empty | Loaded; `internal/iputil` exists, but the HTTP layer does not use it yet |
+| `SCAVIUM_FAUCET_PRIVATE_KEY` | empty | Loaded for future send/signing work; not used by the shipped binary |
+| `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` | `disabled` | Loaded only; captcha verification is not wired into the public claim endpoint yet |
+| `SCAVIUM_FAUCET_CAPTCHA_SECRET` | empty | Loaded only; not used today |
+| `SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL` | empty | Loaded only; not used today |
+| `SCAVIUM_FAUCET_MODE` | `active` | Loaded only; the current public status endpoint still reports `active` from the in-memory read service |
+| `SCAVIUM_FAUCET_ADMIN_TOKEN` | empty | Loaded by config, but `app.New` does not pass it into `httpapi.NewHandler`, so admin endpoints remain disabled in the shipped binary |
 
----
+## Validation rules
 
-## Network
+`Config.Validate()` currently enforces:
 
-| Variable | Default | Description |
-|---|---|---|
-| `SCAVIUM_FAUCET_RPC_URL` | `http://127.0.0.1:18545` | Besu JSON-RPC endpoint. |
-| `SCAVIUM_FAUCET_CHAIN_ID` | `31337` | EVM chain ID. Must match the connected network. |
-| `SCAVIUM_FAUCET_NETWORK_NAME` | `scavium-dev` | Human-readable network name shown in the UI and API. |
-| `SCAVIUM_FAUCET_SYMBOL` | `SCAV` | Token symbol shown in the UI and API. |
-| `SCAVIUM_FAUCET_EXPLORER_TX_URL` | _(empty)_ | URL prefix for transaction links, e.g. `https://explorer.scavium.io/tx/`. |
+- bind address must be non-empty
+- public base URL must be non-empty
+- RPC URL must be non-empty
+- chain ID must be positive
+- network name must be non-empty
+- symbol must be non-empty
+- amount wei must be positive
+- cooldown seconds must be zero or positive
 
----
+Notably, the current validator does **not** require a private key or admin token.
 
-## Wallet & transactions
-
-| Variable | Default | Description |
-|---|---|---|
-| `SCAVIUM_FAUCET_PRIVATE_KEY` | _(required in production)_ | Hex-encoded private key of the faucet wallet. Never commit. Never log. |
-| `SCAVIUM_FAUCET_AMOUNT_WEI` | `1000000000000000000` (1 SCAV) | Amount sent per claim, in wei. |
-
----
-
-## Rate limits & cooldowns
-
-| Variable | Default | Description |
-|---|---|---|
-| `SCAVIUM_FAUCET_COOLDOWN_SECONDS` | `86400` (24 h) | Minimum time between claims from the same address. |
-| `SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR` | `10` | Maximum claim attempts from the same IP per hour. |
-| `SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY` | `3` | Maximum successful claims from the same address per day. |
-| `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` | _(unlimited)_ | Total wei disbursable per day. Faucet auto-pauses when reached. |
-
----
-
-## Captcha
-
-| Variable | Default | Description |
-|---|---|---|
-| `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` | `disabled` | Provider: `disabled`, `dev`, `hcaptcha`, `recaptcha`, `turnstile`. |
-| `SCAVIUM_FAUCET_CAPTCHA_SECRET` | _(empty)_ | Server-side secret for the chosen captcha provider. Never log. |
-| `SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL` | _(provider default)_ | Override the captcha verification URL (useful for testing). |
-
-`dev` provider accepts any non-empty token — use it in CI and local dev only.
-
----
-
-## Security
-
-| Variable | Default | Description |
-|---|---|---|
-| `SCAVIUM_FAUCET_TRUSTED_PROXY` | _(empty)_ | CIDR or IP of the trusted reverse proxy. Required for correct real-IP extraction when behind nginx. Example: `127.0.0.1`. |
-| `SCAVIUM_FAUCET_ADMIN_TOKEN` | _(empty)_ | Bearer token required for all `/api/v1/admin/*` endpoints. If empty, admin API is disabled. Never log. |
-
----
-
-## Example EnvironmentFile
+## Example environment
 
 ```ini
-# /etc/scavium-faucet/env  (chmod 640, owner root:scavium-faucet)
-
 SCAVIUM_FAUCET_BIND_ADDR=127.0.0.1:18080
-SCAVIUM_FAUCET_PUBLIC_BASE_URL=https://faucet.scavium.io
+SCAVIUM_FAUCET_PUBLIC_BASE_URL=https://faucet.example.test
 SCAVIUM_FAUCET_RPC_URL=http://127.0.0.1:18545
 SCAVIUM_FAUCET_CHAIN_ID=1337
 SCAVIUM_FAUCET_NETWORK_NAME=scavium-testnet
 SCAVIUM_FAUCET_SYMBOL=SCAV
-SCAVIUM_FAUCET_EXPLORER_TX_URL=https://explorer.scavium.io/tx/
+SCAVIUM_FAUCET_EXPLORER_TX_URL=https://explorer.example.test/tx/{txHash}
 
-SCAVIUM_FAUCET_PRIVATE_KEY=<hex-encoded-key>
 SCAVIUM_FAUCET_AMOUNT_WEI=1000000000000000000
 SCAVIUM_FAUCET_COOLDOWN_SECONDS=86400
-SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR=5
-SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY=1
-SCAVIUM_FAUCET_DAILY_BUDGET_WEI=100000000000000000000
-
-SCAVIUM_FAUCET_CAPTCHA_PROVIDER=turnstile
-SCAVIUM_FAUCET_CAPTCHA_SECRET=<turnstile-secret>
+SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR=10
+SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY=3
+SCAVIUM_FAUCET_DRY_RUN=true
 
 SCAVIUM_FAUCET_TRUSTED_PROXY=127.0.0.1
-SCAVIUM_FAUCET_ADMIN_TOKEN=<random-high-entropy-token>
-
-SCAVIUM_FAUCET_DRY_RUN=false
 SCAVIUM_FAUCET_MODE=active
+SCAVIUM_FAUCET_ADMIN_TOKEN=replace-me
 ```
 
-> **Important:** `chmod 640` and set ownership to `root:scavium-faucet` so only the service user can read the file.
+## Practical notes
+
+- Keep secrets in an external environment file or service manager, not in the repository.
+- Set `SCAVIUM_FAUCET_BIND_ADDR` to loopback and terminate TLS in a reverse proxy.
+- Treat `SCAVIUM_FAUCET_ADMIN_TOKEN`, `SCAVIUM_FAUCET_PRIVATE_KEY`, and captcha secrets as sensitive even though the current binary does not use all of them yet.

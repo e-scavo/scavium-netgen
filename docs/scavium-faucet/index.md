@@ -1,44 +1,39 @@
 # scavium-faucet
 
-`scavium-faucet` is the public token-distribution service for SCAVIUM EVM-compatible networks.
+`scavium-faucet` is the faucet MVP that currently ships from this repository. The shipped binary is a single Go HTTP server with an embedded web UI, public JSON endpoints, request IDs, structured logs, stub readiness checks, and in-memory claim state.
 
-It provides a web UI and REST API that lets users request test funds from a wallet controlled by the operator, with integrated rate-limiting, captcha validation, per-address cooldowns, and an admin API.
+This directory documents the **implemented project surface**, not the full roadmap. The broader feature backlog remains in [`docs/scavium_faucet_public_features.md`](../scavium_faucet_public_features.md), which stays untouched and should be treated as the source roadmap document.
 
 ## Documentation
 
 | Document | Description |
 |---|---|
-| [architecture.md](architecture.md) | Component diagram, data-flow, and module overview |
-| [api.md](api.md) | Public and admin REST API reference |
-| [configuration.md](configuration.md) | Environment variable reference |
-| [runbook.md](runbook.md) | Operational procedures, health checks, and incident response |
-| [security.md](security.md) | Security model, hardening checklist, and secret management |
+| [architecture.md](architecture.md) | Actual runtime wiring, package roles, and state model |
+| [api.md](api.md) | Public API reference plus the handler-level admin contract |
+| [configuration.md](configuration.md) | Environment variables, defaults, and what is wired today |
+| [deployment.md](deployment.md) | Review-first VPS deployment package with systemd, nginx, env, certbot, firewall, and rollback assets |
+| [deployment-certbot.md](deployment-certbot.md) | Manual ACME and certbot guide for TLS issuance and renewal |
+| [deployment-firewall.md](deployment-firewall.md) | Public exposure and firewall policy for VPS and cloud edge |
+| [deployment-rollback.md](deployment-rollback.md) | Rollback procedure for release symlinks and service recovery |
+| [runbook.md](runbook.md) | Build, run, health checks, and operational caveats |
+| [security.md](security.md) | Current security properties, gaps, and deployment guidance |
 
-## Source documents
+## Current implementation snapshot
 
-| Document | Description |
-|---|---|
-| [scavium_faucet_public_features.md](../scavium_faucet_public_features.md) | Canonical feature list and implementation roadmap |
-| [OPERATIONS.md](../OPERATIONS.md) | Network-level operational procedures |
+- The binary loads environment config and listens on `127.0.0.1:18080` by default.
+- Non-API paths serve the embedded frontend; `/api/*` paths return JSON.
+- Public endpoints support health, readiness, status, config, claim creation, claim lookup, address eligibility, and version.
+- Claim data is stored in memory only; restarting the process loses queued claims and admin state.
+- The handler package includes admin routes, but the shipped app does not pass `AdminToken` into the handler, so `/api/v1/admin/*` is disabled in the binary today.
 
 ## Quick start
 
 ```bash
-# Build
 go build ./cmd/scavium-faucet
 
-# Run in dry-run mode (no real transactions)
 SCAVIUM_FAUCET_DRY_RUN=true \
 SCAVIUM_FAUCET_RPC_URL=http://127.0.0.1:18545 \
-./scavium-faucet
+go run ./cmd/scavium-faucet
 ```
 
-See [configuration.md](configuration.md) for the full list of environment variables.
-
-## Design principles
-
-- **Single binary** — no external runtime dependencies beyond a Besu RPC endpoint and a SQLite/Postgres DB.
-- **Config from environment** — all secrets and tuning parameters are injected at runtime; nothing sensitive is committed.
-- **Defense in depth** — IP rate-limits, address cooldowns, captcha, and circuit-breaker all operate independently.
-- **Observable** — structured JSON logs, `/health`, `/ready`, and metrics endpoints.
-- **Testable** — every package exposes interfaces so the HTTP layer, wallet signer, and DB can be exercised in unit tests without real infrastructure.
+See [configuration.md](configuration.md) for the environment reference and [runbook.md](runbook.md) for operational notes.

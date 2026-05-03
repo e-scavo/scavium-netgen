@@ -1,150 +1,98 @@
 # Security
 
-Security model, hardening checklist, and secret management guidelines for `scavium-faucet`.
+This document describes the security posture of the faucet **as currently implemented**. It also calls out important gaps so the docs do not overstate protections that are only present in roadmap packages.
 
----
+## Security properties in the current binary
 
-## Threat model
+### HTTP server defaults
 
-| Threat | Mitigation |
-|---|---|
-| Bot draining funds | Captcha + IP rate-limit + address cooldown + daily budget |
-| Single IP rotating wallets | IP rate-limit + fingerprint (future) |
-| Single wallet rotating IPs | Address cooldown + per-address daily limit |
-| Stolen admin token | HTTPS only; token never logged; rotate and restart on suspected compromise |
-| Stolen private key | Key stored only in `EnvironmentFile` with `chmod 640`; never logged; use treasury wallet with limited balance |
-| RPC endpoint abuse | Backend RPC not exposed externally; only the Go binary talks to it |
-| HTTP abuse | nginx `limit_req`, connection limits, and request body limit |
-| Credential exposure in logs | All secret fields sanitised; never printed in structured logs |
+- Default bind address is loopback: `127.0.0.1:18080`
+- `ReadHeaderTimeout=5s`
+- `ReadTimeout=10s`
+- `WriteTimeout=10s`
+- `IdleTimeout=60s`
+- JSON request bodies for write endpoints are capped at `1 MiB`
 
----
+These are useful baseline protections against accidental exposure and slow or oversized requests.
 
-## Network hardening
+### Request tracing
 
-- The Go binary binds to `127.0.0.1` only — never to `0.0.0.0`.
-- nginx terminates TLS and proxies to the loopback interface.
-- The Besu RPC node must also bind to loopback or a private interface.
-- Firewall rules must allow port `443` inbound and block `18080`, `18545` from external traffic.
+Every request carries an `X-Request-ID` response header. If the caller does not provide one, the server generates a random request ID. This makes log correlation and error tracing easier.
 
-```bash
-# UFW example
-ufw allow 22/tcp   # SSH
-ufw allow 443/tcp  # HTTPS (nginx)
-ufw deny  18080    # faucet backend — loopback only
-ufw deny  18545    # Besu RPC — loopback only
-ufw enable
-```
+### Address validation
 
----
+Claim creation and address-status lookups validate the supplied EVM address and reject malformed input with a normalized `400 invalid_address` response.
 
-## systemd hardening
+### Admin token comparison
 
-Recommended security directives for the systemd unit:
+`internal/admin.TokenAuthMiddleware` uses constant-time comparison for bearer token checks. If the handler is instantiated with an admin token, the comparison itself avoids basic timing side channels.
 
-```ini
-[Service]
-User=scavium-faucet
-Group=scavium-faucet
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateDevices=true
-ReadWritePaths=/var/lib/scavium-faucet
-EnvironmentFile=/etc/scavium-faucet/env
-```
+### Structured logging
 
-The `EnvironmentFile` must be owned by `root` and readable only by the service user:
+The binary logs structured JSON events through `internal/observability`. The current startup path logs listen and error events and does not print configuration values by default.
 
-```bash
-chown root:scavium-faucet /etc/scavium-faucet/env
-chmod 640 /etc/scavium-faucet/env
-```
+## Important gaps in the current runtime
 
----
+The repository already contains packages and roadmap items for richer protections, but the shipped binary does **not** enforce all of them yet.
 
-## Secret management
+Not wired today:
 
-### Private key (`SCAVIUM_FAUCET_PRIVATE_KEY`)
+- captcha verification
+- IP or address rate-limit enforcement
+- trusted-proxy real IP extraction
+- CORS policy
+- wallet signing / on-chain payout flow
+- persistent audit log or persistent claim storage
+- admin API enablement through `app.New`
+- deep readiness checks against real DB/RPC dependencies
 
-- Never commit to source control.
-- Store only in the `EnvironmentFile` with strict file permissions.
-- Use a dedicated faucet wallet — never the treasury or validator keys.
-- Keep the faucet wallet balance at the minimum needed (e.g. 1–7 days of budget).
-- Refill from treasury on a schedule or when the balance guard triggers.
+Treat those as future work, not active defenses.
 
-### Admin token (`SCAVIUM_FAUCET_ADMIN_TOKEN`)
+## Deployment guidance
 
-- Generate with a cryptographically-secure PRNG: `openssl rand -hex 32`.
-- Rotate immediately if compromised: update `EnvironmentFile`, restart service.
-- Never share over plaintext channels.
+### Reverse proxy and network placement
 
-### Captcha secret (`SCAVIUM_FAUCET_CAPTCHA_SECRET`)
+Run the Go binary on loopback and terminate TLS in a reverse proxy such as nginx.
 
-- Keep in `EnvironmentFile` only.
-- Rotate through the captcha provider dashboard if compromised.
+Recommended external exposure:
 
----
+1. allow inbound HTTPS to the proxy
+2. keep the Go server off the public interface
+3. keep the RPC endpoint off the public interface
 
-## HTTP security headers
+### Secret handling
 
-nginx must set the following headers for all responses:
+Even though the current binary does not use every secret yet, these values should still be managed as secrets:
 
-```nginx
-add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-add_header X-Frame-Options DENY always;
-add_header X-Content-Type-Options nosniff always;
-add_header Referrer-Policy strict-origin-when-cross-origin always;
-add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';" always;
-```
+- `SCAVIUM_FAUCET_PRIVATE_KEY`
+- `SCAVIUM_FAUCET_ADMIN_TOKEN`
+- `SCAVIUM_FAUCET_CAPTCHA_SECRET`
 
----
-
-## CORS
-
-The faucet sets CORS headers based on `SCAVIUM_FAUCET_PUBLIC_BASE_URL`. Only the configured origin is allowed. Do not set `Access-Control-Allow-Origin: *` in production.
-
----
-
-## Trusted proxy configuration
-
-If the faucet is behind nginx on the same host:
+Recommended practice:
 
 ```bash
-SCAVIUM_FAUCET_TRUSTED_PROXY=127.0.0.1
+openssl rand -hex 32
 ```
 
-This ensures `X-Forwarded-For` headers are trusted only from the loopback interface, preventing IP spoofing by external clients.
+Use a dedicated environment file or service manager secret store, not the repository.
 
----
+### Wallet hygiene
 
-## Rate limiting layers
+When the signing path is wired later, use a dedicated faucet hot wallet with limited balance. Do not reuse treasury, validator, or deployer keys.
 
-| Layer | Variable | Default |
-|---|---|---|
-| IP per hour | `SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR` | 10 |
-| Address per day | `SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY` | 3 |
-| Address cooldown | `SCAVIUM_FAUCET_COOLDOWN_SECONDS` | 86400 |
-| Daily budget | `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` | unlimited |
-| nginx rate limit | `limit_req_zone` | operator-defined |
+## Practical hardening checklist
 
-All layers operate independently. A request must pass all active layers.
+- [ ] keep `SCAVIUM_FAUCET_BIND_ADDR` on loopback
+- [ ] put TLS and external access control in a reverse proxy
+- [ ] firewall off direct access to backend and RPC ports
+- [ ] keep environment files readable only by the service owner
+- [ ] leave `SCAVIUM_FAUCET_DRY_RUN=true` in development
+- [ ] rotate the admin token if it is ever exposed
+- [ ] do not assume captcha, rate limits, or budget guards are active until they are wired into the runtime
 
----
+## Recommended operator stance
 
-## Pre-production security checklist
+Because the current binary lacks durable storage and several planned abuse controls, the safest interpretation is:
 
-- [ ] `SCAVIUM_FAUCET_DRY_RUN=false`
-- [ ] `SCAVIUM_FAUCET_BIND_ADDR=127.0.0.1:18080` (loopback only)
-- [ ] nginx TLS enabled with valid certificate
-- [ ] nginx sets all security headers
-- [ ] `EnvironmentFile` permissions: `chmod 640`, `chown root:scavium-faucet`
-- [ ] Private key is a dedicated faucet wallet, not treasury/validator
-- [ ] `SCAVIUM_FAUCET_TRUSTED_PROXY` set correctly
-- [ ] `SCAVIUM_FAUCET_ADMIN_TOKEN` is a random 32-byte hex value
-- [ ] Captcha provider is not `disabled` and not `dev`
-- [ ] Firewall blocks direct access to ports `18080` and `18545`
-- [ ] systemd hardening directives applied
-- [ ] Wallet balance guard configured (`SCAVIUM_FAUCET_DAILY_BUDGET_WEI`)
-- [ ] Log sanitisation verified (no secrets in `journalctl` output)
-- [ ] Admin API tested only over HTTPS
+- good for local development, tests, and documentation-backed MVP exploration
+- not yet a hardened public internet faucet without additional outer controls and future application wiring

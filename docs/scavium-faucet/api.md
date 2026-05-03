@@ -1,254 +1,320 @@
-# API Reference
+# API reference
 
 Base path: `/api/v1`
 
-All responses are `application/json`. Error envelopes follow the shape:
+All API responses are JSON. Every request gets an `X-Request-ID` response header; if the client does not send one, the server generates one.
+
+Normalized error responses use this shape:
 
 ```json
 {
-  "code": "RATE_LIMIT_EXCEEDED",
-  "message": "Too many requests from this IP.",
-  "details": {},
+  "code": "invalid_address",
+  "message": "invalid address",
+  "details": {
+    "reason": "address must be a valid hex Ethereum address"
+  },
   "request_id": "abc123"
 }
 ```
-
-Every request receives an `X-Request-ID` response header for tracing.
-
----
 
 ## Public endpoints
 
 ### `GET /health`
 
-Liveness probe. Returns `200 OK` while the process is running.
-
-**Response**
+Liveness endpoint.
 
 ```json
-{ "status": "ok", "time": "2024-01-01T00:00:00Z" }
+{
+  "status": "ok",
+  "time": "2026-05-03T12:00:00Z"
+}
 ```
-
----
 
 ### `GET /ready`
 
-Readiness probe. Checks DB connectivity, RPC reachability, wallet balance, and queue health.
+Readiness endpoint backed by `ready.DefaultChecks()`.
 
-**Response — healthy**
+Today those checks are stubs, so the shipped binary reports an aggregate of named checks such as `db`, `queue`, `rpc`, and `wallet`, but it is still a shallow readiness signal.
 
+Healthy example:
+
+```json
+{
+  "status": "ok",
+  "checks": [
+    { "name": "db", "status": "ok" },
+    { "name": "queue", "status": "ok" },
+    { "name": "rpc", "status": "ok" },
+    { "name": "wallet", "status": "ok" }
+  ],
+  "time": "2026-05-03T12:00:00Z"
+}
 ```
-200 OK
-{ "status": "ready" }
-```
 
-**Response — degraded**
-
-```
-503 Service Unavailable
-{ "status": "not ready", "checks": { "rpc": "timeout" } }
-```
-
----
-
+### `GET /api/v1/status`
 ### `GET /api/v1/faucet/status`
 
-Returns the current operational status of the faucet.
+Alias routes for the public faucet status payload.
 
-**Response**
+```json
+{
+  "status": "active",
+  "network_name": "scavium-test",
+  "symbol": "tSCAV",
+  "dry_run": false,
+  "updated_at": "2026-05-03T12:00:00Z"
+}
+```
+
+The current in-memory read service always reports `status: "active"`.
+
+### `GET /api/v1/config`
+### `GET /api/v1/faucet/config`
+
+Alias routes for public faucet configuration.
+
+```json
+{
+  "network_name": "scavium-test",
+  "chain_id": 123,
+  "symbol": "tSCAV",
+  "amount_wei": "42",
+  "cooldown_seconds": 60,
+  "explorer_tx_url": "https://explorer.example.test/tx/{txHash}",
+  "dry_run": false,
+  "rate_limit_ip_per_hour": 10,
+  "rate_limit_addr_per_day": 3
+}
+```
+
+### `GET /api/v1/address/{address}/status`
+### `GET /api/v1/faucet/address/{address}/eligibility`
+
+Alias routes for address eligibility.
+
+```json
+{
+  "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+  "eligible": true,
+  "reason": "eligible",
+  "cooldown_seconds": 60,
+  "cooldown_remaining_seconds": 0,
+  "rate_limit_ip_per_hour": 10,
+  "rate_limit_addr_per_day": 3
+}
+```
+
+An invalid address returns `400` with `code: "invalid_address"`.
+
+### `POST /api/v1/claim`
+### `POST /api/v1/faucet/claim`
+
+Alias routes for claim creation.
+
+Request body:
+
+```json
+{
+  "address": "0x52908400098527886E0F7030069857D2E4169EE7"
+}
+```
+
+Optional request header:
+
+```text
+Idempotency-Key: same-key-for-retries
+```
+
+Accepted response:
+
+```json
+{
+  "id": "claim_test",
+  "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+  "amount_wei": "42",
+  "status": "queued",
+  "idempotency_key": "same-key-for-retries",
+  "created_at": "2026-05-03T12:00:00Z",
+  "updated_at": "2026-05-03T12:00:00Z"
+}
+```
+
+Current behavior:
+
+- only `address` is decoded from the body
+- the body is capped at `1 MiB`
+- the claim is stored in memory with initial status `queued`
+- repeated requests with the same `Idempotency-Key` return the same claim
+
+Common errors:
+
+| HTTP | Code | Meaning |
+|---|---|---|
+| 400 | `invalid_json` | Malformed JSON body |
+| 400 | `invalid_address` | Address failed validation |
+| 500 | `claim_unavailable` | Claim service failure |
+
+### `GET /api/v1/claim/{id}`
+### `GET /api/v1/faucet/claim/{id}`
+
+Alias routes for claim lookup.
+
+```json
+{
+  "id": "claim_test",
+  "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+  "amount_wei": "42",
+  "status": "queued",
+  "created_at": "2026-05-03T12:00:00Z",
+  "updated_at": "2026-05-03T12:00:00Z"
+}
+```
+
+If the claim is missing, the server returns `404` with `code: "claim_not_found"`.
+
+### `GET /api/v1/version`
+
+Returns build metadata from `internal/version`.
+
+```json
+{
+  "version": "dev",
+  "commit": "unknown",
+  "build_date": "unknown"
+}
+```
+
+## Admin endpoints
+
+The handler package implements admin routes under `/api/v1/admin/*`, but the shipped binary currently does not pass `AdminToken` into `httpapi.NewHandler`, so these routes return `503` when accessed through `main.go`/`app.New`.
+
+When the handler is constructed with an admin token, every admin request must include:
+
+```text
+Authorization: Bearer <SCAVIUM_FAUCET_ADMIN_TOKEN>
+```
+
+Wrong or missing token returns `401`. Empty configured token returns `503`.
+
+### `GET /api/v1/admin/dashboard`
+
+Returns the in-memory admin summary:
 
 ```json
 {
   "mode": "active",
-  "paused": false,
-  "maintenance": false,
-  "network": "scavium-testnet",
-  "symbol": "SCAV"
+  "claim_counts": {},
+  "blocklist_size": 0,
+  "updated_at": "2026-05-03T12:00:00Z"
 }
 ```
 
-`mode` is one of `active`, `paused`, `maintenance`.
+### `GET /api/v1/admin/claims?limit=50&offset=0`
 
----
-
-### `GET /api/v1/faucet/config`
-
-Returns public parameters visible to clients and the SCAVIUM Wallet.
-
-**Response**
+Lists in-memory claims.
 
 ```json
 {
-  "amount_wei": "1000000000000000000",
-  "cooldown_seconds": 86400,
-  "network_name": "scavium-testnet",
-  "chain_id": 1337,
-  "symbol": "SCAV",
-  "explorer_tx_url": "https://explorer.scavium.io/tx/"
+  "claims": []
 }
 ```
-
----
-
-### `POST /api/v1/faucet/claim`
-
-Submit a fund request.
-
-**Request body**
-
-```json
-{
-  "address": "0xAbCd…",
-  "captcha_token": "<provider-token>"
-}
-```
-
-**Response — accepted**
-
-```
-202 Accepted
-{
-  "claim_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "pending"
-}
-```
-
-**Error codes**
-
-| HTTP | Code | Meaning |
-|---|---|---|
-| 400 | `INVALID_ADDRESS` | Address format or checksum invalid |
-| 400 | `CAPTCHA_FAILED` | Captcha verification failed |
-| 429 | `RATE_LIMIT_IP` | IP hourly limit reached |
-| 429 | `RATE_LIMIT_ADDRESS` | Address daily limit reached |
-| 429 | `COOLDOWN_ACTIVE` | Address is in cooldown period |
-| 503 | `FAUCET_PAUSED` | Faucet is paused or in maintenance |
-| 507 | `BUDGET_EXHAUSTED` | Daily budget fully disbursed |
-
----
-
-### `GET /api/v1/faucet/claim/{id}`
-
-Poll the status of a previously submitted claim.
-
-**Response**
-
-```json
-{
-  "claim_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "sent",
-  "tx_hash": "0xabc…",
-  "amount_wei": "1000000000000000000",
-  "created_at": "2024-01-01T12:00:00Z"
-}
-```
-
-`status` values: `pending`, `sent`, `confirmed`, `failed`.
-
----
-
-### `GET /api/v1/faucet/address/{address}/eligibility`
-
-Returns whether an address can request funds, and how long until the next claim is allowed.
-
-**Response**
-
-```json
-{
-  "eligible": false,
-  "cooldown_remaining_seconds": 72340,
-  "reason": "cooldown"
-}
-```
-
-`reason` when `eligible=false`: `cooldown`, `rate_limit`, `blocked`, `faucet_paused`.
-
----
-
-### `GET /api/v1/version`
-
-Returns build metadata.
-
-**Response**
-
-```json
-{
-  "version": "v1.2.0",
-  "commit": "abc1234",
-  "built_at": "2024-01-01T00:00:00Z"
-}
-```
-
----
-
-## Admin endpoints
-
-All admin endpoints require the header:
-
-```
-Authorization: Bearer <SCAVIUM_FAUCET_ADMIN_TOKEN>
-```
-
-If `SCAVIUM_FAUCET_ADMIN_TOKEN` is not set, all admin endpoints return `503`.
-
----
-
-### `GET /api/v1/admin/dashboard`
-
-Returns aggregate stats: total claims today, amount disbursed, wallet balance.
-
----
-
-### `GET /api/v1/admin/claims`
-
-List claims with optional filters (`?status=pending&page=1`).
-
----
 
 ### `GET /api/v1/admin/claim/{id}`
 
-Retrieve full claim detail including internal fields.
+Returns one claim or `404`.
 
----
+### `POST /api/v1/admin/claim/{id}/retry`
 
-### `PUT /api/v1/admin/claim/{id}`
+Moves a `failed` or `rejected` claim back to `queued`.
 
-Update a claim (approve/reject manual review cases).
+Success response:
 
----
+```json
+{ "status": "retried" }
+```
+
+Conflict response:
+
+- `409` / `not_retryable`
+
+### `POST /api/v1/admin/claim/{id}/cancel`
+
+Rejects a claim that has not been sent yet.
+
+Success response:
+
+```json
+{ "status": "cancelled" }
+```
+
+Conflict response:
+
+- `409` / `not_cancellable`
 
 ### `POST /api/v1/admin/faucet/mode`
 
-Change operational mode.
-
-**Request body**
+Request body:
 
 ```json
 { "mode": "paused" }
 ```
 
----
+Success response:
+
+```json
+{ "mode": "paused" }
+```
+
+The in-memory admin service accepts the new mode string and records an audit entry.
 
 ### `GET /api/v1/admin/blocklist`
 
-List blocked IPs and addresses.
+```json
+{
+  "entries": []
+}
+```
 
 ### `POST /api/v1/admin/blocklist`
 
-Add an entry to the blocklist.
-
-**Request body**
+Request body:
 
 ```json
-{ "type": "ip", "value": "1.2.3.4", "reason": "abuse" }
+{
+  "key_type": "ip",
+  "value": "1.2.3.4",
+  "reason": "test"
+}
 ```
 
-### `DELETE /api/v1/admin/blocklist/{id}`
+Success response:
 
-Remove a blocklist entry.
+```json
+{ "status": "blocked" }
+```
 
----
+### `DELETE /api/v1/admin/blocklist?key_type=ip&value=1.2.3.4`
 
-### `GET /api/v1/admin/audit`
+Success response:
 
-Retrieve the admin audit log (paginated).
+```json
+{ "status": "unblocked" }
+```
+
+### `GET /api/v1/admin/audit?limit=100`
+
+Returns recent in-memory audit entries.
+
+```json
+{
+  "entries": [
+    {
+      "action": "set_mode",
+      "actor": "127.0.0.1",
+      "target": "faucet",
+      "detail": "paused",
+      "created_at": "2026-05-03T12:00:00Z"
+    }
+  ]
+}
+```

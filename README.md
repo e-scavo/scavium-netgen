@@ -165,7 +165,7 @@ Current milestone documented in:
 
 ### scavium-faucet
 
-Public token-distribution service with web UI, REST API, rate-limiting, captcha, and admin API.
+Go faucet MVP with embedded web UI, public status/config/claim endpoints, and code-aligned project documentation.
 
 - Source: [`cmd/scavium-faucet/`](cmd/scavium-faucet/)
 - Documentation: [`docs/scavium-faucet/`](docs/scavium-faucet/)
