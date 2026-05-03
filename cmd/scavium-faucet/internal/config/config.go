@@ -23,10 +23,16 @@ const (
 	EnvAmountWei           = "SCAVIUM_FAUCET_AMOUNT_WEI"
 	EnvCooldownSeconds     = "SCAVIUM_FAUCET_COOLDOWN_SECONDS"
 	EnvDryRun              = "SCAVIUM_FAUCET_DRY_RUN"
+	EnvDatabasePath        = "SCAVIUM_FAUCET_DATABASE_PATH"
 	EnvRateLimitIPPerHour  = "SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR"
 	EnvRateLimitAddrPerDay = "SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY"
 	EnvDailyBudgetWei      = "SCAVIUM_FAUCET_DAILY_BUDGET_WEI"
 	EnvTrustedProxy        = "SCAVIUM_FAUCET_TRUSTED_PROXY"
+	EnvWorkerEnabled       = "SCAVIUM_FAUCET_WORKER_ENABLED"
+	EnvWorkerPollSeconds   = "SCAVIUM_FAUCET_WORKER_POLL_SECONDS"
+	EnvWatcherEnabled      = "SCAVIUM_FAUCET_WATCHER_ENABLED"
+	EnvWatcherPollSeconds  = "SCAVIUM_FAUCET_WATCHER_POLL_SECONDS"
+	EnvMinConfirmations    = "SCAVIUM_FAUCET_MIN_CONFIRMATIONS"
 	// EnvPrivateKey holds the hex-encoded private key used to sign transactions.
 	// Never log this value.
 	EnvPrivateKey = "SCAVIUM_FAUCET_PRIVATE_KEY"
@@ -59,10 +65,16 @@ type Config struct {
 	AmountWei           *big.Int
 	CooldownSeconds     int
 	DryRun              bool
+	DatabasePath        string
 	RateLimitIPPerHour  int
 	RateLimitAddrPerDay int
 	DailyBudgetWei      *big.Int
 	TrustedProxy        string
+	WorkerEnabled       bool
+	WorkerPollSeconds   int
+	WatcherEnabled      bool
+	WatcherPollSeconds  int
+	MinConfirmations    uint64
 	// PrivateKeyHex is the hex-encoded signer key. Not required when DryRun=true.
 	// Never log this value.
 	PrivateKeyHex string
@@ -136,6 +148,8 @@ func FromEnv(lookup func(string) string) (Config, error) {
 		cfg.DryRun = dryRun
 	}
 
+	cfg.DatabasePath = envOrDefault(lookup, EnvDatabasePath, cfg.DatabasePath)
+
 	if raw := strings.TrimSpace(lookup(EnvRateLimitIPPerHour)); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil {
@@ -163,6 +177,44 @@ func FromEnv(lookup func(string) string) (Config, error) {
 	cfg.TrustedProxy = strings.TrimSpace(lookup(EnvTrustedProxy))
 	cfg.PrivateKeyHex = strings.TrimSpace(lookup(EnvPrivateKey))
 
+	if raw := strings.TrimSpace(lookup(EnvWorkerEnabled)); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvWorkerEnabled, err)
+		}
+		cfg.WorkerEnabled = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvWorkerPollSeconds)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvWorkerPollSeconds, err)
+		}
+		cfg.WorkerPollSeconds = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvWatcherEnabled)); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvWatcherEnabled, err)
+		}
+		cfg.WatcherEnabled = v
+	} else if !cfg.DryRun {
+		cfg.WatcherEnabled = true
+	}
+	if raw := strings.TrimSpace(lookup(EnvWatcherPollSeconds)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvWatcherPollSeconds, err)
+		}
+		cfg.WatcherPollSeconds = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvMinConfirmations)); raw != "" {
+		v, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvMinConfirmations, err)
+		}
+		cfg.MinConfirmations = v
+	}
+
 	cfg.CaptchaProvider = envOrDefault(lookup, EnvCaptchaProvider, cfg.CaptchaProvider)
 	cfg.CaptchaSecret = strings.TrimSpace(lookup(EnvCaptchaSecret))
 	cfg.CaptchaVerifyURL = envOrDefault(lookup, EnvCaptchaVerifyURL, cfg.CaptchaVerifyURL)
@@ -185,10 +237,16 @@ func Defaults() Config {
 		AmountWei:           big.NewInt(1_000_000_000_000_000_000),
 		CooldownSeconds:     int((24 * time.Hour).Seconds()),
 		DryRun:              true,
+		DatabasePath:        "cmd/scavium-faucet/data/scavium-faucet.db",
 		RateLimitIPPerHour:  10,
 		RateLimitAddrPerDay: 3,
 		DailyBudgetWei:      nil,
 		TrustedProxy:        "",
+		WorkerEnabled:       true,
+		WorkerPollSeconds:   5,
+		WatcherEnabled:      false,
+		WatcherPollSeconds:  15,
+		MinConfirmations:    1,
 		CaptchaProvider:     "disabled",
 		CaptchaVerifyURL:    "",
 		FaucetMode:          "active",
@@ -222,6 +280,15 @@ func (c Config) Validate() error {
 	}
 	if c.CooldownSeconds < 0 {
 		errs = append(errs, errors.New("cooldown seconds must be zero or positive"))
+	}
+	if strings.TrimSpace(c.DatabasePath) == "" {
+		errs = append(errs, errors.New("database path is required"))
+	}
+	if c.WorkerPollSeconds <= 0 {
+		errs = append(errs, errors.New("worker poll seconds must be positive"))
+	}
+	if c.WatcherPollSeconds <= 0 {
+		errs = append(errs, errors.New("watcher poll seconds must be positive"))
 	}
 
 	return errors.Join(errs...)

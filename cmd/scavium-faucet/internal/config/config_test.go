@@ -27,6 +27,24 @@ func TestFromEnvUsesDevelopmentDefaults(t *testing.T) {
 	if !cfg.DryRun {
 		t.Fatal("dry run default = false, want true")
 	}
+	if cfg.DatabasePath != "cmd/scavium-faucet/data/scavium-faucet.db" {
+		t.Fatalf("database path = %q", cfg.DatabasePath)
+	}
+	if !cfg.WorkerEnabled {
+		t.Fatal("worker enabled default = false, want true")
+	}
+	if cfg.WorkerPollSeconds != 5 {
+		t.Fatalf("worker poll seconds = %d", cfg.WorkerPollSeconds)
+	}
+	if cfg.WatcherEnabled {
+		t.Fatal("watcher enabled default = true, want false in dry-run")
+	}
+	if cfg.WatcherPollSeconds != 15 {
+		t.Fatalf("watcher poll seconds = %d", cfg.WatcherPollSeconds)
+	}
+	if cfg.MinConfirmations != 1 {
+		t.Fatalf("min confirmations = %d", cfg.MinConfirmations)
+	}
 }
 
 func TestFromEnvOverridesValues(t *testing.T) {
@@ -41,10 +59,16 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvAmountWei:           "42",
 		EnvCooldownSeconds:     "60",
 		EnvDryRun:              "false",
+		EnvDatabasePath:        "/tmp/scavium-faucet-test.db",
 		EnvRateLimitIPPerHour:  "20",
 		EnvRateLimitAddrPerDay: "5",
 		EnvDailyBudgetWei:      "9999",
 		EnvTrustedProxy:        "127.0.0.1",
+		EnvWorkerEnabled:       "false",
+		EnvWorkerPollSeconds:   "7",
+		EnvWatcherEnabled:      "true",
+		EnvWatcherPollSeconds:  "21",
+		EnvMinConfirmations:    "3",
 		EnvPrivateKey:          "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
 		EnvCaptchaProvider:     "hcaptcha",
 		EnvCaptchaSecret:       "0x-test-secret",
@@ -91,6 +115,9 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	if cfg.DryRun {
 		t.Fatal("dry run = true, want false")
 	}
+	if cfg.DatabasePath != "/tmp/scavium-faucet-test.db" {
+		t.Fatalf("database path = %q", cfg.DatabasePath)
+	}
 	if cfg.RateLimitIPPerHour != 20 {
 		t.Fatalf("rate limit ip per hour = %d", cfg.RateLimitIPPerHour)
 	}
@@ -105,6 +132,21 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	}
 	if cfg.PrivateKeyHex != "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" {
 		t.Fatal("private key hex not set")
+	}
+	if cfg.WorkerEnabled {
+		t.Fatal("worker enabled = true, want false")
+	}
+	if cfg.WorkerPollSeconds != 7 {
+		t.Fatalf("worker poll seconds = %d", cfg.WorkerPollSeconds)
+	}
+	if !cfg.WatcherEnabled {
+		t.Fatal("watcher enabled = false, want true")
+	}
+	if cfg.WatcherPollSeconds != 21 {
+		t.Fatalf("watcher poll seconds = %d", cfg.WatcherPollSeconds)
+	}
+	if cfg.MinConfirmations != 3 {
+		t.Fatalf("min confirmations = %d", cfg.MinConfirmations)
 	}
 	if cfg.CaptchaProvider != "hcaptcha" {
 		t.Fatalf("captcha provider = %q, want hcaptcha", cfg.CaptchaProvider)
@@ -145,6 +187,21 @@ func TestFromEnvRateLimitDefaults(t *testing.T) {
 	}
 	if cfg.FaucetMode != "active" {
 		t.Fatalf("default faucet mode = %q, want active", cfg.FaucetMode)
+	}
+}
+
+func TestFromEnvEnablesWatcherByDefaultWhenNotDryRun(t *testing.T) {
+	cfg, err := FromEnv(func(key string) string {
+		if key == EnvDryRun {
+			return "false"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("from env: %v", err)
+	}
+	if !cfg.WatcherEnabled {
+		t.Fatal("watcher enabled = false, want true when not dry-run")
 	}
 }
 
@@ -191,5 +248,18 @@ func TestValidateRejectsCriticalEmptyValues(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want to contain %q", err.Error(), want)
 		}
+	}
+}
+
+func TestValidateRejectsEmptyDatabasePath(t *testing.T) {
+	cfg := Defaults()
+	cfg.DatabasePath = " "
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("validate returned nil")
+	}
+	if !strings.Contains(err.Error(), "database path is required") {
+		t.Fatalf("error = %q, want database path validation", err.Error())
 	}
 }
