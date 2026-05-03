@@ -45,6 +45,11 @@ func main() {
 	select {
 	case err := <-errs:
 		if err != nil && err != http.ErrServerClosed {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if closeErr := application.Close(ctx); closeErr != nil {
+				logger.Error("application close failed", map[string]any{"error": closeErr.Error()})
+			}
 			logger.Error("server failed", map[string]any{"error": err.Error()})
 			os.Exit(1)
 		}
@@ -54,6 +59,10 @@ func main() {
 
 		if err := server.Shutdown(ctx); err != nil {
 			logger.Error("server shutdown failed", map[string]any{"error": err.Error()})
+			os.Exit(1)
+		}
+		if err := application.Close(ctx); err != nil {
+			logger.Error("application close failed", map[string]any{"error": err.Error()})
 			os.Exit(1)
 		}
 		logger.Info("server stopped", nil)
