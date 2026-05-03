@@ -16,13 +16,14 @@ import (
 // ── fakeClient ───────────────────────────────────────────────────────────────
 
 type fakeClient struct {
-	chainID    int64
-	nonce      uint64
-	gasPrice   *big.Int
-	balance    *big.Int // nil → 100 ETH
-	sendErr    error
-	sendCalled int
-	nonceCalls int
+	chainID     int64
+	nonce       uint64
+	gasPrice    *big.Int
+	balance     *big.Int // nil → 100 ETH
+	blockNumber uint64
+	sendErr     error
+	sendCalled  int
+	nonceCalls  int
 }
 
 func (f *fakeClient) ChainID(_ context.Context) (*big.Int, error) {
@@ -56,6 +57,10 @@ func (f *fakeClient) SendTransaction(_ context.Context, _ *types.Transaction) er
 
 func (f *fakeClient) TransactionReceipt(_ context.Context, _ common.Hash) (*types.Receipt, error) {
 	return nil, errors.New("not mined")
+}
+
+func (f *fakeClient) BlockNumber(_ context.Context) (uint64, error) {
+	return f.blockNumber, nil
 }
 
 var _ ChainClient = (*fakeClient)(nil)

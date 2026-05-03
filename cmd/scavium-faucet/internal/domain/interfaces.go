@@ -43,6 +43,27 @@ type Sender interface {
 	Send(ctx context.Context, claim Claim) (Transaction, error)
 }
 
+// PendingTx holds the minimum information needed to check a transaction receipt.
+type PendingTx struct {
+	ClaimID string
+	TxHash  common.Hash
+}
+
+// WatcherStore provides the persistence operations used by the receipt watcher.
+type WatcherStore interface {
+	// ListPendingTransactions returns up to limit claims in 'sent' state that have
+	// an associated transaction hash awaiting confirmation.
+	ListPendingTransactions(ctx context.Context, limit int) ([]PendingTx, error)
+	// ConfirmTransaction marks the claim and its transaction record as 'confirmed'
+	// and records the block number and gas used from the receipt.
+	ConfirmTransaction(ctx context.Context, claimID string, blockNumber, gasUsed uint64) error
+	// FailTransaction marks the claim and its transaction record as 'failed'.
+	FailTransaction(ctx context.Context, claimID string, reason string) error
+	// ListStuckSending returns claims that have been in 'sending' state for longer
+	// than stuckAfter.  These represent claims whose worker died mid-flight.
+	ListStuckSending(ctx context.Context, stuckAfter time.Duration, limit int) ([]Claim, error)
+}
+
 type CaptchaVerifier interface {
 	Verify(ctx context.Context, token string, remoteIP string) (CaptchaDecision, error)
 }
