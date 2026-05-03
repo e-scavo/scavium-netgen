@@ -23,7 +23,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	application := app.New(cfg)
+	application, err := app.New(cfg)
+	if err != nil {
+		logger.Error("create application failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
+	}
 	server := &http.Server{
 		Addr:              application.Config.BindAddr,
 		Handler:           application.Handler,
