@@ -10,19 +10,20 @@ import (
 	"time"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/app"
+	"scavium-netgen/cmd/scavium-faucet/internal/config"
 )
 
 func main() {
 	log.SetFlags(0)
 
-	cfg := app.DefaultConfig()
-	if address := os.Getenv("SCAVIUM_FAUCET_ADDR"); address != "" {
-		cfg.Address = address
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		log.Fatalf("load config: %v", err)
 	}
 
 	application := app.New(cfg)
 	server := &http.Server{
-		Addr:              application.Config.Address,
+		Addr:              application.Config.BindAddr,
 		Handler:           application.Handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
