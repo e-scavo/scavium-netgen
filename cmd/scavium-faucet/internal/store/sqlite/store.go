@@ -32,8 +32,11 @@ type Store struct {
 }
 
 // Open opens a SQLite database file and applies embedded migrations.
+// WAL mode and a 5-second busy timeout are enabled to allow concurrent access
+// from the HTTP handler and the background worker without SQLITE_BUSY errors.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
