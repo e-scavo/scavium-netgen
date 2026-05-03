@@ -94,7 +94,8 @@ func TestRequestIDMiddlewareGeneratesMissingRequestID(t *testing.T) {
 }
 
 func TestNotFoundUsesErrorEnvelope(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	// Non-API paths now serve the frontend; /api/ paths return JSON 404.
+	req := httptest.NewRequest(http.MethodGet, "/api/missing", nil)
 	req.Header.Set(requestIDHeader, "test-request-id")
 	rec := httptest.NewRecorder()
 
