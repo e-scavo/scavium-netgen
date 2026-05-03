@@ -45,6 +45,7 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvRateLimitAddrPerDay: "5",
 		EnvDailyBudgetWei:      "9999",
 		EnvTrustedProxy:        "127.0.0.1",
+		EnvPrivateKey:          "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
 	}
 
 	cfg, err := FromEnv(func(key string) string { return values[key] })
@@ -96,6 +97,9 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	}
 	if cfg.TrustedProxy != "127.0.0.1" {
 		t.Fatalf("trusted proxy = %q", cfg.TrustedProxy)
+	}
+	if cfg.PrivateKeyHex != "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" {
+		t.Fatal("private key hex not set")
 	}
 }
 
