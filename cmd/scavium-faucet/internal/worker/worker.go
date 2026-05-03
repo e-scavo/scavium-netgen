@@ -1,3 +1,4 @@
+// Package worker processes queued faucet claims and submits payouts.
 package worker
 
 import (
