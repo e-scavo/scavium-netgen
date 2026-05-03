@@ -11,6 +11,10 @@ This directory documents the **implemented project surface**, not the full roadm
 | [architecture.md](architecture.md) | Actual runtime wiring, package roles, and state model |
 | [api.md](api.md) | Public API reference plus the handler-level admin contract |
 | [configuration.md](configuration.md) | Environment variables, defaults, and what is wired today |
+| [deployment.md](deployment.md) | Review-first VPS deployment package with systemd, nginx, env, certbot, firewall, and rollback assets |
+| [deployment-certbot.md](deployment-certbot.md) | Manual ACME and certbot guide for TLS issuance and renewal |
+| [deployment-firewall.md](deployment-firewall.md) | Public exposure and firewall policy for VPS and cloud edge |
+| [deployment-rollback.md](deployment-rollback.md) | Rollback procedure for release symlinks and service recovery |
 | [runbook.md](runbook.md) | Build, run, health checks, and operational caveats |
 | [security.md](security.md) | Current security properties, gaps, and deployment guidance |
 
