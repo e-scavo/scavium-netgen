@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/captcha"
 	"scavium-netgen/cmd/scavium-faucet/internal/chain"
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
@@ -58,6 +60,16 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	readService := faucet.NewPersistentReadService(cfg, store, store, store)
+	captchaVerifier, err := newCaptchaVerifier(cfg)
+	if err != nil {
+		_ = store.Close()
+		if senderBundle.chainClient != nil {
+			senderBundle.chainClient.Close()
+		}
+		cancel()
+		return nil, err
+	}
+	readService.SetCaptchaVerifier(captchaVerifier)
 	readinessChecks := runtimeChecks(cfg, store, senderBundle.chainClient, senderBundle.signer)
 	app := &App{
 		Config: cfg,
@@ -65,6 +77,7 @@ func New(cfg config.Config) (*App, error) {
 			ReadinessChecks: readinessChecks,
 			ReadService:     readService,
 			AdminToken:      cfg.AdminToken,
+			TrustedProxy:    cfg.TrustedProxy,
 		}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -157,6 +170,25 @@ func openStore(path string) (*sqlite.Store, error) {
 		}
 	}
 	return sqlite.Open(path)
+}
+
+func newCaptchaVerifier(cfg config.Config) (domain.CaptchaVerifier, error) {
+	switch strings.TrimSpace(strings.ToLower(cfg.CaptchaProvider)) {
+	case "", "disabled":
+		return nil, nil
+	case "dev":
+		return captcha.DevAlwaysPass{}, nil
+	case "hcaptcha", "recaptcha", "turnstile":
+		if strings.TrimSpace(cfg.CaptchaVerifyURL) == "" {
+			return nil, fmt.Errorf("captcha provider %q requires verify URL", cfg.CaptchaProvider)
+		}
+		if strings.TrimSpace(cfg.CaptchaSecret) == "" {
+			return nil, fmt.Errorf("captcha provider %q requires secret", cfg.CaptchaProvider)
+		}
+		return captcha.NewHTTPVerifier(cfg.CaptchaVerifyURL, cfg.CaptchaSecret), nil
+	default:
+		return nil, fmt.Errorf("unsupported captcha provider %q", cfg.CaptchaProvider)
+	}
 }
 
 func newSender(ctx context.Context, cfg config.Config) (senderBundle, error) {

@@ -18,6 +18,7 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/internal/frontend"
+	"scavium-netgen/cmd/scavium-faucet/internal/iputil"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/version"
 )
@@ -40,7 +41,9 @@ type ErrorEnvelope struct {
 }
 
 type claimRequest struct {
-	Address string `json:"address"`
+	Address      string `json:"address"`
+	CaptchaToken string `json:"captcha_token"`
+	Fingerprint  string `json:"fingerprint"`
 }
 
 // Dependencies groups the services and settings required to build the HTTP API.
@@ -53,6 +56,9 @@ type Dependencies struct {
 	// If empty, admin endpoints respond 503 (disabled).
 	// Never log this value.
 	AdminToken string
+	// TrustedProxy enables X-Forwarded-For/X-Real-IP processing when RemoteAddr
+	// matches this proxy address.
+	TrustedProxy string
 }
 
 // NewHandler builds the public and admin HTTP routes for the faucet service.
@@ -75,12 +81,12 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.HandleFunc("/ready", handleReady(deps.ReadinessChecks))
 	mux.HandleFunc("/api/v1/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/config", handleFaucetConfig(deps.ReadService))
-	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService))
+	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy))
 	mux.HandleFunc("/api/v1/claim/", handleGetClaim(deps.ReadService, "/api/v1/claim/"))
 	mux.HandleFunc("/api/v1/address/", handleAddressStatus(deps.ReadService, "/api/v1/address/", "/status"))
 	mux.HandleFunc("/api/v1/faucet/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/config", handleFaucetConfig(deps.ReadService))
-	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService))
+	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy))
 	mux.HandleFunc("/api/v1/faucet/claim/", handleGetClaim(deps.ReadService, "/api/v1/faucet/claim/"))
 	mux.HandleFunc("/api/v1/faucet/address/", handleAddressStatus(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
 	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
@@ -213,7 +219,7 @@ func handleAddressStatus(readService faucet.ReadService, prefix, suffix string) 
 	}
 }
 
-func handleCreateClaim(readService faucet.ReadService) http.HandlerFunc {
+func handleCreateClaim(readService faucet.ReadService, trustedProxy string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -242,6 +248,10 @@ func handleCreateClaim(readService faucet.ReadService) http.HandlerFunc {
 		claim, err := readService.CreateClaim(r.Context(), faucet.ClaimRequest{
 			Address:        address,
 			IdempotencyKey: strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)),
+			RemoteIP:       iputil.RealIP(r, trustedProxy),
+			UserAgent:      r.UserAgent(),
+			CaptchaToken:   strings.TrimSpace(body.CaptchaToken),
+			Fingerprint:    strings.TrimSpace(body.Fingerprint),
 		})
 		if err != nil {
 			WriteError(w, r, http.StatusInternalServerError, "claim_unavailable", "claim unavailable", nil)

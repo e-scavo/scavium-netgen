@@ -28,6 +28,8 @@ type PersistentReadService struct {
 	claims          domain.ClaimStore
 	queue           domain.QueueStore
 	rateLimiter     domain.RateLimiter
+	captchaVerifier domain.CaptchaVerifier
+	riskEngine      domain.RiskEngine
 	now             func() time.Time
 	generateClaimID func() (string, error)
 }
@@ -62,6 +64,16 @@ func (s *PersistentReadService) SetClaimIDGenerator(generate func() (string, err
 	if generate != nil {
 		s.generateClaimID = generate
 	}
+}
+
+// SetCaptchaVerifier enables captcha verification for claim creation.
+func (s *PersistentReadService) SetCaptchaVerifier(verifier domain.CaptchaVerifier) {
+	s.captchaVerifier = verifier
+}
+
+// SetRiskEngine enables anti-abuse risk evaluation for claim creation.
+func (s *PersistentReadService) SetRiskEngine(engine domain.RiskEngine) {
+	s.riskEngine = engine
 }
 
 func (s *PersistentReadService) Status(context.Context) (StatusResponse, error) {
@@ -133,6 +145,13 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, fmt.Errorf("faucet mode is %s", configuredStatus(s.cfg.FaucetMode))
 	}
 
+	if err := s.verifyCaptcha(ctx, request); err != nil {
+		return ClaimResponse{}, err
+	}
+	if err := s.evaluateRisk(ctx, request); err != nil {
+		return ClaimResponse{}, err
+	}
+
 	remaining, _, err := s.cooldown(ctx, request.Address)
 	if err != nil {
 		return ClaimResponse{}, err
@@ -141,7 +160,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, fmt.Errorf("address cooldown active: retry after %d seconds", remaining)
 	}
 
-	if err := s.enforceRateLimits(ctx, request.Address); err != nil {
+	if err := s.enforceRateLimits(ctx, request); err != nil {
 		return ClaimResponse{}, err
 	}
 
@@ -219,22 +238,78 @@ func (s *PersistentReadService) cooldown(ctx context.Context, address common.Add
 	return int(math.Ceil(remaining.Seconds())), nextEligible, nil
 }
 
-func (s *PersistentReadService) enforceRateLimits(ctx context.Context, address common.Address) error {
-	if s.rateLimiter == nil || s.cfg.RateLimitAddrPerDay <= 0 {
+func (s *PersistentReadService) verifyCaptcha(ctx context.Context, request ClaimRequest) error {
+	if s.captchaVerifier == nil {
 		return nil
 	}
-
-	decision, err := s.rateLimiter.Allow(ctx, "addr:"+strings.ToLower(address.Hex()), s.cfg.RateLimitAddrPerDay, 24*time.Hour)
+	decision, err := s.captchaVerifier.Verify(ctx, strings.TrimSpace(request.CaptchaToken), strings.TrimSpace(request.RemoteIP))
 	if err != nil {
 		return err
 	}
-	if !decision.Allowed {
-		if decision.Reason != "" {
-			return errors.New(decision.Reason)
-		}
-		return errors.New("address rate limit exceeded")
+	if decision.Passed {
+		return nil
+	}
+	if decision.Reason != "" {
+		return errors.New(decision.Reason)
+	}
+	return errors.New("captcha failed")
+}
+
+func (s *PersistentReadService) evaluateRisk(ctx context.Context, request ClaimRequest) error {
+	if s.riskEngine == nil {
+		return nil
+	}
+	decision, err := s.riskEngine.Evaluate(ctx, domain.RiskInput{
+		Address:     request.Address,
+		RemoteIP:    strings.TrimSpace(request.RemoteIP),
+		Fingerprint: strings.TrimSpace(request.Fingerprint),
+		UserAgent:   strings.TrimSpace(request.UserAgent),
+		RequestedAt: s.now(),
+	})
+	if err != nil {
+		return err
+	}
+	if decision.Allowed {
+		return nil
+	}
+	if decision.Reason != "" {
+		return errors.New(decision.Reason)
+	}
+	return errors.New("claim rejected by risk engine")
+}
+
+func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request ClaimRequest) error {
+	if s.rateLimiter == nil {
+		return nil
+	}
+
+	if err := s.allowRateLimit(ctx, "ip:"+strings.TrimSpace(request.RemoteIP), s.cfg.RateLimitIPPerHour, time.Hour, "IP rate limit exceeded"); err != nil {
+		return err
+	}
+	if err := s.allowRateLimit(ctx, "addr:"+strings.ToLower(request.Address.Hex()), s.cfg.RateLimitAddrPerDay, 24*time.Hour, "address rate limit exceeded"); err != nil {
+		return err
+	}
+	if err := s.allowRateLimit(ctx, "fp:"+strings.ToLower(strings.TrimSpace(request.Fingerprint)), s.cfg.RateLimitIPPerHour, time.Hour, "fingerprint rate limit exceeded"); err != nil {
+		return err
 	}
 	return nil
+}
+
+func (s *PersistentReadService) allowRateLimit(ctx context.Context, key string, limit int, window time.Duration, fallbackReason string) error {
+	if limit <= 0 || key == "" || strings.HasSuffix(key, ":") {
+		return nil
+	}
+	decision, err := s.rateLimiter.Allow(ctx, key, limit, window)
+	if err != nil {
+		return err
+	}
+	if decision.Allowed {
+		return nil
+	}
+	if decision.Reason != "" {
+		return errors.New(decision.Reason)
+	}
+	return errors.New(fallbackReason)
 }
 
 func configuredStatus(mode string) domain.FaucetStatus {

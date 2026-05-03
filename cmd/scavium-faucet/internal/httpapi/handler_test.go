@@ -418,6 +418,45 @@ func TestCreateClaimWalletAlias(t *testing.T) {
 	}
 }
 
+func TestCreateClaimPassesSecuritySignals(t *testing.T) {
+	service := &recordingClaimService{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{
+		"address":"0x52908400098527886E0F7030069857D2E4169EE7",
+		"captcha_token":" captcha-token ",
+		"fingerprint":" fingerprint-1 "
+	}`))
+	req.RemoteAddr = "10.0.0.1:4567"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.1")
+	req.Header.Set("User-Agent", "wallet-test/1.0")
+	req.Header.Set(idempotencyKeyHeader, " idem-key ")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService:  service,
+		TrustedProxy: "10.0.0.1",
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+	if service.request.RemoteIP != "203.0.113.9" {
+		t.Fatalf("remote ip = %q, want 203.0.113.9", service.request.RemoteIP)
+	}
+	if service.request.UserAgent != "wallet-test/1.0" {
+		t.Fatalf("user agent = %q", service.request.UserAgent)
+	}
+	if service.request.CaptchaToken != "captcha-token" {
+		t.Fatalf("captcha token = %q", service.request.CaptchaToken)
+	}
+	if service.request.Fingerprint != "fingerprint-1" {
+		t.Fatalf("fingerprint = %q", service.request.Fingerprint)
+	}
+	if service.request.IdempotencyKey != "idem-key" {
+		t.Fatalf("idempotency key = %q", service.request.IdempotencyKey)
+	}
+}
+
 // TestCreateClaimResponseHasTxHashField verifies the claim response includes the
 // tx_hash field (empty when the claim is just queued, populated after sending).
 func TestCreateClaimResponseHasTxHashField(t *testing.T) {
@@ -602,6 +641,38 @@ func testClaimService() *faucet.InMemoryReadService {
 	service := testReadService().(*faucet.InMemoryReadService)
 	service.SetClaimIDGenerator(func() (string, error) { return "claim_test", nil })
 	return service
+}
+
+type recordingClaimService struct {
+	request faucet.ClaimRequest
+}
+
+func (s *recordingClaimService) Status(context.Context) (faucet.StatusResponse, error) {
+	return faucet.StatusResponse{}, nil
+}
+
+func (s *recordingClaimService) Config(context.Context) (faucet.ConfigResponse, error) {
+	return faucet.ConfigResponse{}, nil
+}
+
+func (s *recordingClaimService) AddressStatus(context.Context, common.Address) (faucet.AddressStatusResponse, error) {
+	return faucet.AddressStatusResponse{}, nil
+}
+
+func (s *recordingClaimService) CreateClaim(_ context.Context, request faucet.ClaimRequest) (faucet.ClaimResponse, error) {
+	s.request = request
+	return faucet.ClaimResponse{
+		ID:        "claim_recorded",
+		Address:   request.Address.Hex(),
+		AmountWei: "42",
+		Status:    domain.ClaimStatusQueued,
+		CreatedAt: "2026-05-03T12:00:00Z",
+		UpdatedAt: "2026-05-03T12:00:00Z",
+	}, nil
+}
+
+func (s *recordingClaimService) GetClaim(context.Context, string) (faucet.ClaimResponse, bool, error) {
+	return faucet.ClaimResponse{}, false, nil
 }
 
 // --- Admin test helpers ---

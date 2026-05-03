@@ -52,6 +52,10 @@ type AddressStatusResponse struct {
 type ClaimRequest struct {
 	Address        common.Address
 	IdempotencyKey string
+	RemoteIP       string
+	UserAgent      string
+	CaptchaToken   string
+	Fingerprint    string
 }
 
 // ClaimResponse is returned by claim creation and lookup endpoints.
