@@ -67,18 +67,21 @@ func TestCreateAndGetClaim(t *testing.T) {
 	}
 }
 
-func TestIdempotencyConstraint(t *testing.T) {
+func TestCreateClaimWithIdempotencyReturnsExistingClaim(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	_, err := store.CreateClaimWithIdempotency(context.Background(), testClaim("claim_1"), "idem-key")
+	first, err := store.CreateClaimWithIdempotency(context.Background(), testClaim("claim_1"), "idem-key")
 	if err != nil {
 		t.Fatalf("create first claim: %v", err)
 	}
 
-	_, err = store.CreateClaimWithIdempotency(context.Background(), testClaim("claim_2"), "idem-key")
-	if err == nil {
-		t.Fatal("create duplicate idempotency key returned nil")
+	second, err := store.CreateClaimWithIdempotency(context.Background(), testClaim("claim_2"), "idem-key")
+	if err != nil {
+		t.Fatalf("create duplicate idempotency key: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("id = %q, want existing id %q", second.ID, first.ID)
 	}
 }
 
