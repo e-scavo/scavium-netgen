@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/config"
+	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/version"
 )
@@ -30,12 +34,16 @@ type ErrorEnvelope struct {
 
 type Dependencies struct {
 	ReadinessChecks []ready.Check
+	ReadService     faucet.ReadService
 	VersionInfo     version.Info
 }
 
 func NewHandler(deps Dependencies) http.Handler {
 	if deps.ReadinessChecks == nil {
 		deps.ReadinessChecks = ready.DefaultChecks()
+	}
+	if deps.ReadService == nil {
+		deps.ReadService = faucet.NewInMemoryReadService(configDefaults())
 	}
 	if deps.VersionInfo == (version.Info{}) {
 		deps.VersionInfo = version.Current()
@@ -44,6 +52,12 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/ready", handleReady(deps.ReadinessChecks))
+	mux.HandleFunc("/api/v1/status", handleFaucetStatus(deps.ReadService))
+	mux.HandleFunc("/api/v1/config", handleFaucetConfig(deps.ReadService))
+	mux.HandleFunc("/api/v1/address/", handleAddressStatus(deps.ReadService, "/api/v1/address/", "/status"))
+	mux.HandleFunc("/api/v1/faucet/status", handleFaucetStatus(deps.ReadService))
+	mux.HandleFunc("/api/v1/faucet/config", handleFaucetConfig(deps.ReadService))
+	mux.HandleFunc("/api/v1/faucet/address/", handleAddressStatus(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
 	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
 	mux.HandleFunc("/", handleNotFound)
 	return RequestIDMiddleware(mux)
@@ -96,6 +110,71 @@ func handleVersion(info version.Info) http.HandlerFunc {
 	}
 }
 
+func handleFaucetStatus(readService faucet.ReadService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		status, err := readService.Status(r.Context())
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "status_unavailable", "status unavailable", nil)
+			return
+		}
+		WriteJSON(w, http.StatusOK, status)
+	}
+}
+
+func handleFaucetConfig(readService faucet.ReadService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		cfg, err := readService.Config(r.Context())
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "config_unavailable", "config unavailable", nil)
+			return
+		}
+		WriteJSON(w, http.StatusOK, cfg)
+	}
+}
+
+func handleAddressStatus(readService faucet.ReadService, prefix, suffix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		addressText, ok := pathMiddle(r.URL.Path, prefix, suffix)
+		if !ok {
+			handleNotFound(w, r)
+			return
+		}
+
+		address, err := domain.ValidateAddress(addressText)
+		if err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_address", "invalid address", map[string]any{
+				"reason": err.Error(),
+			})
+			return
+		}
+
+		status, err := readService.AddressStatus(r.Context(), address)
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "address_status_unavailable", "address status unavailable", nil)
+			return
+		}
+		WriteJSON(w, http.StatusOK, status)
+	}
+}
+
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get(requestIDHeader)
@@ -139,4 +218,19 @@ func newRequestID() string {
 		return fmt.Sprintf("%d", time.Now().UTC().UnixNano())
 	}
 	return fmt.Sprintf("%x", b[:])
+}
+
+func pathMiddle(path, prefix, suffix string) (string, bool) {
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return "", false
+	}
+	middle := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	if middle == "" || strings.Contains(middle, "/") {
+		return "", false
+	}
+	return middle, true
+}
+
+func configDefaults() config.Config {
+	return config.Defaults()
 }

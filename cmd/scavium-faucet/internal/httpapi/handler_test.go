@@ -3,11 +3,14 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/config"
+	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/version"
 )
@@ -200,4 +203,153 @@ func TestVersion(t *testing.T) {
 	if body.Version != "v1.2.3" || body.Commit != "abc123" || body.BuildDate != "2026-05-03T00:00:00Z" {
 		t.Fatalf("version body = %#v", body)
 	}
+}
+
+func TestPublicStatus(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body faucet.StatusResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != "active" {
+		t.Fatalf("status = %q, want active", body.Status)
+	}
+	if body.NetworkName != "scavium-test" {
+		t.Fatalf("network name = %q", body.NetworkName)
+	}
+	if body.UpdatedAt != "2026-05-03T12:00:00Z" {
+		t.Fatalf("updated at = %q", body.UpdatedAt)
+	}
+}
+
+func TestWalletStatusAlias(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/faucet/status", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestPublicConfig(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body faucet.ConfigResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ChainID != 123 {
+		t.Fatalf("chain id = %d, want 123", body.ChainID)
+	}
+	if body.AmountWei != "42" {
+		t.Fatalf("amount wei = %q, want 42", body.AmountWei)
+	}
+}
+
+func TestWalletConfigAlias(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/faucet/config", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAddressStatus(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/address/0x52908400098527886E0F7030069857D2E4169EE7/status", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body faucet.AddressStatusResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.Eligible {
+		t.Fatal("eligible = false, want true")
+	}
+	if body.Address != "0x52908400098527886E0F7030069857D2E4169EE7" {
+		t.Fatalf("address = %q", body.Address)
+	}
+}
+
+func TestWalletEligibilityAlias(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/faucet/address/0x52908400098527886E0F7030069857D2E4169EE7/eligibility", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAddressStatusRejectsInvalidAddress(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/address/not-an-address/status", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "invalid_address" {
+		t.Fatalf("code = %q, want invalid_address", body.Code)
+	}
+}
+
+func TestPublicConfigRejectsUnsupportedMethod(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+	if got := rec.Header().Get("Allow"); got != http.MethodGet {
+		t.Fatalf("allow header = %q, want %q", got, http.MethodGet)
+	}
+}
+
+func testReadService() faucet.ReadService {
+	cfg := config.Defaults()
+	cfg.NetworkName = "scavium-test"
+	cfg.ChainID = 123
+	cfg.Symbol = "tSCAV"
+	cfg.AmountWei = big.NewInt(42)
+	cfg.CooldownSeconds = 60
+	cfg.ExplorerTxURL = "https://explorer.example.test/tx/{txHash}"
+	cfg.DryRun = false
+
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	return faucet.NewInMemoryReadServiceWithClock(cfg, func() time.Time { return now })
 }
