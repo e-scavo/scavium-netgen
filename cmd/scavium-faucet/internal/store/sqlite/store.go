@@ -527,3 +527,131 @@ func (s *Store) Allow(ctx context.Context, key string, limit int, window time.Du
 	}
 	return decision, nil
 }
+
+// ── WatcherStore ─────────────────────────────────────────────────────────────
+
+var _ domain.WatcherStore = (*Store)(nil)
+
+// ListPendingTransactions returns up to limit claims in 'sent' state that have
+// an associated transaction row.
+func (s *Store) ListPendingTransactions(ctx context.Context, limit int) ([]domain.PendingTx, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.request_id, t.tx_hash
+		FROM transactions t
+		JOIN requests r ON r.id = t.request_id
+		WHERE r.status = ?
+		LIMIT ?
+	`, string(domain.ClaimStatusSent), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list pending transactions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.PendingTx
+	for rows.Next() {
+		var claimID, txHash string
+		if err := rows.Scan(&claimID, &txHash); err != nil {
+			return nil, err
+		}
+		out = append(out, domain.PendingTx{
+			ClaimID: claimID,
+			TxHash:  common.HexToHash(txHash),
+		})
+	}
+	return out, rows.Err()
+}
+
+// ConfirmTransaction marks the claim as 'confirmed' and updates the transaction
+// record with blockNumber and gasUsed.  Both writes are atomic.
+func (s *Store) ConfirmTransaction(ctx context.Context, claimID string, blockNumber, gasUsed uint64) error {
+	now := formatTime(time.Now().UTC())
+
+	dbTx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin confirm tx: %w", err)
+	}
+	defer dbTx.Rollback() //nolint:errcheck
+
+	result, err := dbTx.ExecContext(ctx, `
+		UPDATE requests SET status = ?, updated_at = ? WHERE id = ? AND status = ?
+	`, string(domain.ClaimStatusConfirmed), now, claimID, string(domain.ClaimStatusSent))
+	if err != nil {
+		return fmt.Errorf("confirm claim: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+
+	if _, err := dbTx.ExecContext(ctx, `
+		UPDATE transactions
+		SET status = ?, block_number = ?, gas_used = ?, updated_at = ?
+		WHERE request_id = ?
+	`, string(domain.ClaimStatusConfirmed), blockNumber, gasUsed, now, claimID); err != nil {
+		return fmt.Errorf("confirm transaction record: %w", err)
+	}
+
+	return dbTx.Commit()
+}
+
+// FailTransaction marks the claim and its transaction record as 'failed'.
+func (s *Store) FailTransaction(ctx context.Context, claimID string, reason string) error {
+	now := formatTime(time.Now().UTC())
+
+	dbTx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin fail tx: %w", err)
+	}
+	defer dbTx.Rollback() //nolint:errcheck
+
+	if _, err := dbTx.ExecContext(ctx, `
+		UPDATE requests SET status = ?, reason = ?, updated_at = ? WHERE id = ?
+	`, string(domain.ClaimStatusFailed), reason, now, claimID); err != nil {
+		return fmt.Errorf("fail claim: %w", err)
+	}
+
+	// Update transaction record if one exists.
+	if _, err := dbTx.ExecContext(ctx, `
+		UPDATE transactions SET status = ?, updated_at = ? WHERE request_id = ?
+	`, string(domain.ClaimStatusFailed), now, claimID); err != nil {
+		return fmt.Errorf("fail transaction record: %w", err)
+	}
+
+	return dbTx.Commit()
+}
+
+// ListStuckSending returns claims that have been in 'sending' state for longer
+// than stuckAfter.
+func (s *Store) ListStuckSending(ctx context.Context, stuckAfter time.Duration, limit int) ([]domain.Claim, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	cutoff := formatTime(time.Now().UTC().Add(-stuckAfter))
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		FROM requests
+		WHERE status = ? AND updated_at <= ?
+		ORDER BY updated_at ASC
+		LIMIT ?
+	`, string(domain.ClaimStatusSending), cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list stuck sending: %w", err)
+	}
+	defer rows.Close()
+
+	var claims []domain.Claim
+	for rows.Next() {
+		claim, err := scanClaim(rows)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	return claims, rows.Err()
+}

@@ -574,3 +574,191 @@ func indexExists(t *testing.T, db *sql.DB, index string) bool {
 	}
 	return count == 1
 }
+
+// ── WatcherStore tests ────────────────────────────────────────────────────────
+
+func TestListPendingTransactionsReturnsSentClaimsWithTx(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	// Create a claim, send it (Ack with a real hash) → status becomes 'sent'.
+	if _, err := store.CreateClaim(context.Background(), testClaim("p1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+	txHash := common.HexToHash("0xabc123")
+	tx := domain.Transaction{
+		Hash:      txHash,
+		From:      common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+		To:        common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
+		ValueWei:  big.NewInt(1e18),
+		Status:    domain.ClaimStatusSent,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := store.Ack(context.Background(), "p1", tx); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	pending, err := store.ListPendingTransactions(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending len = %d, want 1", len(pending))
+	}
+	if pending[0].ClaimID != "p1" {
+		t.Fatalf("claimID = %q, want p1", pending[0].ClaimID)
+	}
+	if pending[0].TxHash != txHash {
+		t.Fatalf("txHash = %s, want %s", pending[0].TxHash.Hex(), txHash.Hex())
+	}
+}
+
+func TestConfirmTransactionUpdatesStatusAndRecord(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	// Setup: create → dequeue → ack (sent).
+	if _, err := store.CreateClaim(context.Background(), testClaim("conf1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+	now := time.Now().UTC()
+	tx := domain.Transaction{
+		Hash:      common.HexToHash("0xdead01"),
+		From:      common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+		To:        common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
+		ValueWei:  big.NewInt(1e18),
+		Status:    domain.ClaimStatusSent,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := store.Ack(context.Background(), "conf1", tx); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	if err := store.ConfirmTransaction(context.Background(), "conf1", 500, 21000); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	got, err := store.GetClaim(context.Background(), "conf1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != domain.ClaimStatusConfirmed {
+		t.Fatalf("status = %q, want confirmed", got.Status)
+	}
+
+	var blockNum, gasUsed uint64
+	err = store.db.QueryRow(`SELECT block_number, gas_used FROM transactions WHERE request_id = ?`, "conf1").Scan(&blockNum, &gasUsed)
+	if err != nil {
+		t.Fatalf("query tx record: %v", err)
+	}
+	if blockNum != 500 {
+		t.Fatalf("block_number = %d, want 500", blockNum)
+	}
+	if gasUsed != 21000 {
+		t.Fatalf("gas_used = %d, want 21000", gasUsed)
+	}
+}
+
+func TestFailTransactionMarksFailed(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	// Setup: create → dequeue → ack (sent).
+	if _, err := store.CreateClaim(context.Background(), testClaim("fail1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+	now := time.Now().UTC()
+	tx := domain.Transaction{
+		Hash:      common.HexToHash("0xdead02"),
+		From:      common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
+		To:        common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
+		ValueWei:  big.NewInt(1e18),
+		Status:    domain.ClaimStatusSent,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := store.Ack(context.Background(), "fail1", tx); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	if err := store.FailTransaction(context.Background(), "fail1", "transaction reverted on-chain"); err != nil {
+		t.Fatalf("fail transaction: %v", err)
+	}
+
+	got, err := store.GetClaim(context.Background(), "fail1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != domain.ClaimStatusFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if got.Reason != "transaction reverted on-chain" {
+		t.Fatalf("reason = %q", got.Reason)
+	}
+}
+
+func TestListStuckSendingReturnsSendingOlderThanCutoff(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	// Create two claims and dequeue (moves to 'sending').
+	c1 := testClaim("stuck1")
+	c1.Status = domain.ClaimStatusQueued
+	c2 := testClaim("stuck2")
+	c2.Status = domain.ClaimStatusQueued
+	if _, err := store.CreateClaim(context.Background(), c1); err != nil {
+		t.Fatalf("create c1: %v", err)
+	}
+	if _, err := store.CreateClaim(context.Background(), c2); err != nil {
+		t.Fatalf("create c2: %v", err)
+	}
+	if _, err := store.DequeueBatch(context.Background(), 2); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+
+	// Backdate updated_at to simulate stuck claims.
+	past := formatTime(time.Now().UTC().Add(-10 * time.Minute))
+	if _, err := store.db.Exec(`UPDATE requests SET updated_at = ? WHERE status = 'sending'`, past); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	stuck, err := store.ListStuckSending(context.Background(), 5*time.Minute, 10)
+	if err != nil {
+		t.Fatalf("list stuck: %v", err)
+	}
+	if len(stuck) != 2 {
+		t.Fatalf("stuck len = %d, want 2", len(stuck))
+	}
+}
+
+func TestListStuckSendingExcludesRecentClaims(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	if _, err := store.CreateClaim(context.Background(), testClaim("fresh1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+
+	// updated_at is just now — should not be stuck.
+	stuck, err := store.ListStuckSending(context.Background(), 5*time.Minute, 10)
+	if err != nil {
+		t.Fatalf("list stuck: %v", err)
+	}
+	if len(stuck) != 0 {
+		t.Fatalf("expected 0 stuck claims, got %d", len(stuck))
+	}
+}

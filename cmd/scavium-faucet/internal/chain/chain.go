@@ -27,6 +27,8 @@ type ChainClient interface {
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
 	// TransactionReceipt fetches the receipt for txHash (returns error if not yet mined).
 	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+	// BlockNumber returns the number of the most recently mined block.
+	BlockNumber(ctx context.Context) (uint64, error)
 }
 
 // Client wraps ethclient.Client and implements ChainClient.
@@ -70,6 +72,10 @@ func (c *Client) SendTransaction(ctx context.Context, tx *types.Transaction) err
 
 func (c *Client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	return c.ec.TransactionReceipt(ctx, txHash)
+}
+
+func (c *Client) BlockNumber(ctx context.Context) (uint64, error) {
+	return c.ec.BlockNumber(ctx)
 }
 
 // ValidateChainID checks that the node's chain ID matches the expected value.
