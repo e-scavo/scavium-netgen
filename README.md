@@ -161,6 +161,15 @@ Current milestone documented in:
 
 `milestones/milestone-001-testnet-live/`
 
+## Components
+
+### scavium-faucet
+
+Go faucet MVP with embedded web UI, public status/config/claim endpoints, and code-aligned project documentation.
+
+- Source: [`cmd/scavium-faucet/`](cmd/scavium-faucet/)
+- Documentation: [`docs/scavium-faucet/`](docs/scavium-faucet/)
+
 ## Roadmap
 
 Next development steps:
@@ -169,4 +178,3 @@ Next development steps:
 - wallet utilities
 - transaction sender
 - transaction receipt tools
-- faucet tools
