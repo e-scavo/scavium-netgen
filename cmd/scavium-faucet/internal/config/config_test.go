@@ -46,6 +46,10 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvDailyBudgetWei:      "9999",
 		EnvTrustedProxy:        "127.0.0.1",
 		EnvPrivateKey:          "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+		EnvCaptchaProvider:     "hcaptcha",
+		EnvCaptchaSecret:       "0x-test-secret",
+		EnvCaptchaVerifyURL:    "https://hcaptcha.example.test/siteverify",
+		EnvFaucetMode:          "paused",
 	}
 
 	cfg, err := FromEnv(func(key string) string { return values[key] })
@@ -101,6 +105,18 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	if cfg.PrivateKeyHex != "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" {
 		t.Fatal("private key hex not set")
 	}
+	if cfg.CaptchaProvider != "hcaptcha" {
+		t.Fatalf("captcha provider = %q, want hcaptcha", cfg.CaptchaProvider)
+	}
+	if cfg.CaptchaSecret != "0x-test-secret" {
+		t.Fatal("captcha secret not set")
+	}
+	if cfg.CaptchaVerifyURL != "https://hcaptcha.example.test/siteverify" {
+		t.Fatalf("captcha verify url = %q", cfg.CaptchaVerifyURL)
+	}
+	if cfg.FaucetMode != "paused" {
+		t.Fatalf("faucet mode = %q, want paused", cfg.FaucetMode)
+	}
 }
 
 func TestFromEnvRateLimitDefaults(t *testing.T) {
@@ -119,6 +135,12 @@ func TestFromEnvRateLimitDefaults(t *testing.T) {
 	}
 	if cfg.TrustedProxy != "" {
 		t.Fatalf("default trusted proxy = %q, want empty", cfg.TrustedProxy)
+	}
+	if cfg.CaptchaProvider != "disabled" {
+		t.Fatalf("default captcha provider = %q, want disabled", cfg.CaptchaProvider)
+	}
+	if cfg.FaucetMode != "active" {
+		t.Fatalf("default faucet mode = %q, want active", cfg.FaucetMode)
 	}
 }
 
