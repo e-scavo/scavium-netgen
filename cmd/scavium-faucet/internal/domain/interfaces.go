@@ -2,10 +2,14 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+// ErrNotFound reports that a requested persisted domain record does not exist.
+var ErrNotFound = errors.New("not found")
 
 // ClaimStore persists claims and claim state transitions.
 type ClaimStore interface {

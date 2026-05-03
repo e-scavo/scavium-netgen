@@ -24,7 +24,7 @@ var _ domain.RateLimiter = (*Store)(nil)
 var _ domain.QueueStore = (*Store)(nil)
 
 // ErrNotFound reports that the requested record does not exist.
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = domain.ErrNotFound
 
 // Store persists faucet state in SQLite and implements the domain store contracts.
 type Store struct {
@@ -111,6 +111,16 @@ func (s *Store) CreateClaim(ctx context.Context, claim domain.Claim) (domain.Cla
 }
 
 func (s *Store) CreateClaimWithIdempotency(ctx context.Context, claim domain.Claim, idempotencyKey string) (domain.Claim, error) {
+	if idempotencyKey != "" {
+		existing, err := s.GetClaimByIdempotencyKey(ctx, idempotencyKey)
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return domain.Claim{}, err
+		}
+	}
+
 	if claim.AmountWei == nil {
 		claim.AmountWei = big.NewInt(0)
 	}
@@ -136,9 +146,30 @@ func (s *Store) CreateClaimWithIdempotency(ctx context.Context, claim domain.Cla
 		formatTime(claim.UpdatedAt),
 	)
 	if err != nil {
+		if idempotencyKey != "" {
+			existing, lookupErr := s.GetClaimByIdempotencyKey(ctx, idempotencyKey)
+			if lookupErr == nil {
+				return existing, nil
+			}
+		}
 		return domain.Claim{}, err
 	}
 
+	return claim, nil
+}
+
+// GetClaimByIdempotencyKey returns the claim previously created for idempotencyKey.
+func (s *Store) GetClaimByIdempotencyKey(ctx context.Context, idempotencyKey string) (domain.Claim, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		FROM requests
+		WHERE idempotency_key = NULLIF(?, '')
+	`, idempotencyKey)
+
+	claim, err := scanClaim(row)
+	if err != nil {
+		return domain.Claim{}, err
+	}
 	return claim, nil
 }
 
