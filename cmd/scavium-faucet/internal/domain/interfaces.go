@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// ClaimStore persists claims and claim state transitions.
 type ClaimStore interface {
 	CreateClaim(ctx context.Context, claim Claim) (Claim, error)
 	GetClaim(ctx context.Context, id string) (Claim, error)
@@ -15,10 +16,12 @@ type ClaimStore interface {
 	LastClaimByAddress(ctx context.Context, address common.Address) (Claim, error)
 }
 
+// RateLimiter evaluates whether a key can proceed within a sliding window.
 type RateLimiter interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (RateLimitDecision, error)
 }
 
+// RateLimitDecision is the result returned by RateLimiter.Allow.
 type RateLimitDecision struct {
 	Allowed    bool
 	Remaining  int
@@ -26,6 +29,7 @@ type RateLimitDecision struct {
 	Reason     string
 }
 
+// QueueStore coordinates claim queue lifecycle for asynchronous processing.
 type QueueStore interface {
 	// Enqueue transitions a claim to the 'queued' state, making it available for processing.
 	Enqueue(ctx context.Context, claimID string) error
@@ -39,6 +43,7 @@ type QueueStore interface {
 	Fail(ctx context.Context, claimID string, reason string, maxRetries int) error
 }
 
+// Sender submits a claim payment transaction.
 type Sender interface {
 	Send(ctx context.Context, claim Claim) (Transaction, error)
 }
@@ -64,19 +69,23 @@ type WatcherStore interface {
 	ListStuckSending(ctx context.Context, stuckAfter time.Duration, limit int) ([]Claim, error)
 }
 
+// CaptchaVerifier validates a challenge token from a given client IP.
 type CaptchaVerifier interface {
 	Verify(ctx context.Context, token string, remoteIP string) (CaptchaDecision, error)
 }
 
+// CaptchaDecision captures the verifier outcome.
 type CaptchaDecision struct {
 	Passed bool
 	Reason string
 }
 
+// RiskEngine evaluates anti-abuse signals for a claim request.
 type RiskEngine interface {
 	Evaluate(ctx context.Context, input RiskInput) (RiskDecision, error)
 }
 
+// RiskInput is the signal set consumed by RiskEngine.
 type RiskInput struct {
 	Address     common.Address
 	RemoteIP    string
@@ -85,6 +94,7 @@ type RiskInput struct {
 	RequestedAt time.Time
 }
 
+// RiskDecision is the risk evaluation result for a request.
 type RiskDecision struct {
 	Allowed bool
 	Score   int

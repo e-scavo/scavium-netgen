@@ -7,20 +7,31 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// ClaimStatus represents the lifecycle state of a faucet claim.
 type ClaimStatus string
 
 const (
-	ClaimStatusReceived  ClaimStatus = "received"
+	// ClaimStatusReceived indicates the request was accepted by the API.
+	ClaimStatusReceived ClaimStatus = "received"
+	// ClaimStatusValidated indicates input and abuse checks have passed.
 	ClaimStatusValidated ClaimStatus = "validated"
-	ClaimStatusQueued    ClaimStatus = "queued"
-	ClaimStatusSending   ClaimStatus = "sending"
-	ClaimStatusSent      ClaimStatus = "sent"
+	// ClaimStatusQueued indicates the claim is waiting for worker pickup.
+	ClaimStatusQueued ClaimStatus = "queued"
+	// ClaimStatusSending indicates a worker is currently sending the transaction.
+	ClaimStatusSending ClaimStatus = "sending"
+	// ClaimStatusSent indicates a transaction was broadcast and awaits receipt.
+	ClaimStatusSent ClaimStatus = "sent"
+	// ClaimStatusConfirmed indicates the transaction was mined successfully.
 	ClaimStatusConfirmed ClaimStatus = "confirmed"
-	ClaimStatusFailed    ClaimStatus = "failed"
-	ClaimStatusRejected  ClaimStatus = "rejected"
-	ClaimStatusPaused    ClaimStatus = "paused"
+	// ClaimStatusFailed indicates processing reached a terminal failure state.
+	ClaimStatusFailed ClaimStatus = "failed"
+	// ClaimStatusRejected indicates the claim was intentionally denied/cancelled.
+	ClaimStatusRejected ClaimStatus = "rejected"
+	// ClaimStatusPaused indicates claim creation was blocked by faucet mode.
+	ClaimStatusPaused ClaimStatus = "paused"
 )
 
+// Claim is the canonical persisted faucet request record.
 type Claim struct {
 	ID            string
 	Address       common.Address
@@ -34,6 +45,7 @@ type Claim struct {
 	UpdatedAt     time.Time
 }
 
+// Transaction stores chain-level data associated with a claim payout.
 type Transaction struct {
 	Hash        common.Hash
 	From        common.Address
@@ -46,6 +58,7 @@ type Transaction struct {
 	UpdatedAt   time.Time
 }
 
+// FaucetConfig is the read model exposed by faucet status/config endpoints.
 type FaucetConfig struct {
 	NetworkName     string
 	ChainID         int64
@@ -56,15 +69,21 @@ type FaucetConfig struct {
 	DryRun          bool
 }
 
+// FaucetStatus represents the operational availability state.
 type FaucetStatus string
 
 const (
-	FaucetStatusActive      FaucetStatus = "active"
-	FaucetStatusPaused      FaucetStatus = "paused"
+	// FaucetStatusActive means claim requests are accepted.
+	FaucetStatusActive FaucetStatus = "active"
+	// FaucetStatusPaused means claims are temporarily disabled by operator action.
+	FaucetStatusPaused FaucetStatus = "paused"
+	// FaucetStatusMaintenance means claims are disabled for maintenance work.
 	FaucetStatusMaintenance FaucetStatus = "maintenance"
-	FaucetStatusNoFunds     FaucetStatus = "no_funds"
+	// FaucetStatusNoFunds means claims are disabled because hot wallet is empty.
+	FaucetStatusNoFunds FaucetStatus = "no_funds"
 )
 
+// IsValidClaimStatus reports whether status is part of the supported claim lifecycle.
 func IsValidClaimStatus(status ClaimStatus) bool {
 	switch status {
 	case ClaimStatusReceived,
@@ -82,6 +101,7 @@ func IsValidClaimStatus(status ClaimStatus) bool {
 	}
 }
 
+// IsTerminalClaimStatus reports whether no further processing should occur.
 func IsTerminalClaimStatus(status ClaimStatus) bool {
 	switch status {
 	case ClaimStatusConfirmed, ClaimStatusFailed, ClaimStatusRejected:
@@ -91,6 +111,7 @@ func IsTerminalClaimStatus(status ClaimStatus) bool {
 	}
 }
 
+// IsValidFaucetStatus reports whether status is a supported faucet mode.
 func IsValidFaucetStatus(status FaucetStatus) bool {
 	switch status {
 	case FaucetStatusActive,
