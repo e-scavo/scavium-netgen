@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math/big"
@@ -340,6 +341,183 @@ func TestPublicConfigRejectsUnsupportedMethod(t *testing.T) {
 	}
 }
 
+func TestCreateClaim(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	service := testClaimService()
+
+	NewHandler(Dependencies{ReadService: service}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+
+	var body faucet.ClaimResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ID != "claim_test" {
+		t.Fatalf("id = %q, want claim_test", body.ID)
+	}
+	if body.Status != "queued" {
+		t.Fatalf("status = %q, want queued", body.Status)
+	}
+}
+
+func TestCreateClaimWalletAlias(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/faucet/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testClaimService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+}
+
+func TestGetClaim(t *testing.T) {
+	service := testClaimService()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	createRec := httptest.NewRecorder()
+	handler := NewHandler(Dependencies{ReadService: service})
+
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusAccepted {
+		t.Fatalf("create status code = %d", createRec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/claim/claim_test", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", getRec.Code, http.StatusOK)
+	}
+
+	var body faucet.ClaimResponse
+	if err := json.NewDecoder(getRec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ID != "claim_test" {
+		t.Fatalf("id = %q, want claim_test", body.ID)
+	}
+}
+
+func TestGetClaimWalletAlias(t *testing.T) {
+	service := testClaimService()
+	handler := NewHandler(Dependencies{ReadService: service})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/faucet/claim/claim_test", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", getRec.Code, http.StatusOK)
+	}
+}
+
+func TestCreateClaimIdempotency(t *testing.T) {
+	service := testClaimService()
+	handler := NewHandler(Dependencies{ReadService: service})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	firstReq.Header.Set(idempotencyKeyHeader, "same-key")
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	secondReq.Header.Set(idempotencyKeyHeader, "same-key")
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+
+	if firstRec.Code != http.StatusAccepted || secondRec.Code != http.StatusAccepted {
+		t.Fatalf("status codes = %d, %d", firstRec.Code, secondRec.Code)
+	}
+
+	var first faucet.ClaimResponse
+	var second faucet.ClaimResponse
+	if err := json.NewDecoder(firstRec.Body).Decode(&first); err != nil {
+		t.Fatalf("decode first: %v", err)
+	}
+	if err := json.NewDecoder(secondRec.Body).Decode(&second); err != nil {
+		t.Fatalf("decode second: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("ids differ: %q != %q", first.ID, second.ID)
+	}
+	if second.IdempotencyKey != "same-key" {
+		t.Fatalf("idempotency key = %q", second.IdempotencyKey)
+	}
+}
+
+func TestCreateClaimRejectsInvalidAddress(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"not-an-address"}`))
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testClaimService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "invalid_address" {
+		t.Fatalf("code = %q, want invalid_address", body.Code)
+	}
+}
+
+func TestCreateClaimRejectsInvalidJSON(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{`))
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testClaimService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestGetClaimNotFound(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/claim/missing", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testClaimService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "claim_not_found" {
+		t.Fatalf("code = %q, want claim_not_found", body.Code)
+	}
+}
+
+func TestCreateClaimRejectsUnsupportedMethod(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/claim", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testClaimService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+	if got := rec.Header().Get("Allow"); got != http.MethodPost {
+		t.Fatalf("allow header = %q, want %q", got, http.MethodPost)
+	}
+}
+
 func testReadService() faucet.ReadService {
 	cfg := config.Defaults()
 	cfg.NetworkName = "scavium-test"
@@ -352,4 +530,10 @@ func testReadService() faucet.ReadService {
 
 	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 	return faucet.NewInMemoryReadServiceWithClock(cfg, func() time.Time { return now })
+}
+
+func testClaimService() *faucet.InMemoryReadService {
+	service := testReadService().(*faucet.InMemoryReadService)
+	service.SetClaimIDGenerator(func() (string, error) { return "claim_test", nil })
+	return service
 }

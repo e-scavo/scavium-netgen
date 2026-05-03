@@ -77,3 +77,68 @@ func TestInMemoryReadServiceAddressStatus(t *testing.T) {
 		t.Fatalf("cooldown seconds = %d", status.CooldownSeconds)
 	}
 }
+
+func TestInMemoryReadServiceCreateAndGetClaim(t *testing.T) {
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	service := NewInMemoryReadServiceWithClock(testConfig(), func() time.Time { return now })
+	service.SetClaimIDGenerator(func() (string, error) { return "claim_test", nil })
+	address := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+
+	created, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address})
+	if err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+	if created.ID != "claim_test" {
+		t.Fatalf("id = %q, want claim_test", created.ID)
+	}
+	if created.Status != domain.ClaimStatusQueued {
+		t.Fatalf("status = %q, want %q", created.Status, domain.ClaimStatusQueued)
+	}
+	if created.CreatedAt != "2026-05-03T12:00:00Z" {
+		t.Fatalf("created at = %q", created.CreatedAt)
+	}
+
+	got, found, err := service.GetClaim(context.Background(), "claim_test")
+	if err != nil {
+		t.Fatalf("get claim: %v", err)
+	}
+	if !found {
+		t.Fatal("claim not found")
+	}
+	if got.ID != created.ID {
+		t.Fatalf("got id = %q, want %q", got.ID, created.ID)
+	}
+}
+
+func TestInMemoryReadServiceIdempotency(t *testing.T) {
+	nextID := 0
+	service := NewInMemoryReadService(testConfig())
+	service.SetClaimIDGenerator(func() (string, error) {
+		nextID++
+		return "claim_id", nil
+	})
+	address := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+
+	first, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:        address,
+		IdempotencyKey: "same-key",
+	})
+	if err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+
+	second, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:        address,
+		IdempotencyKey: "same-key",
+	})
+	if err != nil {
+		t.Fatalf("create second claim: %v", err)
+	}
+
+	if first.ID != second.ID {
+		t.Fatalf("ids differ: %q != %q", first.ID, second.ID)
+	}
+	if nextID != 1 {
+		t.Fatalf("generated ids = %d, want 1", nextID)
+	}
+}

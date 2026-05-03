@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -17,6 +19,7 @@ import (
 )
 
 const requestIDHeader = "X-Request-ID"
+const idempotencyKeyHeader = "Idempotency-Key"
 
 type requestIDContextKey struct{}
 
@@ -30,6 +33,10 @@ type ErrorEnvelope struct {
 	Message   string         `json:"message"`
 	Details   map[string]any `json:"details"`
 	RequestID string         `json:"request_id"`
+}
+
+type claimRequest struct {
+	Address string `json:"address"`
 }
 
 type Dependencies struct {
@@ -54,9 +61,13 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.HandleFunc("/ready", handleReady(deps.ReadinessChecks))
 	mux.HandleFunc("/api/v1/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/config", handleFaucetConfig(deps.ReadService))
+	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService))
+	mux.HandleFunc("/api/v1/claim/", handleGetClaim(deps.ReadService, "/api/v1/claim/"))
 	mux.HandleFunc("/api/v1/address/", handleAddressStatus(deps.ReadService, "/api/v1/address/", "/status"))
 	mux.HandleFunc("/api/v1/faucet/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/config", handleFaucetConfig(deps.ReadService))
+	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService))
+	mux.HandleFunc("/api/v1/faucet/claim/", handleGetClaim(deps.ReadService, "/api/v1/faucet/claim/"))
 	mux.HandleFunc("/api/v1/faucet/address/", handleAddressStatus(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
 	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
 	mux.HandleFunc("/", handleNotFound)
@@ -175,6 +186,69 @@ func handleAddressStatus(readService faucet.ReadService, prefix, suffix string) 
 	}
 }
 
+func handleCreateClaim(readService faucet.ReadService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		var body claimRequest
+		if err := decodeNoTrailingTokens(json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)), &body); err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+			return
+		}
+
+		address, err := domain.ValidateAddress(body.Address)
+		if err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_address", "invalid address", map[string]any{
+				"reason": err.Error(),
+			})
+			return
+		}
+
+		claim, err := readService.CreateClaim(r.Context(), faucet.ClaimRequest{
+			Address:        address,
+			IdempotencyKey: strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)),
+		})
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "claim_unavailable", "claim unavailable", nil)
+			return
+		}
+
+		WriteJSON(w, http.StatusAccepted, claim)
+	}
+}
+
+func handleGetClaim(readService faucet.ReadService, prefix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		id, ok := pathRemainder(r.URL.Path, prefix)
+		if !ok {
+			handleNotFound(w, r)
+			return
+		}
+
+		claim, found, err := readService.GetClaim(r.Context(), id)
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "claim_unavailable", "claim unavailable", nil)
+			return
+		}
+		if !found {
+			WriteError(w, r, http.StatusNotFound, "claim_not_found", "claim not found", nil)
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, claim)
+	}
+}
+
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get(requestIDHeader)
@@ -231,6 +305,30 @@ func pathMiddle(path, prefix, suffix string) (string, bool) {
 	return middle, true
 }
 
+func pathRemainder(path, prefix string) (string, bool) {
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	remainder := strings.TrimPrefix(path, prefix)
+	if remainder == "" || strings.Contains(remainder, "/") {
+		return "", false
+	}
+	return remainder, true
+}
+
 func configDefaults() config.Config {
 	return config.Defaults()
+}
+
+func decodeNoTrailingTokens(decoder *json.Decoder, v any) error {
+	if err := decoder.Decode(v); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected trailing JSON")
+		}
+		return err
+	}
+	return nil
 }
