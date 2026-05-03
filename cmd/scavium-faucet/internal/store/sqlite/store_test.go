@@ -16,7 +16,7 @@ func TestMigrateCreatesRequiredTables(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, table := range []string{"requests", "transactions", "rate_limits", "config"} {
+	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "schema_migrations"} {
 		if !tableExists(t, store.db, table) {
 			t.Fatalf("table %s does not exist", table)
 		}
@@ -292,6 +292,202 @@ func TestCooldownViaRateLimiter(t *testing.T) {
 	}
 	if d2.RetryAfter <= 0 {
 		t.Fatalf("retry after = %v, want > 0", d2.RetryAfter)
+	}
+}
+
+// ── QueueStore tests ─────────────────────────────────────────────────────────
+
+func TestEnqueueTransitionsToQueued(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	claim := testClaim("q1")
+	claim.Status = domain.ClaimStatusReceived
+	if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	if err := store.Enqueue(context.Background(), claim.ID); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	got, err := store.GetClaim(context.Background(), claim.ID)
+	if err != nil {
+		t.Fatalf("get claim: %v", err)
+	}
+	if got.Status != domain.ClaimStatusQueued {
+		t.Fatalf("status = %q, want queued", got.Status)
+	}
+}
+
+func TestDequeueBatchTransitionsToSending(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	for i, id := range []string{"q1", "q2", "q3"} {
+		c := testClaim(id)
+		c.CreatedAt = c.CreatedAt.Add(time.Duration(i) * time.Second)
+		c.UpdatedAt = c.CreatedAt
+		if _, err := store.CreateClaim(context.Background(), c); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+
+	batch, err := store.DequeueBatch(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+	if len(batch) != 2 {
+		t.Fatalf("batch len = %d, want 2", len(batch))
+	}
+
+	for _, c := range batch {
+		got, err := store.GetClaim(context.Background(), c.ID)
+		if err != nil {
+			t.Fatalf("get %s: %v", c.ID, err)
+		}
+		if got.Status != domain.ClaimStatusSending {
+			t.Fatalf("%s status = %q, want sending", c.ID, got.Status)
+		}
+	}
+
+	// Third claim should still be queued.
+	remaining, err := store.DequeueBatch(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("second dequeue: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].ID != "q3" {
+		t.Fatalf("remaining = %v", remaining)
+	}
+}
+
+func TestAckTransitionsToSent(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	if _, err := store.CreateClaim(context.Background(), testClaim("c1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	batch, err := store.DequeueBatch(context.Background(), 1)
+	if err != nil || len(batch) != 1 {
+		t.Fatalf("dequeue: %v / len=%d", err, len(batch))
+	}
+
+	if err := store.Ack(context.Background(), "c1"); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	got, err := store.GetClaim(context.Background(), "c1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != domain.ClaimStatusSent {
+		t.Fatalf("status = %q, want sent", got.Status)
+	}
+}
+
+func TestFailWithRetryRequeues(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	if _, err := store.CreateClaim(context.Background(), testClaim("c1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+
+	if err := store.Fail(context.Background(), "c1", "send error", 3); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	got, err := store.GetClaim(context.Background(), "c1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != domain.ClaimStatusQueued {
+		t.Fatalf("status = %q, want queued", got.Status)
+	}
+	if got.RetryCount != 1 {
+		t.Fatalf("retry_count = %d, want 1", got.RetryCount)
+	}
+	if got.NextAttemptAt == nil {
+		t.Fatal("next_attempt_at should be set after fail")
+	}
+	if !got.NextAttemptAt.After(time.Now()) {
+		t.Fatalf("next_attempt_at %v should be in the future", got.NextAttemptAt)
+	}
+}
+
+func TestFailExhaustRetriesDeadLetters(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	const maxRetries = 2
+
+	if _, err := store.CreateClaim(context.Background(), testClaim("c1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// First fail: retry_count becomes 1 (< maxRetries=2) → re-queued.
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("first dequeue: %v", err)
+	}
+	if err := store.Fail(context.Background(), "c1", "err", maxRetries); err != nil {
+		t.Fatalf("first fail: %v", err)
+	}
+	got, _ := store.GetClaim(context.Background(), "c1")
+	if got.Status != domain.ClaimStatusQueued {
+		t.Fatalf("after 1st fail status = %q, want queued", got.Status)
+	}
+
+	// Manually clear next_attempt_at so DequeueBatch picks it up.
+	if _, err := store.db.Exec(`UPDATE requests SET next_attempt_at = NULL WHERE id = 'c1'`); err != nil {
+		t.Fatalf("clear next_attempt_at: %v", err)
+	}
+
+	// Second fail: retry_count becomes 2 (== maxRetries=2) → dead-letter.
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("second dequeue: %v", err)
+	}
+	if err := store.Fail(context.Background(), "c1", "final err", maxRetries); err != nil {
+		t.Fatalf("second fail: %v", err)
+	}
+	got, _ = store.GetClaim(context.Background(), "c1")
+	if got.Status != domain.ClaimStatusFailed {
+		t.Fatalf("after 2nd fail status = %q, want failed", got.Status)
+	}
+	if got.RetryCount != 2 {
+		t.Fatalf("retry_count = %d, want 2", got.RetryCount)
+	}
+}
+
+func TestDequeueBatchSkipsFutureNextAttemptAt(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	if _, err := store.CreateClaim(context.Background(), testClaim("c1")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Dequeue to move to sending, then fail once — next_attempt_at is 30s in future.
+	if _, err := store.DequeueBatch(context.Background(), 1); err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+	if err := store.Fail(context.Background(), "c1", "err", 3); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	// DequeueBatch must not return c1 because next_attempt_at is in the future.
+	batch, err := store.DequeueBatch(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("second dequeue: %v", err)
+	}
+	for _, c := range batch {
+		if c.ID == "c1" {
+			t.Fatal("claim c1 should be skipped due to future next_attempt_at")
+		}
 	}
 }
 

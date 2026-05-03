@@ -20,6 +20,7 @@ import (
 
 var _ domain.ClaimStore = (*Store)(nil)
 var _ domain.RateLimiter = (*Store)(nil)
+var _ domain.QueueStore = (*Store)(nil)
 
 var ErrNotFound = errors.New("not found")
 
@@ -50,6 +51,17 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Migrate(ctx context.Context) error {
+	// Ensure migration-tracking table exists before running any migrations.
+	_, err := s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			name       TEXT PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+
 	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
 		return fmt.Errorf("read migrations: %w", err)
@@ -64,12 +76,23 @@ func (s *Store) Migrate(ctx context.Context) error {
 	sort.Strings(names)
 
 	for _, name := range names {
+		var count int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE name = ?`, name).Scan(&count); err != nil {
+			return fmt.Errorf("check migration %s: %w", name, err)
+		}
+		if count > 0 {
+			continue // already applied
+		}
+
 		sqlText, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 		if _, err := s.db.ExecContext(ctx, string(sqlText)); err != nil {
 			return fmt.Errorf("apply migration %s: %w", name, err)
+		}
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, formatTime(time.Now().UTC())); err != nil {
+			return fmt.Errorf("record migration %s: %w", name, err)
 		}
 	}
 
@@ -114,7 +137,7 @@ func (s *Store) CreateClaimWithIdempotency(ctx context.Context, claim domain.Cla
 
 func (s *Store) GetClaim(ctx context.Context, id string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, created_at, updated_at
+		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE id = ?
 	`, id)
@@ -154,7 +177,7 @@ func (s *Store) ListClaimsByAddress(ctx context.Context, address common.Address,
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, created_at, updated_at
+		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE address = ?
 		ORDER BY created_at DESC
@@ -181,7 +204,7 @@ func (s *Store) ListClaimsByAddress(ctx context.Context, address common.Address,
 
 func (s *Store) LastClaimByAddress(ctx context.Context, address common.Address) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, created_at, updated_at
+		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE address = ?
 		ORDER BY created_at DESC
@@ -201,16 +224,18 @@ type claimScanner interface {
 
 func scanClaim(scanner claimScanner) (domain.Claim, error) {
 	var (
-		id        string
-		address   string
-		amountWei string
-		status    string
-		reason    string
-		createdAt string
-		updatedAt string
+		id            string
+		address       string
+		amountWei     string
+		status        string
+		reason        string
+		retryCount    int
+		nextAttemptAt sql.NullString
+		createdAt     string
+		updatedAt     string
 	)
 
-	if err := scanner.Scan(&id, &address, &amountWei, &status, &reason, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&id, &address, &amountWei, &status, &reason, &retryCount, &nextAttemptAt, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Claim{}, ErrNotFound
 		}
@@ -231,14 +256,25 @@ func scanClaim(scanner claimScanner) (domain.Claim, error) {
 		return domain.Claim{}, err
 	}
 
+	var nextAttempt *time.Time
+	if nextAttemptAt.Valid {
+		t, err := parseTime(nextAttemptAt.String)
+		if err != nil {
+			return domain.Claim{}, fmt.Errorf("invalid next_attempt_at: %w", err)
+		}
+		nextAttempt = &t
+	}
+
 	return domain.Claim{
-		ID:        id,
-		Address:   common.HexToAddress(address),
-		AmountWei: amount,
-		Status:    domain.ClaimStatus(status),
-		Reason:    reason,
-		CreatedAt: created,
-		UpdatedAt: updated,
+		ID:            id,
+		Address:       common.HexToAddress(address),
+		AmountWei:     amount,
+		Status:        domain.ClaimStatus(status),
+		Reason:        reason,
+		RetryCount:    retryCount,
+		NextAttemptAt: nextAttempt,
+		CreatedAt:     created,
+		UpdatedAt:     updated,
 	}, nil
 }
 
@@ -249,6 +285,143 @@ func formatTime(t time.Time) string {
 func parseTime(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, s)
 }
+
+// ── QueueStore ───────────────────────────────────────────────────────────────
+
+// Enqueue transitions a claim to the 'queued' state.
+func (s *Store) Enqueue(ctx context.Context, claimID string) error {
+	now := formatTime(time.Now().UTC())
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE requests
+		SET status = ?, updated_at = ?
+		WHERE id = ?
+	`, string(domain.ClaimStatusQueued), now, claimID)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DequeueBatch picks up to n queued claims (skipping those whose next_attempt_at
+// is still in the future), transitions them to 'sending', and returns them.
+func (s *Store) DequeueBatch(ctx context.Context, n int) ([]domain.Claim, error) {
+	if n <= 0 {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	nowStr := formatTime(now)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin dequeue tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		FROM requests
+		WHERE status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+		ORDER BY created_at ASC
+		LIMIT ?
+	`, string(domain.ClaimStatusQueued), nowStr, n)
+	if err != nil {
+		return nil, fmt.Errorf("query queued claims: %w", err)
+	}
+
+	var claims []domain.Claim
+	for rows.Next() {
+		claim, err := scanClaim(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, claim := range claims {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE requests
+			SET status = ?, updated_at = ?
+			WHERE id = ?
+		`, string(domain.ClaimStatusSending), nowStr, claim.ID); err != nil {
+			return nil, fmt.Errorf("transition to sending %s: %w", claim.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit dequeue tx: %w", err)
+	}
+	return claims, nil
+}
+
+// Ack transitions a claim from 'sending' to 'sent'.
+func (s *Store) Ack(ctx context.Context, claimID string) error {
+	now := formatTime(time.Now().UTC())
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE requests
+		SET status = ?, updated_at = ?
+		WHERE id = ? AND status = ?
+	`, string(domain.ClaimStatusSent), now, claimID, string(domain.ClaimStatusSending))
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Fail increments retry_count.  When retry_count reaches maxRetries the claim is
+// dead-lettered (status = 'failed').  Otherwise it is re-queued with a linear
+// backoff: next_attempt_at = now + retry_count*30s.
+func (s *Store) Fail(ctx context.Context, claimID string, reason string, maxRetries int) error {
+	now := time.Now().UTC()
+	nowStr := formatTime(now)
+
+	var retryCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT retry_count FROM requests WHERE id = ?`, claimID).Scan(&retryCount); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	newCount := retryCount + 1
+	if newCount >= maxRetries {
+		_, err := s.db.ExecContext(ctx, `
+			UPDATE requests
+			SET status = ?, reason = ?, retry_count = ?, updated_at = ?
+			WHERE id = ?
+		`, string(domain.ClaimStatusFailed), reason, newCount, nowStr, claimID)
+		return err
+	}
+
+	backoff := time.Duration(newCount) * 30 * time.Second
+	nextAttempt := formatTime(now.Add(backoff))
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE requests
+		SET status = ?, reason = ?, retry_count = ?, next_attempt_at = ?, updated_at = ?
+		WHERE id = ?
+	`, string(domain.ClaimStatusQueued), reason, newCount, nextAttempt, nowStr, claimID)
+	return err
+}
+
+// ── RateLimiter ──────────────────────────────────────────────────────────────
 
 // Allow implements domain.RateLimiter using the rate_limits table.
 // It counts requests for a given key within a fixed time window.

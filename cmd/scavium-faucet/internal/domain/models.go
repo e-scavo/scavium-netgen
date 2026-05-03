@@ -22,14 +22,16 @@ const (
 )
 
 type Claim struct {
-	ID          string
-	Address     common.Address
-	AmountWei   *big.Int
-	Status      ClaimStatus
-	Transaction *Transaction
-	Reason      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            string
+	Address       common.Address
+	AmountWei     *big.Int
+	Status        ClaimStatus
+	Transaction   *Transaction
+	Reason        string
+	RetryCount    int
+	NextAttemptAt *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type Transaction struct {
