@@ -34,6 +34,12 @@ type App struct {
 	closeFuncs []func(context.Context) error
 }
 
+type senderBundle struct {
+	sender      domain.Sender
+	chainClient *chain.Client
+	signer      chain.Signer
+}
+
 // New constructs the faucet application with its configured HTTP handler tree.
 func New(cfg config.Config) (*App, error) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -44,7 +50,7 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("open sqlite store: %w", err)
 	}
 
-	sender, chainClient, err := newSender(ctx, cfg)
+	senderBundle, err := newSender(ctx, cfg)
 	if err != nil {
 		_ = store.Close()
 		cancel()
@@ -52,10 +58,11 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	readService := faucet.NewPersistentReadService(cfg, store, store, store)
+	readinessChecks := runtimeChecks(cfg, store, senderBundle.chainClient, senderBundle.signer)
 	app := &App{
 		Config: cfg,
 		Handler: httpapi.NewHandler(httpapi.Dependencies{
-			ReadinessChecks: ready.DefaultChecks(),
+			ReadinessChecks: readinessChecks,
 			ReadService:     readService,
 			AdminToken:      cfg.AdminToken,
 		}),
@@ -66,9 +73,9 @@ func New(cfg config.Config) (*App, error) {
 	app.closeFuncs = append(app.closeFuncs, func(context.Context) error {
 		return store.Close()
 	})
-	if chainClient != nil {
+	if senderBundle.chainClient != nil {
 		app.closeFuncs = append(app.closeFuncs, func(context.Context) error {
-			chainClient.Close()
+			senderBundle.chainClient.Close()
 			return nil
 		})
 	}
@@ -76,15 +83,15 @@ func New(cfg config.Config) (*App, error) {
 	if cfg.WorkerEnabled {
 		workerCfg := worker.DefaultConfig()
 		workerCfg.PollInterval = time.Duration(cfg.WorkerPollSeconds) * time.Second
-		w := worker.New(store, sender, workerCfg, nil)
+		w := worker.New(store, senderBundle.sender, workerCfg, nil)
 		app.start("worker", w.Run)
 	}
 
-	if !cfg.DryRun && cfg.WatcherEnabled && chainClient != nil {
+	if !cfg.DryRun && cfg.WatcherEnabled && senderBundle.chainClient != nil {
 		watcherCfg := chain.DefaultWatcherConfig()
 		watcherCfg.PollInterval = time.Duration(cfg.WatcherPollSeconds) * time.Second
 		watcherCfg.MinConfirmations = cfg.MinConfirmations
-		w := chain.NewWatcher(store, chainClient, watcherCfg, nil)
+		w := chain.NewWatcher(store, senderBundle.chainClient, watcherCfg, nil)
 		app.start("watcher", w.Run)
 	}
 
@@ -152,9 +159,9 @@ func openStore(path string) (*sqlite.Store, error) {
 	return sqlite.Open(path)
 }
 
-func newSender(ctx context.Context, cfg config.Config) (domain.Sender, *chain.Client, error) {
+func newSender(ctx context.Context, cfg config.Config) (senderBundle, error) {
 	if cfg.DryRun {
-		return chain.NewDryRunSender(common.Address{}), nil, nil
+		return senderBundle{sender: chain.NewDryRunSender(common.Address{})}, nil
 	}
 
 	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -162,18 +169,36 @@ func newSender(ctx context.Context, cfg config.Config) (domain.Sender, *chain.Cl
 
 	client, err := chain.NewClient(startupCtx, cfg.RPCURL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create chain client: %w", err)
+		return senderBundle{}, fmt.Errorf("create chain client: %w", err)
 	}
 	if err := chain.ValidateChainID(startupCtx, client, cfg.ChainID); err != nil {
 		client.Close()
-		return nil, nil, fmt.Errorf("validate chain id: %w", err)
+		return senderBundle{}, fmt.Errorf("validate chain id: %w", err)
 	}
 
 	signer, err := chain.NewPrivateKeySigner(cfg.PrivateKeyHex)
 	if err != nil {
 		client.Close()
-		return nil, nil, fmt.Errorf("create signer: %w", err)
+		return senderBundle{}, fmt.Errorf("create signer: %w", err)
 	}
 
-	return chain.NewEthSender(client, signer, cfg.ChainID, chain.GasPolicy{}), client, nil
+	return senderBundle{
+		sender:      chain.NewEthSender(client, signer, cfg.ChainID, chain.GasPolicy{}),
+		chainClient: client,
+		signer:      signer,
+	}, nil
+}
+
+func runtimeChecks(cfg config.Config, store *sqlite.Store, chainClient *chain.Client, signer chain.Signer) []ready.Check {
+	checks := []ready.Check{
+		ready.DBCheck(store),
+		ready.QueueCheck(store),
+	}
+	if !cfg.DryRun && chainClient != nil {
+		checks = append(checks, ready.RPCCheck(chainClient))
+		if signer != nil {
+			checks = append(checks, ready.WalletCheck(chainClient, signer))
+		}
+	}
+	return checks
 }

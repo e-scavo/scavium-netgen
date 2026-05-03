@@ -56,6 +56,22 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// Ping verifies that the database connection is usable.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
+// PingQueue verifies that queue-related request columns are accessible.
+func (s *Store) PingQueue(ctx context.Context) error {
+	var count int
+	return s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM requests
+		WHERE status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+		LIMIT 1
+	`, string(domain.ClaimStatusQueued), formatTime(time.Now().UTC())).Scan(&count)
+}
+
 // Migrate applies pending embedded schema migrations in lexical order.
 func (s *Store) Migrate(ctx context.Context) error {
 	// Ensure migration-tracking table exists before running any migrations.
