@@ -25,6 +25,9 @@ const (
 	EnvRateLimitAddrPerDay = "SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY"
 	EnvDailyBudgetWei      = "SCAVIUM_FAUCET_DAILY_BUDGET_WEI"
 	EnvTrustedProxy        = "SCAVIUM_FAUCET_TRUSTED_PROXY"
+	// EnvPrivateKey holds the hex-encoded private key used to sign transactions.
+	// Never log this value.
+	EnvPrivateKey = "SCAVIUM_FAUCET_PRIVATE_KEY"
 )
 
 type Config struct {
@@ -42,6 +45,9 @@ type Config struct {
 	RateLimitAddrPerDay int
 	DailyBudgetWei      *big.Int
 	TrustedProxy        string
+	// PrivateKeyHex is the hex-encoded signer key. Not required when DryRun=true.
+	// Never log this value.
+	PrivateKeyHex string
 }
 
 func LoadFromEnv() (Config, error) {
@@ -119,6 +125,7 @@ func FromEnv(lookup func(string) string) (Config, error) {
 	}
 
 	cfg.TrustedProxy = strings.TrimSpace(lookup(EnvTrustedProxy))
+	cfg.PrivateKeyHex = strings.TrimSpace(lookup(EnvPrivateKey))
 
 	return cfg, nil
 }
