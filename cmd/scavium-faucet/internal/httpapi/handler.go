@@ -194,6 +194,10 @@ func handleCreateClaim(readService faucet.ReadService) http.HandlerFunc {
 			return
 		}
 
+		// TODO(step 5.x): optional address-ownership challenge/signature verification.
+		// The wallet may include an `X-Signature` header containing a signed challenge
+		// to prove control of the address before the claim is enqueued.
+
 		var body claimRequest
 		if err := decodeNoTrailingTokens(json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)), &body); err != nil {
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)

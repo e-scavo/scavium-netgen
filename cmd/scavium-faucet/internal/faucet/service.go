@@ -23,21 +23,26 @@ type StatusResponse struct {
 }
 
 type ConfigResponse struct {
-	NetworkName     string `json:"network_name"`
-	ChainID         int64  `json:"chain_id"`
-	Symbol          string `json:"symbol"`
-	AmountWei       string `json:"amount_wei"`
-	CooldownSeconds int    `json:"cooldown_seconds"`
-	ExplorerTxURL   string `json:"explorer_tx_url"`
-	DryRun          bool   `json:"dry_run"`
+	NetworkName         string `json:"network_name"`
+	ChainID             int64  `json:"chain_id"`
+	Symbol              string `json:"symbol"`
+	AmountWei           string `json:"amount_wei"`
+	CooldownSeconds     int    `json:"cooldown_seconds"`
+	ExplorerTxURL       string `json:"explorer_tx_url"`
+	DryRun              bool   `json:"dry_run"`
+	RateLimitIPPerHour  int    `json:"rate_limit_ip_per_hour"`
+	RateLimitAddrPerDay int    `json:"rate_limit_addr_per_day"`
 }
 
 type AddressStatusResponse struct {
-	Address          string `json:"address"`
-	Eligible         bool   `json:"eligible"`
-	Reason           string `json:"reason"`
-	CooldownSeconds  int    `json:"cooldown_seconds"`
-	NextEligibleTime string `json:"next_eligible_time,omitempty"`
+	Address                  string `json:"address"`
+	Eligible                 bool   `json:"eligible"`
+	Reason                   string `json:"reason"`
+	CooldownSeconds          int    `json:"cooldown_seconds"`
+	CooldownRemainingSeconds int    `json:"cooldown_remaining_seconds"`
+	NextEligibleTime         string `json:"next_eligible_time,omitempty"`
+	RateLimitIPPerHour       int    `json:"rate_limit_ip_per_hour"`
+	RateLimitAddrPerDay      int    `json:"rate_limit_addr_per_day"`
 }
 
 type ClaimRequest struct {
@@ -48,6 +53,7 @@ type ClaimRequest struct {
 type ClaimResponse struct {
 	ID             string             `json:"id"`
 	Address        string             `json:"address"`
+	TxHash         string             `json:"tx_hash,omitempty"`
 	AmountWei      string             `json:"amount_wei"`
 	Status         domain.ClaimStatus `json:"status"`
 	Reason         string             `json:"reason,omitempty"`
@@ -121,22 +127,27 @@ func (s *InMemoryReadService) Config(context.Context) (ConfigResponse, error) {
 	}
 
 	return ConfigResponse{
-		NetworkName:     s.cfg.NetworkName,
-		ChainID:         s.cfg.ChainID,
-		Symbol:          s.cfg.Symbol,
-		AmountWei:       amountWei,
-		CooldownSeconds: s.cfg.CooldownSeconds,
-		ExplorerTxURL:   s.cfg.ExplorerTxURL,
-		DryRun:          s.cfg.DryRun,
+		NetworkName:         s.cfg.NetworkName,
+		ChainID:             s.cfg.ChainID,
+		Symbol:              s.cfg.Symbol,
+		AmountWei:           amountWei,
+		CooldownSeconds:     s.cfg.CooldownSeconds,
+		ExplorerTxURL:       s.cfg.ExplorerTxURL,
+		DryRun:              s.cfg.DryRun,
+		RateLimitIPPerHour:  s.cfg.RateLimitIPPerHour,
+		RateLimitAddrPerDay: s.cfg.RateLimitAddrPerDay,
 	}, nil
 }
 
 func (s *InMemoryReadService) AddressStatus(_ context.Context, address common.Address) (AddressStatusResponse, error) {
 	return AddressStatusResponse{
-		Address:         address.Hex(),
-		Eligible:        true,
-		Reason:          "eligible",
-		CooldownSeconds: s.cfg.CooldownSeconds,
+		Address:                  address.Hex(),
+		Eligible:                 true,
+		Reason:                   "eligible",
+		CooldownSeconds:          s.cfg.CooldownSeconds,
+		CooldownRemainingSeconds: 0,
+		RateLimitIPPerHour:       s.cfg.RateLimitIPPerHour,
+		RateLimitAddrPerDay:      s.cfg.RateLimitAddrPerDay,
 	}, nil
 }
 
@@ -193,9 +204,15 @@ func claimResponse(claim domain.Claim, idempotencyKey string) ClaimResponse {
 		amountWei = claim.AmountWei.String()
 	}
 
+	txHash := ""
+	if claim.Transaction != nil && claim.Transaction.Hash != (common.Hash{}) {
+		txHash = claim.Transaction.Hash.Hex()
+	}
+
 	return ClaimResponse{
 		ID:             claim.ID,
 		Address:        claim.Address.Hex(),
+		TxHash:         txHash,
 		AmountWei:      amountWei,
 		Status:         claim.Status,
 		Reason:         claim.Reason,
