@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+// StatusResponse is returned by public faucet status endpoints.
 type StatusResponse struct {
 	Status      domain.FaucetStatus `json:"status"`
 	NetworkName string              `json:"network_name"`
@@ -22,6 +23,7 @@ type StatusResponse struct {
 	UpdatedAt   string              `json:"updated_at"`
 }
 
+// ConfigResponse is returned by public faucet config endpoints.
 type ConfigResponse struct {
 	NetworkName         string `json:"network_name"`
 	ChainID             int64  `json:"chain_id"`
@@ -34,6 +36,7 @@ type ConfigResponse struct {
 	RateLimitAddrPerDay int    `json:"rate_limit_addr_per_day"`
 }
 
+// AddressStatusResponse describes whether an address can request funds now.
 type AddressStatusResponse struct {
 	Address                  string `json:"address"`
 	Eligible                 bool   `json:"eligible"`
@@ -45,11 +48,13 @@ type AddressStatusResponse struct {
 	RateLimitAddrPerDay      int    `json:"rate_limit_addr_per_day"`
 }
 
+// ClaimRequest is the internal read-side input for claim creation.
 type ClaimRequest struct {
 	Address        common.Address
 	IdempotencyKey string
 }
 
+// ClaimResponse is returned by claim creation and lookup endpoints.
 type ClaimResponse struct {
 	ID             string             `json:"id"`
 	Address        string             `json:"address"`
@@ -62,6 +67,7 @@ type ClaimResponse struct {
 	UpdatedAt      string             `json:"updated_at"`
 }
 
+// ReadService defines the public read/claim contract consumed by HTTP handlers.
 type ReadService interface {
 	Status(context.Context) (StatusResponse, error)
 	Config(context.Context) (ConfigResponse, error)
@@ -70,6 +76,7 @@ type ReadService interface {
 	GetClaim(context.Context, string) (ClaimResponse, bool, error)
 }
 
+// InMemoryReadService is a concurrency-safe in-memory implementation of ReadService.
 type InMemoryReadService struct {
 	mu              sync.RWMutex
 	cfg             config.Config
@@ -79,6 +86,7 @@ type InMemoryReadService struct {
 	generateClaimID func() (string, error)
 }
 
+// NewInMemoryReadService creates a default in-memory read service.
 func NewInMemoryReadService(cfg config.Config) *InMemoryReadService {
 	return &InMemoryReadService{
 		cfg: cfg,
@@ -93,6 +101,7 @@ func NewInMemoryReadService(cfg config.Config) *InMemoryReadService {
 	}
 }
 
+// NewInMemoryReadServiceWithClock is a test helper that injects the time source.
 func NewInMemoryReadServiceWithClock(cfg config.Config, now func() time.Time) *InMemoryReadService {
 	service := NewInMemoryReadService(cfg)
 	if now != nil {
@@ -101,6 +110,7 @@ func NewInMemoryReadServiceWithClock(cfg config.Config, now func() time.Time) *I
 	return service
 }
 
+// SetClaimIDGenerator overrides claim ID generation (primarily for tests).
 func (s *InMemoryReadService) SetClaimIDGenerator(generate func() (string, error)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
