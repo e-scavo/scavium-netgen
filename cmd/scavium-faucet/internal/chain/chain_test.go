@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync"
 	"testing"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
@@ -18,8 +19,10 @@ type fakeClient struct {
 	chainID    int64
 	nonce      uint64
 	gasPrice   *big.Int
+	balance    *big.Int // nil → 100 ETH
 	sendErr    error
 	sendCalled int
+	nonceCalls int
 }
 
 func (f *fakeClient) ChainID(_ context.Context) (*big.Int, error) {
@@ -27,10 +30,15 @@ func (f *fakeClient) ChainID(_ context.Context) (*big.Int, error) {
 }
 
 func (f *fakeClient) BalanceAt(_ context.Context, _ common.Address, _ *big.Int) (*big.Int, error) {
-	return big.NewInt(0), nil
+	if f.balance != nil {
+		return new(big.Int).Set(f.balance), nil
+	}
+	// Default: 100 ETH — enough for any faucet send in tests.
+	return new(big.Int).Mul(big.NewInt(100), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)), nil
 }
 
 func (f *fakeClient) NonceAt(_ context.Context, _ common.Address, _ *big.Int) (uint64, error) {
+	f.nonceCalls++
 	return f.nonce, nil
 }
 
@@ -207,7 +215,7 @@ func TestDryRunSenderDoesNotCallClient(t *testing.T) {
 func TestEthSenderSendSuccess(t *testing.T) {
 	client := &fakeClient{chainID: 31337, nonce: 7}
 	signer := &fakeSigner{addr: common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")}
-	sender := NewEthSender(client, signer, 31337)
+	sender := NewEthSender(client, signer, 31337, GasPolicy{})
 
 	tx, err := sender.Send(context.Background(), fakeClaim())
 	if err != nil {
@@ -227,11 +235,163 @@ func TestEthSenderSendSuccess(t *testing.T) {
 func TestEthSenderPropagatesSendError(t *testing.T) {
 	client := &fakeClient{chainID: 31337, sendErr: errors.New("rpc: timeout")}
 	signer := &fakeSigner{}
-	sender := NewEthSender(client, signer, 31337)
+	sender := NewEthSender(client, signer, 31337, GasPolicy{})
 
 	_, err := sender.Send(context.Background(), fakeClaim())
 	if err == nil {
 		t.Fatal("expected error from SendTransaction, got nil")
+	}
+}
+
+// ── EthSender — gas floor ────────────────────────────────────────────────────
+
+func TestEthSenderAppliesGasFloor(t *testing.T) {
+	client := &fakeClient{chainID: 31337, gasPrice: big.NewInt(1)} // node suggests 1 wei
+	signer := &fakeSigner{addr: common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")}
+	floor := big.NewInt(2_000_000_000) // 2 gwei floor
+	sender := NewEthSender(client, signer, 31337, GasPolicy{MinGasPrice: floor})
+
+	_, err := sender.Send(context.Background(), fakeClaim())
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	// The transaction was sent — if the floor had not been applied the gas price
+	// would be 1 wei which is below the floor.  No error means the floor was used.
+}
+
+// ── EthSender — balance guard ─────────────────────────────────────────────────
+
+func TestEthSenderInsufficientBalance(t *testing.T) {
+	client := &fakeClient{
+		chainID:  31337,
+		balance:  big.NewInt(0), // zero balance
+		gasPrice: big.NewInt(1_000_000_000),
+	}
+	signer := &fakeSigner{addr: common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")}
+	sender := NewEthSender(client, signer, 31337, GasPolicy{})
+
+	_, err := sender.Send(context.Background(), fakeClaim())
+	if err == nil {
+		t.Fatal("expected insufficient balance error, got nil")
+	}
+	if client.sendCalled != 0 {
+		t.Fatal("SendTransaction must not be called when balance is insufficient")
+	}
+}
+
+// ── EthSender — nonce reset on send error ─────────────────────────────────────
+
+func TestEthSenderResetsNonceOnSendError(t *testing.T) {
+	client := &fakeClient{chainID: 31337, sendErr: errors.New("nonce too low")}
+	signer := &fakeSigner{}
+	sender := NewEthSender(client, signer, 31337, GasPolicy{})
+
+	// First call seeds the nonce via NonceAt.
+	_, _ = sender.Send(context.Background(), fakeClaim())
+	nonceCalls1 := client.nonceCalls
+
+	// Second call must re-fetch nonce because Reset() was called on send error.
+	client.sendErr = nil
+	_, err := sender.Send(context.Background(), fakeClaim())
+	if err != nil {
+		t.Fatalf("second send: %v", err)
+	}
+	if client.nonceCalls <= nonceCalls1 {
+		t.Fatal("expected a second NonceAt call after nonce reset")
+	}
+}
+
+// ── NonceManager ─────────────────────────────────────────────────────────────
+
+func TestNonceManagerFirstCallFetchesFromNode(t *testing.T) {
+	client := &fakeClient{nonce: 5}
+	nm := NewNonceManager(client, common.Address{})
+
+	n, err := nm.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("nonce = %d, want 5", n)
+	}
+	if client.nonceCalls != 1 {
+		t.Fatalf("NonceAt calls = %d, want 1", client.nonceCalls)
+	}
+}
+
+func TestNonceManagerIncrementsWithoutRPC(t *testing.T) {
+	client := &fakeClient{nonce: 10}
+	nm := NewNonceManager(client, common.Address{})
+
+	for i := uint64(0); i < 5; i++ {
+		n, err := nm.Next(context.Background())
+		if err != nil {
+			t.Fatalf("Next %d: %v", i, err)
+		}
+		if n != 10+i {
+			t.Fatalf("nonce[%d] = %d, want %d", i, n, 10+i)
+		}
+	}
+	// Only one RPC call for the first seed.
+	if client.nonceCalls != 1 {
+		t.Fatalf("NonceAt calls = %d, want 1", client.nonceCalls)
+	}
+}
+
+func TestNonceManagerResetRefetchesFromNode(t *testing.T) {
+	client := &fakeClient{nonce: 3}
+	nm := NewNonceManager(client, common.Address{})
+
+	_, _ = nm.Next(context.Background()) // seed
+	_, _ = nm.Next(context.Background()) // local increment
+	nm.Reset()
+
+	// After reset the next call must re-fetch.
+	client.nonce = 7
+	n, err := nm.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next after reset: %v", err)
+	}
+	if n != 7 {
+		t.Fatalf("nonce after reset = %d, want 7", n)
+	}
+	if client.nonceCalls != 2 {
+		t.Fatalf("NonceAt calls = %d, want 2", client.nonceCalls)
+	}
+}
+
+func TestNonceManagerConcurrency(t *testing.T) {
+	const goroutines = 50
+	client := &fakeClient{nonce: 0}
+	nm := NewNonceManager(client, common.Address{})
+
+	var wg sync.WaitGroup
+	nonces := make([]uint64, goroutines)
+	wg.Add(goroutines)
+	for i := range goroutines {
+		go func(idx int) {
+			defer wg.Done()
+			n, err := nm.Next(context.Background())
+			if err != nil {
+				t.Errorf("goroutine %d Next: %v", idx, err)
+				return
+			}
+			nonces[idx] = n
+		}(i)
+	}
+	wg.Wait()
+
+	// All nonces must be unique.
+	seen := make(map[uint64]bool, goroutines)
+	for _, n := range nonces {
+		if seen[n] {
+			t.Fatalf("duplicate nonce %d", n)
+		}
+		seen[n] = true
+	}
+	// Exactly one NonceAt call (the seed).
+	if client.nonceCalls != 1 {
+		t.Fatalf("NonceAt calls = %d, want 1", client.nonceCalls)
 	}
 }
 

@@ -365,10 +365,19 @@ func (s *Store) DequeueBatch(ctx context.Context, n int) ([]domain.Claim, error)
 	return claims, nil
 }
 
-// Ack transitions a claim from 'sending' to 'sent'.
-func (s *Store) Ack(ctx context.Context, claimID string) error {
+// Ack transitions a claim from 'sending' to 'sent' and persists the transaction
+// record when tx contains a non-zero hash.  Both writes happen in a single
+// database transaction.
+func (s *Store) Ack(ctx context.Context, claimID string, tx domain.Transaction) error {
 	now := formatTime(time.Now().UTC())
-	result, err := s.db.ExecContext(ctx, `
+
+	dbTx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin ack tx: %w", err)
+	}
+	defer dbTx.Rollback() //nolint:errcheck
+
+	result, err := dbTx.ExecContext(ctx, `
 		UPDATE requests
 		SET status = ?, updated_at = ?
 		WHERE id = ? AND status = ?
@@ -383,7 +392,27 @@ func (s *Store) Ack(ctx context.Context, claimID string) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+
+	// Only record a transaction row when a real hash is present (skip dry-run).
+	if tx.Hash != (common.Hash{}) {
+		valueWei := "0"
+		if tx.ValueWei != nil {
+			valueWei = tx.ValueWei.String()
+		}
+		if _, err := dbTx.ExecContext(ctx, `
+			INSERT INTO transactions
+				(request_id, tx_hash, from_address, to_address, value_wei, status,
+				 block_number, gas_used, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, claimID, tx.Hash.Hex(), tx.From.Hex(), tx.To.Hex(), valueWei,
+			string(tx.Status), tx.BlockNumber, tx.GasUsed,
+			formatTime(tx.CreatedAt), formatTime(tx.UpdatedAt),
+		); err != nil {
+			return fmt.Errorf("insert transaction record: %w", err)
+		}
+	}
+
+	return dbTx.Commit()
 }
 
 // Fail increments retry_count.  When retry_count reaches maxRetries the claim is
