@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,14 +10,16 @@ import (
 
 	"scavium-netgen/cmd/scavium-faucet/internal/app"
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
+	"scavium-netgen/cmd/scavium-faucet/internal/observability"
 )
 
 func main() {
-	log.SetFlags(0)
+	logger := observability.DefaultLogger()
 
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		logger.Error("load config failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 
 	application := app.New(cfg)
@@ -33,7 +34,7 @@ func main() {
 
 	errs := make(chan error, 1)
 	go func() {
-		log.Printf("scavium faucet listening on %s", server.Addr)
+		logger.Info("scavium faucet listening", map[string]any{"addr": server.Addr})
 		errs <- server.ListenAndServe()
 	}()
 
@@ -43,14 +44,17 @@ func main() {
 	select {
 	case err := <-errs:
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server failed: %v", err)
+			logger.Error("server failed", map[string]any{"error": err.Error()})
+			os.Exit(1)
 		}
 	case <-stop:
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		if err := server.Shutdown(ctx); err != nil {
-			log.Fatalf("server shutdown: %v", err)
+			logger.Error("server shutdown failed", map[string]any{"error": err.Error()})
+			os.Exit(1)
 		}
+		logger.Info("server stopped", nil)
 	}
 }

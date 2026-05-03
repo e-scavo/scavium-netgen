@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"scavium-netgen/cmd/scavium-faucet/internal/ready"
+	"scavium-netgen/cmd/scavium-faucet/internal/version"
 )
 
 const requestIDHeader = "X-Request-ID"
@@ -25,9 +28,23 @@ type ErrorEnvelope struct {
 	RequestID string         `json:"request_id"`
 }
 
-func NewHandler() http.Handler {
+type Dependencies struct {
+	ReadinessChecks []ready.Check
+	VersionInfo     version.Info
+}
+
+func NewHandler(deps Dependencies) http.Handler {
+	if deps.ReadinessChecks == nil {
+		deps.ReadinessChecks = ready.DefaultChecks()
+	}
+	if deps.VersionInfo == (version.Info{}) {
+		deps.VersionInfo = version.Current()
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/ready", handleReady(deps.ReadinessChecks))
+	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
 	mux.HandleFunc("/", handleNotFound)
 	return RequestIDMiddleware(mux)
 }
@@ -47,6 +64,36 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func handleNotFound(w http.ResponseWriter, r *http.Request) {
 	WriteError(w, r, http.StatusNotFound, "not_found", "not found", nil)
+}
+
+func handleReady(checks []ready.Check) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		result := ready.Evaluate(r.Context(), checks)
+		statusCode := http.StatusOK
+		if result.Status != ready.StatusOK {
+			statusCode = http.StatusServiceUnavailable
+		}
+
+		WriteJSON(w, statusCode, result)
+	}
+}
+
+func handleVersion(info version.Info) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, info)
+	}
 }
 
 func RequestIDMiddleware(next http.Handler) http.Handler {
