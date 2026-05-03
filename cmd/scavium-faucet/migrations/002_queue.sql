@@ -1,0 +1,2 @@
+ALTER TABLE requests ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE requests ADD COLUMN next_attempt_at TEXT;

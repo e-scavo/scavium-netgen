@@ -26,11 +26,17 @@ type RateLimitDecision struct {
 	Reason     string
 }
 
-type Queue interface {
-	Enqueue(ctx context.Context, claim Claim) error
-	Dequeue(ctx context.Context) (Claim, error)
+type QueueStore interface {
+	// Enqueue transitions a claim to the 'queued' state, making it available for processing.
+	Enqueue(ctx context.Context, claimID string) error
+	// DequeueBatch picks up to n claims in 'queued' state whose next_attempt_at is not in the
+	// future, transitions them to 'sending', and returns them.
+	DequeueBatch(ctx context.Context, n int) ([]Claim, error)
+	// Ack transitions a claim from 'sending' to 'sent'.
 	Ack(ctx context.Context, claimID string) error
-	Fail(ctx context.Context, claimID string, err error) error
+	// Fail increments retry_count. If retry_count reaches maxRetries the claim is dead-lettered
+	// ('failed'). Otherwise it is re-queued with an exponential backoff on next_attempt_at.
+	Fail(ctx context.Context, claimID string, reason string, maxRetries int) error
 }
 
 type Sender interface {
