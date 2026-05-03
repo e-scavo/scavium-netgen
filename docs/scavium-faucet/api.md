@@ -32,9 +32,14 @@ Liveness endpoint.
 
 ### `GET /ready`
 
-Readiness endpoint backed by `ready.DefaultChecks()`.
+Readiness endpoint. Probes are real infrastructure checks wired by `runtimeChecks()` in `app.New`:
 
-Today those checks are stubs, so the shipped binary reports an aggregate of named checks such as `db`, `queue`, `rpc`, and `wallet`, but it is still a shallow readiness signal.
+- `db` — SQLite ping via `ready.DBCheck`
+- `queue` — SQLite queue probe via `ready.QueueCheck`
+- `rpc` — Ethereum JSON-RPC chain-ID check via `ready.RPCCheck` (non-dry-run only)
+- `wallet` — on-chain balance check for the signer address via `ready.WalletCheck` (non-dry-run only)
+
+In dry-run mode only `db` and `queue` checks are active. A degraded result means at least one probe failed.
 
 Healthy example:
 
@@ -66,7 +71,7 @@ Alias routes for the public faucet status payload.
 }
 ```
 
-The current in-memory read service always reports `status: "active"`.
+The value reported by `status` reflects the configured `SCAVIUM_FAUCET_MODE` value (`active`, `paused`, or `maintenance`).
 
 ### `GET /api/v1/config`
 ### `GET /api/v1/faucet/config`
@@ -115,9 +120,13 @@ Request body:
 
 ```json
 {
-  "address": "0x52908400098527886E0F7030069857D2E4169EE7"
+  "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+  "captcha_token": "<provider-token>",
+  "fingerprint": "<client-fingerprint>"
 }
 ```
+
+All fields except `address` are optional. `captcha_token` is only validated when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`. `fingerprint` is used for fingerprint-scoped rate limiting when provided.
 
 Optional request header:
 
@@ -141,10 +150,16 @@ Accepted response:
 
 Current behavior:
 
-- only `address` is decoded from the body
+- `address`, `captcha_token`, and `fingerprint` are decoded from the body
 - the body is capped at `1 MiB`
-- the claim is stored in memory with initial status `queued`
-- repeated requests with the same `Idempotency-Key` return the same claim
+- `RemoteIP` is extracted from the request (trusting `X-Forwarded-For` / `X-Real-IP` when `SCAVIUM_FAUCET_TRUSTED_PROXY` is set)
+- `UserAgent` is forwarded from the request header
+- the address cooldown is checked against the SQLite store
+- persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided)
+- captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; a failed verification returns `500 claim_unavailable`
+- risk evaluation runs when a risk engine is configured
+- the accepted claim is persisted to SQLite with initial status `received`, then enqueued as `queued`
+- repeated requests with the same `Idempotency-Key` return the same persisted claim without creating a duplicate
 
 Common errors:
 
@@ -186,7 +201,7 @@ Returns build metadata from `internal/version`.
 
 ## Admin endpoints
 
-The handler package implements admin routes under `/api/v1/admin/*`, but the shipped binary currently does not pass `AdminToken` into `httpapi.NewHandler`, so these routes return `503` when accessed through `main.go`/`app.New`.
+Admin routes are active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set. `app.New` passes the token into `httpapi.Dependencies.AdminToken`; when the token is empty the routes return `503`.
 
 When the handler is constructed with an admin token, every admin request must include:
 

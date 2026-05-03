@@ -31,22 +31,35 @@ Claim creation and address-status lookups validate the supplied EVM address and 
 
 The binary logs structured JSON events through `internal/observability`. The current startup path logs listen and error events and does not print configuration values by default.
 
-## Important gaps in the current runtime
+### Persistent rate limiting
 
-The repository already contains packages and roadmap items for richer protections, but the shipped binary does **not** enforce all of them yet.
+Claim creation enforces rate limits via the SQLite-backed `RateLimiter`:
 
-Not wired today:
+- per source IP: `SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR` requests per hour
+- per Ethereum address: `SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY` requests per day
+- per fingerprint: same hourly limit as IP when a `fingerprint` field is supplied in the claim body
 
-- captcha verification
-- IP or address rate-limit enforcement
-- trusted-proxy real IP extraction
+Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to your reverse-proxy address so that IP extraction uses the real client IP rather than `127.0.0.1`.
+
+### Captcha verification
+
+When `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is set to `hcaptcha`, `recaptcha`, or `turnstile`, claim creation verifies the `captcha_token` field against the configured provider endpoint. A failed or missing token causes the claim to be rejected. Provider `dev` always passes (for testing only). Default is `disabled`.
+
+### Admin token and persistent claim storage
+
+`app.New` passes `cfg.AdminToken` into `httpapi.Dependencies.AdminToken`, enabling the `/api/v1/admin/*` routes when the token is non-empty. Claims are persisted in SQLite (WAL mode); restarting the process does not lose state.
+
+### Trusted proxy and real IP extraction
+
+`SCAVIUM_FAUCET_TRUSTED_PROXY` controls whether the handler trusts `X-Forwarded-For` / `X-Real-IP` headers. Set to the loopback or proxy address to ensure rate limiting operates on real client IPs.
+
+## Remaining gaps
+
+The following protections are not yet implemented:
+
 - CORS policy
-- wallet signing / on-chain payout flow
-- persistent audit log or persistent claim storage
-- admin API enablement through `app.New`
-- deep readiness checks against real DB/RPC dependencies
-
-Treat those as future work, not active defenses.
+- daily budget enforcement (`SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is loaded but not checked)
+- service-level error differentiation for rate-limit and captcha failures (currently both return `500 claim_unavailable`; a future improvement would return `429` or `403` with precise error codes)
 
 ## Deployment guidance
 
@@ -62,13 +75,13 @@ Recommended external exposure:
 
 ### Secret handling
 
-Even though the current binary does not use every secret yet, these values should still be managed as secrets:
+These values must be managed as secrets and must not appear in the repository:
 
 - `SCAVIUM_FAUCET_PRIVATE_KEY`
 - `SCAVIUM_FAUCET_ADMIN_TOKEN`
 - `SCAVIUM_FAUCET_CAPTCHA_SECRET`
 
-Recommended practice:
+None of these are logged by the binary. Recommended generation:
 
 ```bash
 openssl rand -hex 32
@@ -78,7 +91,7 @@ Use a dedicated environment file or service manager secret store, not the reposi
 
 ### Wallet hygiene
 
-When the signing path is wired later, use a dedicated faucet hot wallet with limited balance. Do not reuse treasury, validator, or deployer keys.
+Use a dedicated faucet hot wallet with limited balance. Do not reuse treasury, validator, or deployer keys.
 
 ## Practical hardening checklist
 
@@ -87,12 +100,10 @@ When the signing path is wired later, use a dedicated faucet hot wallet with lim
 - [ ] firewall off direct access to backend and RPC ports
 - [ ] keep environment files readable only by the service owner
 - [ ] leave `SCAVIUM_FAUCET_DRY_RUN=true` in development
+- [ ] set `SCAVIUM_FAUCET_TRUSTED_PROXY` to the reverse proxy address
+- [ ] set `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` for public deployments
 - [ ] rotate the admin token if it is ever exposed
-- [ ] do not assume captcha, rate limits, or budget guards are active until they are wired into the runtime
 
 ## Recommended operator stance
 
-Because the current binary lacks durable storage and several planned abuse controls, the safest interpretation is:
-
-- good for local development, tests, and documentation-backed MVP exploration
-- not yet a hardened public internet faucet without additional outer controls and future application wiring
+The binary provides persistent claim storage, real readiness probes, persistent rate limiting, captcha support, trusted-proxy IP extraction, and an active admin API. It is suitable for a testnet faucet deployment behind a reverse proxy with TLS. Remaining gaps are CORS policy and daily budget enforcement.
