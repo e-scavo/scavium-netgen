@@ -18,6 +18,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var _ domain.ClaimStore = (*Store)(nil)
+var _ domain.RateLimiter = (*Store)(nil)
+
 var ErrNotFound = errors.New("not found")
 
 type Store struct {
@@ -245,4 +248,80 @@ func formatTime(t time.Time) string {
 
 func parseTime(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, s)
+}
+
+// Allow implements domain.RateLimiter using the rate_limits table.
+// It counts requests for a given key within a fixed time window.
+// Window boundaries are aligned to the epoch (e.g. for 1h windows: 00:00, 01:00, ...).
+func (s *Store) Allow(ctx context.Context, key string, limit int, window time.Duration) (domain.RateLimitDecision, error) {
+	now := time.Now().UTC()
+	windowSecs := int64(window.Seconds())
+
+	// Align window start to epoch boundary.
+	windowStartUnix := (now.Unix() / windowSecs) * windowSecs
+	windowStart := time.Unix(windowStartUnix, 0).UTC()
+	windowStartStr := formatTime(windowStart)
+	nowStr := formatTime(now)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.RateLimitDecision{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Ensure the row exists with count=0.
+	_, err = tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO rate_limits
+			(limit_key, window_start, window_seconds, count, created_at, updated_at)
+		VALUES (?, ?, ?, 0, ?, ?)
+	`, key, windowStartStr, windowSecs, nowStr, nowStr)
+	if err != nil {
+		return domain.RateLimitDecision{}, fmt.Errorf("insert rate limit row: %w", err)
+	}
+
+	// Increment count.
+	_, err = tx.ExecContext(ctx, `
+		UPDATE rate_limits
+		SET count = count + 1, updated_at = ?
+		WHERE limit_key = ? AND window_start = ? AND window_seconds = ?
+	`, nowStr, key, windowStartStr, windowSecs)
+	if err != nil {
+		return domain.RateLimitDecision{}, fmt.Errorf("increment rate limit: %w", err)
+	}
+
+	// Read current count.
+	var count int
+	err = tx.QueryRowContext(ctx, `
+		SELECT count FROM rate_limits
+		WHERE limit_key = ? AND window_start = ? AND window_seconds = ?
+	`, key, windowStartStr, windowSecs).Scan(&count)
+	if err != nil {
+		return domain.RateLimitDecision{}, fmt.Errorf("read rate limit count: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return domain.RateLimitDecision{}, fmt.Errorf("commit rate limit tx: %w", err)
+	}
+
+	remaining := limit - count
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	windowEnd := windowStart.Add(window)
+	retryAfter := windowEnd.Sub(now)
+	if retryAfter < 0 {
+		retryAfter = 0
+	}
+
+	allowed := count <= limit
+	decision := domain.RateLimitDecision{
+		Allowed:   allowed,
+		Remaining: remaining,
+	}
+	if !allowed {
+		decision.RetryAfter = retryAfter
+		decision.Reason = fmt.Sprintf("rate limit exceeded for key %q: %d/%d in window", key, count, limit)
+	}
+	return decision, nil
 }
