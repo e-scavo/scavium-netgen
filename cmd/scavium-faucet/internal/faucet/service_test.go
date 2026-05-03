@@ -57,6 +57,12 @@ func TestInMemoryReadServiceConfig(t *testing.T) {
 	if cfg.DryRun {
 		t.Fatal("dry run = true, want false")
 	}
+	if cfg.RateLimitIPPerHour != 10 {
+		t.Fatalf("rate_limit_ip_per_hour = %d, want 10", cfg.RateLimitIPPerHour)
+	}
+	if cfg.RateLimitAddrPerDay != 3 {
+		t.Fatalf("rate_limit_addr_per_day = %d, want 3", cfg.RateLimitAddrPerDay)
+	}
 }
 
 func TestInMemoryReadServiceAddressStatus(t *testing.T) {
@@ -75,6 +81,15 @@ func TestInMemoryReadServiceAddressStatus(t *testing.T) {
 	}
 	if status.CooldownSeconds != 60 {
 		t.Fatalf("cooldown seconds = %d", status.CooldownSeconds)
+	}
+	if status.CooldownRemainingSeconds != 0 {
+		t.Fatalf("cooldown_remaining_seconds = %d, want 0 when eligible", status.CooldownRemainingSeconds)
+	}
+	if status.RateLimitIPPerHour != 10 {
+		t.Fatalf("rate_limit_ip_per_hour = %d, want 10", status.RateLimitIPPerHour)
+	}
+	if status.RateLimitAddrPerDay != 3 {
+		t.Fatalf("rate_limit_addr_per_day = %d, want 3", status.RateLimitAddrPerDay)
 	}
 }
 

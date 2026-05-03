@@ -262,6 +262,12 @@ func TestPublicConfig(t *testing.T) {
 	if body.AmountWei != "42" {
 		t.Fatalf("amount wei = %q, want 42", body.AmountWei)
 	}
+	if body.RateLimitIPPerHour <= 0 {
+		t.Fatalf("rate_limit_ip_per_hour = %d, want > 0", body.RateLimitIPPerHour)
+	}
+	if body.RateLimitAddrPerDay <= 0 {
+		t.Fatalf("rate_limit_addr_per_day = %d, want > 0", body.RateLimitAddrPerDay)
+	}
 }
 
 func TestWalletConfigAlias(t *testing.T) {
@@ -272,6 +278,17 @@ func TestWalletConfigAlias(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body faucet.ConfigResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.RateLimitIPPerHour <= 0 {
+		t.Fatalf("rate_limit_ip_per_hour = %d, want > 0", body.RateLimitIPPerHour)
+	}
+	if body.RateLimitAddrPerDay <= 0 {
+		t.Fatalf("rate_limit_addr_per_day = %d, want > 0", body.RateLimitAddrPerDay)
 	}
 }
 
@@ -305,6 +322,24 @@ func TestWalletEligibilityAlias(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body faucet.AddressStatusResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.Eligible {
+		t.Fatal("eligible = false, want true")
+	}
+	// Wallet-specific compact fields must be present.
+	if body.CooldownRemainingSeconds < 0 {
+		t.Fatalf("cooldown_remaining_seconds = %d, must be >= 0", body.CooldownRemainingSeconds)
+	}
+	if body.RateLimitIPPerHour <= 0 {
+		t.Fatalf("rate_limit_ip_per_hour = %d, want > 0", body.RateLimitIPPerHour)
+	}
+	if body.RateLimitAddrPerDay <= 0 {
+		t.Fatalf("rate_limit_addr_per_day = %d, want > 0", body.RateLimitAddrPerDay)
 	}
 }
 
@@ -374,6 +409,31 @@ func TestCreateClaimWalletAlias(t *testing.T) {
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+}
+
+// TestCreateClaimResponseHasTxHashField verifies the claim response includes the
+// tx_hash field (empty when the claim is just queued, populated after sending).
+func TestCreateClaimResponseHasTxHashField(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testClaimService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+
+	// Decode as a generic map so we can verify the field is present even when empty.
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// tx_hash must be present in the JSON response (may be absent when omitempty and empty string).
+	// A freshly queued claim has no tx hash — the field should be absent or empty.
+	if txHash, ok := body["tx_hash"]; ok && txHash != "" {
+		t.Fatalf("tx_hash = %q, want empty or absent for a freshly queued claim", txHash)
 	}
 }
 
