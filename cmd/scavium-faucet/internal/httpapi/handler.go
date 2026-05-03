@@ -17,6 +17,7 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
+	"scavium-netgen/cmd/scavium-faucet/internal/frontend"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/version"
 )
@@ -81,7 +82,9 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.HandleFunc("/api/v1/faucet/claim/", handleGetClaim(deps.ReadService, "/api/v1/faucet/claim/"))
 	mux.HandleFunc("/api/v1/faucet/address/", handleAddressStatus(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
 	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
-	mux.HandleFunc("/", handleNotFound)
+	// Unknown /api/ paths get a JSON 404; everything else is served by the frontend.
+	mux.HandleFunc("/api/", handleNotFound)
+	mux.Handle("/", frontend.Handler())
 
 	// Admin routes — all protected by bearer-token auth.
 	adminMux := http.NewServeMux()
