@@ -1,35 +1,41 @@
 # Configuration reference
 
-Configuration is loaded from environment variables at startup via `internal/config`. The table below distinguishes between values that affect the shipped binary today and values that are loaded for later stages but not yet wired into runtime behavior.
+Configuration is loaded from environment variables at startup via `internal/config`. All variables listed below are active in the current runtime unless noted as _loaded but not yet enforced_.
 
 ## Variables
 
-| Variable | Default | Current effect |
+| Variable | Default | Effect |
 |---|---|---|
-| `SCAVIUM_FAUCET_BIND_ADDR` | `127.0.0.1:18080` | Used by `main.go` as the listen address |
+| `SCAVIUM_FAUCET_BIND_ADDR` | `127.0.0.1:18080` | HTTP listen address used by `main.go` |
 | `SCAVIUM_FAUCET_PUBLIC_BASE_URL` | `http://127.0.0.1:18080` | Loaded and validated; not currently surfaced by the handler |
-| `SCAVIUM_FAUCET_RPC_URL` | `http://127.0.0.1:18545` | Loaded and validated; not actively used because readiness checks are still stubs |
-| `SCAVIUM_FAUCET_CHAIN_ID` | `31337` | Exposed by `/api/v1/config` |
+| `SCAVIUM_FAUCET_RPC_URL` | `http://127.0.0.1:18545` | Ethereum JSON-RPC endpoint; used to create `chain.Client` at startup (non-dry-run); drives `RPCCheck` and `WalletCheck` in `/ready` |
+| `SCAVIUM_FAUCET_CHAIN_ID` | `31337` | Validated against the RPC node at startup (non-dry-run); exposed by `/api/v1/config` |
 | `SCAVIUM_FAUCET_NETWORK_NAME` | `scavium-dev` | Exposed by `/api/v1/status` and `/api/v1/config` |
 | `SCAVIUM_FAUCET_SYMBOL` | `SCAV` | Exposed by `/api/v1/status` and `/api/v1/config` |
 | `SCAVIUM_FAUCET_EXPLORER_TX_URL` | empty | Exposed by `/api/v1/config` |
-| `SCAVIUM_FAUCET_AMOUNT_WEI` | `1000000000000000000` | Exposed by `/api/v1/config` and copied into created claims |
-| `SCAVIUM_FAUCET_COOLDOWN_SECONDS` | `86400` | Exposed by `/api/v1/config` and address-status responses |
-| `SCAVIUM_FAUCET_DRY_RUN` | `true` | Exposed by `/api/v1/status` and `/api/v1/config` |
-| `SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR` | `10` | Exposed by `/api/v1/config` and address-status responses; not enforced yet |
-| `SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY` | `3` | Exposed by `/api/v1/config` and address-status responses; not enforced yet |
-| `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` | empty | Loaded but not enforced yet |
-| `SCAVIUM_FAUCET_TRUSTED_PROXY` | empty | Loaded; `internal/iputil` exists, but the HTTP layer does not use it yet |
-| `SCAVIUM_FAUCET_PRIVATE_KEY` | empty | Loaded for future send/signing work; not used by the shipped binary |
-| `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` | `disabled` | Loaded only; captcha verification is not wired into the public claim endpoint yet |
-| `SCAVIUM_FAUCET_CAPTCHA_SECRET` | empty | Loaded only; not used today |
-| `SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL` | empty | Loaded only; not used today |
-| `SCAVIUM_FAUCET_MODE` | `active` | Loaded only; the current public status endpoint still reports `active` from the in-memory read service |
-| `SCAVIUM_FAUCET_ADMIN_TOKEN` | empty | Loaded by config, but `app.New` does not pass it into `httpapi.NewHandler`, so admin endpoints remain disabled in the shipped binary |
+| `SCAVIUM_FAUCET_AMOUNT_WEI` | `1000000000000000000` | Copied into each created claim; exposed by `/api/v1/config` |
+| `SCAVIUM_FAUCET_COOLDOWN_SECONDS` | `86400` | Per-address cooldown enforced by `PersistentReadService`; exposed by `/api/v1/config` and address-status responses |
+| `SCAVIUM_FAUCET_DRY_RUN` | `true` | When `true`, uses `DryRunSender` and skips RPC/wallet startup checks; exposed by `/api/v1/status` and `/api/v1/config` |
+| `SCAVIUM_FAUCET_DATABASE_PATH` | `cmd/scavium-faucet/data/scavium-faucet.db` | Path to the SQLite database file; created with parent directories if missing; migrations run automatically on open |
+| `SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR` | `10` | Maximum claims per source IP per hour; enforced by the persistent rate limiter on claim creation; exposed by `/api/v1/config` |
+| `SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY` | `3` | Maximum claims per Ethereum address per day; enforced by the persistent rate limiter on claim creation; exposed by `/api/v1/config` |
+| `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` | empty | Loaded but not yet enforced |
+| `SCAVIUM_FAUCET_TRUSTED_PROXY` | empty | When set to the reverse proxy's IP, the handler extracts the real client IP from `X-Forwarded-For` / `X-Real-IP` via `internal/iputil`; used for rate limiting and logging |
+| `SCAVIUM_FAUCET_PRIVATE_KEY` | empty | Hex-encoded signer key; required and validated at startup when `DRY_RUN=false`; used by `chain.EthSender` to sign transactions |
+| `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` | `disabled` | Selects the captcha backend: `disabled` (no check), `dev` (always pass), `hcaptcha`, `recaptcha`, or `turnstile`; active in claim creation when not `disabled` |
+| `SCAVIUM_FAUCET_CAPTCHA_SECRET` | empty | Server-side secret for the chosen captcha provider; required when provider is `hcaptcha`, `recaptcha`, or `turnstile` |
+| `SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL` | empty | Verification URL for the chosen captcha provider; required when provider is `hcaptcha`, `recaptcha`, or `turnstile` |
+| `SCAVIUM_FAUCET_MODE` | `active` | Operational mode reported by `/api/v1/status`; `active`, `paused`, or `maintenance` |
+| `SCAVIUM_FAUCET_ADMIN_TOKEN` | empty | Bearer token for `/api/v1/admin/*` endpoints; admin API is active when non-empty and uses constant-time comparison; never logged |
+| `SCAVIUM_FAUCET_WORKER_ENABLED` | `true` | Enables the background worker that processes the SQLite claim queue |
+| `SCAVIUM_FAUCET_WORKER_POLL_SECONDS` | `5` | Worker polling interval in seconds |
+| `SCAVIUM_FAUCET_WATCHER_ENABLED` | `false` (dry-run), auto `true` (non-dry-run) | Enables the background watcher that polls for on-chain confirmations; automatically enabled when `DRY_RUN=false` unless explicitly set |
+| `SCAVIUM_FAUCET_WATCHER_POLL_SECONDS` | `15` | Watcher polling interval in seconds |
+| `SCAVIUM_FAUCET_MIN_CONFIRMATIONS` | `1` | Minimum on-chain confirmations required before a claim is marked `confirmed` |
 
 ## Validation rules
 
-`Config.Validate()` currently enforces:
+`Config.Validate()` enforces:
 
 - bind address must be non-empty
 - public base URL must be non-empty
@@ -39,8 +45,10 @@ Configuration is loaded from environment variables at startup via `internal/conf
 - symbol must be non-empty
 - amount wei must be positive
 - cooldown seconds must be zero or positive
+- worker poll seconds must be positive
+- watcher poll seconds must be positive
 
-Notably, the current validator does **not** require a private key or admin token.
+Private key and admin token are not validated by `Config.Validate()`. A missing private key causes a startup error when `DRY_RUN=false`.
 
 ## Example environment
 
@@ -53,19 +61,35 @@ SCAVIUM_FAUCET_NETWORK_NAME=scavium-testnet
 SCAVIUM_FAUCET_SYMBOL=SCAV
 SCAVIUM_FAUCET_EXPLORER_TX_URL=https://explorer.example.test/tx/{txHash}
 
+SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db
 SCAVIUM_FAUCET_AMOUNT_WEI=1000000000000000000
 SCAVIUM_FAUCET_COOLDOWN_SECONDS=86400
 SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR=10
 SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY=3
-SCAVIUM_FAUCET_DRY_RUN=true
+SCAVIUM_FAUCET_DRY_RUN=false
+
+SCAVIUM_FAUCET_PRIVATE_KEY=replace-with-actual-hex-key
+
+SCAVIUM_FAUCET_WORKER_ENABLED=true
+SCAVIUM_FAUCET_WORKER_POLL_SECONDS=5
+SCAVIUM_FAUCET_WATCHER_ENABLED=true
+SCAVIUM_FAUCET_WATCHER_POLL_SECONDS=15
+SCAVIUM_FAUCET_MIN_CONFIRMATIONS=1
 
 SCAVIUM_FAUCET_TRUSTED_PROXY=127.0.0.1
 SCAVIUM_FAUCET_MODE=active
 SCAVIUM_FAUCET_ADMIN_TOKEN=replace-me
+
+# Optional captcha (disabled by default)
+# SCAVIUM_FAUCET_CAPTCHA_PROVIDER=hcaptcha
+# SCAVIUM_FAUCET_CAPTCHA_SECRET=replace-with-captcha-secret
+# SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL=https://hcaptcha.com/siteverify
 ```
 
 ## Practical notes
 
 - Keep secrets in an external environment file or service manager, not in the repository.
 - Set `SCAVIUM_FAUCET_BIND_ADDR` to loopback and terminate TLS in a reverse proxy.
-- Treat `SCAVIUM_FAUCET_ADMIN_TOKEN`, `SCAVIUM_FAUCET_PRIVATE_KEY`, and captcha secrets as sensitive even though the current binary does not use all of them yet.
+- Treat `SCAVIUM_FAUCET_ADMIN_TOKEN`, `SCAVIUM_FAUCET_PRIVATE_KEY`, and `SCAVIUM_FAUCET_CAPTCHA_SECRET` as secrets; none are logged by the binary.
+- Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to the loopback or reverse proxy address so that IP-based rate limiting uses the real client IP rather than `127.0.0.1`.
+- In dry-run mode (`DRY_RUN=true`), the `PRIVATE_KEY` is not required; `DryRunSender` is used and no on-chain transactions are submitted.
