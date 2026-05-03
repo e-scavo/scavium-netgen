@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
+	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/internal/httpapi"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 )
@@ -18,6 +19,7 @@ func New(cfg config.Config) *App {
 		Config: cfg,
 		Handler: httpapi.NewHandler(httpapi.Dependencies{
 			ReadinessChecks: ready.DefaultChecks(),
+			ReadService:     faucet.NewInMemoryReadService(cfg),
 		}),
 	}
 }
