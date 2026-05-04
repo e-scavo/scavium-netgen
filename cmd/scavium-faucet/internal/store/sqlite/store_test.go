@@ -145,6 +145,101 @@ func TestListAndLastClaimsByAddress(t *testing.T) {
 	}
 }
 
+func TestDailyClaimAmountWeiUsesUTCWindowAndIncludedStatuses(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	dayStart := time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)
+	dayEnd := dayStart.Add(24 * time.Hour)
+	included := []domain.ClaimStatus{
+		domain.ClaimStatusReceived,
+		domain.ClaimStatusValidated,
+		domain.ClaimStatusQueued,
+		domain.ClaimStatusSending,
+		domain.ClaimStatusSent,
+		domain.ClaimStatusConfirmed,
+	}
+
+	for i, status := range included {
+		claim := testClaim("included")
+		claim.ID = "included_" + string(rune('a'+i))
+		claim.Status = status
+		claim.AmountWei = big.NewInt(10)
+		claim.CreatedAt = dayStart.Add(time.Duration(i) * time.Hour)
+		claim.UpdatedAt = claim.CreatedAt
+		if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+			t.Fatalf("create included %s: %v", status, err)
+		}
+	}
+
+	subsecond := testClaim("included_subsecond")
+	subsecond.Status = domain.ClaimStatusQueued
+	subsecond.AmountWei = big.NewInt(10)
+	subsecond.CreatedAt = dayStart.Add(time.Nanosecond)
+	subsecond.UpdatedAt = subsecond.CreatedAt
+	if _, err := store.CreateClaim(context.Background(), subsecond); err != nil {
+		t.Fatalf("create subsecond included: %v", err)
+	}
+
+	excluded := testClaim("excluded_failed")
+	excluded.Status = domain.ClaimStatusFailed
+	excluded.AmountWei = big.NewInt(1000)
+	excluded.CreatedAt = dayStart.Add(time.Hour)
+	excluded.UpdatedAt = excluded.CreatedAt
+	if _, err := store.CreateClaim(context.Background(), excluded); err != nil {
+		t.Fatalf("create excluded failed: %v", err)
+	}
+
+	previousDay := testClaim("previous_day")
+	previousDay.AmountWei = big.NewInt(1000)
+	previousDay.CreatedAt = dayStart.Add(-time.Nanosecond)
+	previousDay.UpdatedAt = previousDay.CreatedAt
+	if _, err := store.CreateClaim(context.Background(), previousDay); err != nil {
+		t.Fatalf("create previous day: %v", err)
+	}
+
+	total, err := store.DailyClaimAmountWei(context.Background(), dayStart, dayEnd, included)
+	if err != nil {
+		t.Fatalf("daily claim amount: %v", err)
+	}
+	if total.Cmp(big.NewInt(70)) != 0 {
+		t.Fatalf("total = %s, want 70", total)
+	}
+}
+
+func TestCreateClaimWithIdempotencyAndDailyBudgetBlocksExceeded(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	dayStart := time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)
+	dayEnd := dayStart.Add(24 * time.Hour)
+	existing := testClaim("existing")
+	existing.AmountWei = big.NewInt(60)
+	existing.CreatedAt = dayStart.Add(time.Hour)
+	existing.UpdatedAt = existing.CreatedAt
+	if _, err := store.CreateClaim(context.Background(), existing); err != nil {
+		t.Fatalf("create existing: %v", err)
+	}
+
+	next := testClaim("next")
+	next.AmountWei = big.NewInt(50)
+	next.CreatedAt = dayStart.Add(2 * time.Hour)
+	next.UpdatedAt = next.CreatedAt
+	_, used, exceeded, err := store.CreateClaimWithIdempotencyAndDailyBudget(context.Background(), next, "", dayStart, dayEnd, big.NewInt(100), []domain.ClaimStatus{domain.ClaimStatusQueued})
+	if err != nil {
+		t.Fatalf("create with budget: %v", err)
+	}
+	if !exceeded {
+		t.Fatal("exceeded = false, want true")
+	}
+	if used.Cmp(big.NewInt(60)) != 0 {
+		t.Fatalf("used = %s, want 60", used)
+	}
+	if _, err := store.GetClaim(context.Background(), next.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("next claim err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestGetClaimNotFound(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()

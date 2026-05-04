@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"errors"
+	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -18,6 +19,11 @@ type ClaimStore interface {
 	UpdateClaimStatus(ctx context.Context, id string, status ClaimStatus, reason string) (Claim, error)
 	ListClaimsByAddress(ctx context.Context, address common.Address, limit int) ([]Claim, error)
 	LastClaimByAddress(ctx context.Context, address common.Address) (Claim, error)
+}
+
+// DailyBudgetStore reports persisted claim amounts for UTC day budget checks.
+type DailyBudgetStore interface {
+	DailyClaimAmountWei(ctx context.Context, dayStart, dayEnd time.Time, statuses []ClaimStatus) (*big.Int, error)
 }
 
 // RateLimiter evaluates whether a key can proceed within a sliding window.

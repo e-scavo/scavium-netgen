@@ -22,6 +22,14 @@ type idempotentClaimStore interface {
 	GetClaimByIdempotencyKey(ctx context.Context, idempotencyKey string) (domain.Claim, error)
 }
 
+type dailyBudgetStore interface {
+	DailyClaimAmountWei(ctx context.Context, dayStart, dayEnd time.Time, statuses []domain.ClaimStatus) (*big.Int, error)
+}
+
+type budgetedClaimStore interface {
+	CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, claim domain.Claim, idempotencyKey string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error)
+}
+
 // PersistentReadService implements ReadService using durable stores.
 type PersistentReadService struct {
 	cfg             config.Config
@@ -209,12 +217,74 @@ func (s *PersistentReadService) GetClaim(ctx context.Context, id string) (ClaimR
 }
 
 func (s *PersistentReadService) createClaim(ctx context.Context, claim domain.Claim, idempotencyKey string) (domain.Claim, error) {
+	if budget := s.cfg.DailyBudgetWei; budget != nil && budget.Sign() > 0 {
+		dayStart, dayEnd := utcDayWindow(s.now())
+		if store, ok := s.claims.(budgetedClaimStore); ok {
+			created, used, exceeded, err := store.CreateClaimWithIdempotencyAndDailyBudget(ctx, claim, idempotencyKey, dayStart, dayEnd, copyBigInt(budget), dailyBudgetStatuses())
+			if err != nil {
+				return domain.Claim{}, err
+			}
+			if exceeded {
+				return domain.Claim{}, dailyBudgetExceededError(used, copyBigInt(claim.AmountWei), copyBigInt(budget))
+			}
+			return created, nil
+		}
+		if err := s.enforceDailyBudget(ctx); err != nil {
+			return domain.Claim{}, err
+		}
+	}
+
 	if idempotencyKey != "" {
 		if store, ok := s.claims.(idempotentClaimStore); ok {
 			return store.CreateClaimWithIdempotency(ctx, claim, idempotencyKey)
 		}
 	}
 	return s.claims.CreateClaim(ctx, claim)
+}
+
+func (s *PersistentReadService) enforceDailyBudget(ctx context.Context) error {
+	budget := s.cfg.DailyBudgetWei
+	if budget == nil || budget.Sign() <= 0 {
+		return nil
+	}
+	store, ok := s.claims.(dailyBudgetStore)
+	if !ok {
+		return fmt.Errorf("daily budget store unavailable")
+	}
+
+	dayStart, dayEnd := utcDayWindow(s.now())
+	used, err := store.DailyClaimAmountWei(ctx, dayStart, dayEnd, dailyBudgetStatuses())
+	if err != nil {
+		return err
+	}
+	claimAmount := copyBigInt(s.cfg.AmountWei)
+	nextTotal := new(big.Int).Add(used, claimAmount)
+	if nextTotal.Cmp(budget) > 0 {
+		return dailyBudgetExceededError(used, claimAmount, budget)
+	}
+	return nil
+}
+
+func dailyBudgetExceededError(used, claimAmount, budget *big.Int) error {
+	reason := fmt.Sprintf("daily budget exceeded: used %s + claim %s > budget %s", used.String(), claimAmount.String(), budget.String())
+	return claimError(ErrDailyBudgetExceeded, reason)
+}
+
+func utcDayWindow(t time.Time) (time.Time, time.Time) {
+	now := t.UTC()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	return dayStart, dayStart.Add(24 * time.Hour)
+}
+
+func dailyBudgetStatuses() []domain.ClaimStatus {
+	return []domain.ClaimStatus{
+		domain.ClaimStatusReceived,
+		domain.ClaimStatusValidated,
+		domain.ClaimStatusQueued,
+		domain.ClaimStatusSending,
+		domain.ClaimStatusSent,
+		domain.ClaimStatusConfirmed,
+	}
 }
 
 func (s *PersistentReadService) cooldown(ctx context.Context, address common.Address) (int, time.Time, error) {

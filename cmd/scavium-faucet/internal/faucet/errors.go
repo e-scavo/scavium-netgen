@@ -6,11 +6,12 @@ import (
 )
 
 var (
-	ErrFaucetUnavailable = errors.New("faucet unavailable")
-	ErrCaptchaFailed     = errors.New("captcha failed")
-	ErrClaimRejected     = errors.New("claim rejected")
-	ErrCooldownActive    = errors.New("cooldown active")
-	ErrRateLimited       = errors.New("rate limited")
+	ErrFaucetUnavailable   = errors.New("faucet unavailable")
+	ErrCaptchaFailed       = errors.New("captcha failed")
+	ErrClaimRejected       = errors.New("claim rejected")
+	ErrCooldownActive      = errors.New("cooldown active")
+	ErrRateLimited         = errors.New("rate limited")
+	ErrDailyBudgetExceeded = errors.New("daily budget exceeded")
 )
 
 type ClaimError struct {

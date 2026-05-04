@@ -214,6 +214,79 @@ func TestPersistentReadServiceFailedCaptchaRejectsClaim(t *testing.T) {
 	}
 }
 
+func TestPersistentReadServiceDailyBudgetBlocksExceededClaims(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(84)
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress()}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentSecondTestAddress()}); err != nil {
+		t.Fatalf("create second claim: %v", err)
+	}
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{Address: common.HexToAddress("0xde709f2102306220921060314715629080e2fb77")})
+	if err == nil {
+		t.Fatal("third claim returned nil error")
+	}
+	if !errors.Is(err, ErrDailyBudgetExceeded) {
+		t.Fatalf("error = %v, want ErrDailyBudgetExceeded", err)
+	}
+}
+
+func TestPersistentReadServiceDailyBudgetSurvivesRecreation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "faucet.db")
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(42)
+
+	store := openPersistentTestStore(t, path)
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress()}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close first store: %v", err)
+	}
+
+	reopened := openPersistentTestStore(t, path)
+	defer reopened.Close()
+	recreatedService := newPersistentTestService(t, reopened, cfg, persistentTestNow().Add(time.Hour))
+	_, err := recreatedService.CreateClaim(context.Background(), ClaimRequest{Address: persistentSecondTestAddress()})
+	if err == nil {
+		t.Fatal("second claim returned nil error")
+	}
+	if !errors.Is(err, ErrDailyBudgetExceeded) {
+		t.Fatalf("error = %v, want ErrDailyBudgetExceeded", err)
+	}
+}
+
+func TestPersistentReadServiceDailyBudgetUsesCurrentUTCDay(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(42)
+
+	yesterday := domain.Claim{
+		ID:        "yesterday",
+		Address:   persistentTestAddress(),
+		AmountWei: big.NewInt(42),
+		Status:    domain.ClaimStatusQueued,
+		CreatedAt: persistentTestNow().Add(-24 * time.Hour),
+		UpdatedAt: persistentTestNow().Add(-24 * time.Hour),
+	}
+	if _, err := store.CreateClaim(context.Background(), yesterday); err != nil {
+		t.Fatalf("create yesterday claim: %v", err)
+	}
+
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentSecondTestAddress()}); err != nil {
+		t.Fatalf("create current day claim: %v", err)
+	}
+}
+
 func TestPersistentReadServiceAddressRateLimit(t *testing.T) {
 	store := openPersistentTestStore(t, "")
 	defer store.Close()
