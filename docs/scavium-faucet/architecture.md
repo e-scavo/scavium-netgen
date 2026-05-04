@@ -135,3 +135,9 @@ The abuse signal ledger is now treated as an operational dataset with a bounded 
 Startup wiring remains conservative: after migrations complete and before sender/worker/watchers are started, `app.NewWithLogger` prunes expired abuse signals using the configured retention window. A pruning error fails startup because it indicates the same persistence layer used by enforcement and claim intake is unhealthy.
 
 No public API route was added. The new summary contract is internal-only and exists to make Phase 16 metrics and later admin surfaces depend on a stable domain boundary instead of ad-hoc SQL.
+
+## Phase 15.close — Abuse Protection Closure
+
+The Phase 15 architecture is closed around a conservative claim-intake control loop: captcha verification, abuse signal recording, progressive signal-based enforcement, persistent rate limits, budget checks, claim persistence, and background dispatch remain ordered inside the existing runtime.
+
+No new external service boundary was added beyond the already-configured captcha provider, and no public API route was introduced for abuse operations. The internal contracts added during Phase 15 (`AbuseSignalRecorder`, `AbuseSignalCounter`, `AbuseSignalPruner`, and `AbuseSignalReporter`) now form the stable bridge into Phase 16 metrics and later Phase 18 admin surfaces.
