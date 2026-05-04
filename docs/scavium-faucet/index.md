@@ -28,6 +28,9 @@ This directory documents the **implemented project surface**, not the full roadm
 - Readiness checks are real probes against the database and queue; RPC and wallet checks activate when not in dry-run mode.
 - `AdminToken` is wired from config into the HTTP handler; setting `SCAVIUM_FAUCET_ADMIN_TOKEN` enables the `/api/v1/admin/*` endpoints.
 - Captcha verification, trusted-proxy IP extraction, user-agent forwarding, and persistent rate limits (IP per hour, address per day) are active in claim creation.
+- CORS is configurable via `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS`; exact-origin matching only, wildcard `*` rejected at startup, admin paths always excluded. Empty (default) disables CORS headers entirely.
+- Daily distribution is optionally capped by `SCAVIUM_FAUCET_DAILY_BUDGET_WEI`; the limit is enforced atomically in SQLite and resets at UTC midnight.
+- Each request produces a structured JSON access log line on stdout containing `request_id`, `method`, `path`, `status`, `duration`, and `remote_ip`; no secrets or request bodies are logged.
 
 ## Quick start
 
