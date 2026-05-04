@@ -4,6 +4,27 @@ This package prepares a **manual, review-first** VPS deployment for `scavium-fau
 
 It does **not** assume automatic production execution from this repository. All files use placeholders such as `DOMAIN`, `DEPLOY_USER`, `APP_PATH`, and `SERVICE_NAME` so an operator can review and adapt them before use.
 
+## Current deployment status (2026-05-04)
+
+Phase 14 has been executed on a real VPS and is operational.
+
+- OS: Debian GNU/Linux 13 (trixie)
+- Public domain: `faucet.testnet.scavium.network`
+- TLS: active via certbot
+- Reverse proxy: nginx active
+- Service manager: systemd unit enabled and running
+- Persistence: SQLite active at `/var/lib/scavium-faucet/scavium-faucet.db`
+- Backend bind: loopback-only (`127.0.0.1:18080`)
+
+Verified post-deploy behavior:
+
+- `/health` and `/ready` respond successfully through the deployed topology
+- claim lifecycle verified end-to-end (`queued` -> `sending` -> `confirmed`)
+- rate limiting verified with `429` responses
+- CORS policy verified
+- request logging verified
+- RPC connectivity and transaction sending verified
+
 ## Current runtime constraints
 
 Keep the deployment aligned with the current binary:
@@ -80,6 +101,8 @@ Recommended placeholder mapping:
 6. Install the reviewed systemd and nginx files manually on the VPS.
 7. Follow the certbot guide only after DNS points to the VPS and nginx is syntactically valid.
 8. Keep the Go service bound to loopback and expose only nginx on the public interface.
+
+The environment in this repository is now both a review-first reference and a record of a successful real deployment on Debian 13 for `faucet.testnet.scavium.network`.
 
 ## Manual systemd installation
 

@@ -2,6 +2,28 @@
 
 This runbook covers the faucet binary that exists today: one Go process, embedded frontend, public JSON API, SQLite-backed persistent claim state, a background worker, and real readiness probes.
 
+## Production status (2026-05-04)
+
+The faucet is live at `https://faucet.testnet.scavium.network`.
+
+Validated production topology:
+
+- Debian 13 (trixie) VPS
+- nginx reverse proxy on public HTTPS
+- systemd-managed backend service
+- certbot-managed TLS certificates
+- backend loopback bind (`127.0.0.1:18080`)
+- SQLite persistence and background worker active
+
+Validated production outcomes:
+
+- `/health` and `/ready` successful
+- claim flow successful through `queued` -> `sending` -> `confirmed`
+- rate limiting observed (`429`)
+- CORS configuration active and verified
+- request logging active in journald
+- RPC connectivity and transaction sending verified
+
 ## Build and run
 
 ```bash
@@ -111,6 +133,23 @@ systemctl status scavium-faucet
 journalctl -u scavium-faucet -n 200 --no-pager
 systemctl restart scavium-faucet
 ```
+
+## Production operation commands (executed)
+
+The following command set was used during successful production rollout and validation:
+
+- `systemctl daemon-reload`
+- `systemctl enable scavium-faucet.service`
+- `systemctl start scavium-faucet.service`
+- `systemctl status scavium-faucet.service --no-pager`
+- `nginx -t`
+- `systemctl reload nginx`
+- `certbot --nginx -d faucet.testnet.scavium.network --agree-tos --email OPS_EMAIL --redirect --dry-run`
+- `certbot --nginx -d faucet.testnet.scavium.network --agree-tos --email OPS_EMAIL --redirect`
+- `journalctl -u scavium-faucet.service -f`
+- `curl -fsS http://127.0.0.1:18080/health`
+- `curl -fsS http://127.0.0.1:18080/ready`
+- `curl -fsS https://faucet.testnet.scavium.network/health`
 
 ## Deployment notes
 
