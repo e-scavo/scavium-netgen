@@ -39,6 +39,7 @@ zip -r "$ZIP_NAME" "$PROJECT_NAME" \
      "$PROJECT_NAME/cmd/scavo_tgbot/*" \
      "$PROJECT_NAME/cmd/scavo_wallets/*" \
      "$PROJECT_NAME/bin/*" \
+     "$PROJECT_NAME/dist/*" \
      "$PROJECT_NAME/*.zip" \
      "$PROJECT_NAME/*.exe" \
      "$PROJECT_NAME/*.out"
