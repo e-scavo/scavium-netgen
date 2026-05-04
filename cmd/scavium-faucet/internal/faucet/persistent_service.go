@@ -142,7 +142,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 	}
 
 	if configuredStatus(s.cfg.FaucetMode) != domain.FaucetStatusActive {
-		return ClaimResponse{}, fmt.Errorf("faucet mode is %s", configuredStatus(s.cfg.FaucetMode))
+		return ClaimResponse{}, claimError(ErrFaucetUnavailable, fmt.Sprintf("faucet mode is %s", configuredStatus(s.cfg.FaucetMode)))
 	}
 
 	if err := s.verifyCaptcha(ctx, request); err != nil {
@@ -157,7 +157,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, err
 	}
 	if remaining > 0 {
-		return ClaimResponse{}, fmt.Errorf("address cooldown active: retry after %d seconds", remaining)
+		return ClaimResponse{}, claimRetryError(ErrCooldownActive, fmt.Sprintf("retry after %d seconds", remaining), remaining)
 	}
 
 	if err := s.enforceRateLimits(ctx, request); err != nil {
@@ -250,9 +250,9 @@ func (s *PersistentReadService) verifyCaptcha(ctx context.Context, request Claim
 		return nil
 	}
 	if decision.Reason != "" {
-		return errors.New(decision.Reason)
+		return claimError(ErrCaptchaFailed, decision.Reason)
 	}
-	return errors.New("captcha failed")
+	return claimError(ErrCaptchaFailed, "")
 }
 
 func (s *PersistentReadService) evaluateRisk(ctx context.Context, request ClaimRequest) error {
@@ -273,9 +273,9 @@ func (s *PersistentReadService) evaluateRisk(ctx context.Context, request ClaimR
 		return nil
 	}
 	if decision.Reason != "" {
-		return errors.New(decision.Reason)
+		return claimError(ErrClaimRejected, decision.Reason)
 	}
-	return errors.New("claim rejected by risk engine")
+	return claimError(ErrClaimRejected, "claim rejected by risk engine")
 }
 
 func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request ClaimRequest) error {
@@ -306,10 +306,11 @@ func (s *PersistentReadService) allowRateLimit(ctx context.Context, key string, 
 	if decision.Allowed {
 		return nil
 	}
+	retryAfterSeconds := int(math.Ceil(decision.RetryAfter.Seconds()))
 	if decision.Reason != "" {
-		return errors.New(decision.Reason)
+		return claimRetryError(ErrRateLimited, decision.Reason, retryAfterSeconds)
 	}
-	return errors.New(fallbackReason)
+	return claimRetryError(ErrRateLimited, fallbackReason, retryAfterSeconds)
 }
 
 func configuredStatus(mode string) domain.FaucetStatus {

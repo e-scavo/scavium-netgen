@@ -2,9 +2,9 @@ package faucet
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -126,8 +126,15 @@ func TestPersistentReadServiceCooldownBlocksRepeatedClaims(t *testing.T) {
 	if err == nil {
 		t.Fatal("second claim returned nil error")
 	}
-	if !strings.Contains(err.Error(), "cooldown") {
-		t.Fatalf("error = %v, want cooldown error", err)
+	if !errors.Is(err, ErrCooldownActive) {
+		t.Fatalf("error = %v, want ErrCooldownActive", err)
+	}
+	var claimErr *ClaimError
+	if !errors.As(err, &claimErr) {
+		t.Fatalf("error = %T, want ClaimError", err)
+	}
+	if claimErr.RetryAfterSeconds != 600 {
+		t.Fatalf("retry after = %d, want 600", claimErr.RetryAfterSeconds)
 	}
 }
 
@@ -168,8 +175,8 @@ func TestPersistentReadServiceRejectsInactiveMode(t *testing.T) {
 	if err == nil {
 		t.Fatal("create claim returned nil error")
 	}
-	if !strings.Contains(err.Error(), "paused") {
-		t.Fatalf("error = %v, want paused mode error", err)
+	if !errors.Is(err, ErrFaucetUnavailable) {
+		t.Fatalf("error = %v, want ErrFaucetUnavailable", err)
 	}
 }
 
@@ -202,8 +209,8 @@ func TestPersistentReadServiceFailedCaptchaRejectsClaim(t *testing.T) {
 	if err == nil {
 		t.Fatal("create claim returned nil error")
 	}
-	if !strings.Contains(err.Error(), "captcha failed") {
-		t.Fatalf("error = %v, want captcha failure", err)
+	if !errors.Is(err, ErrCaptchaFailed) {
+		t.Fatalf("error = %v, want ErrCaptchaFailed", err)
 	}
 }
 
@@ -225,8 +232,8 @@ func TestPersistentReadServiceAddressRateLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("second claim returned nil error")
 	}
-	if !strings.Contains(err.Error(), "rate limit") {
-		t.Fatalf("error = %v, want rate limit error", err)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("error = %v, want ErrRateLimited", err)
 	}
 }
 
@@ -252,8 +259,8 @@ func TestPersistentReadServiceIPRateLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("second claim returned nil error")
 	}
-	if !strings.Contains(err.Error(), "rate limit") {
-		t.Fatalf("error = %v, want rate limit error", err)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("error = %v, want ErrRateLimited", err)
 	}
 }
 
@@ -279,8 +286,8 @@ func TestPersistentReadServiceFingerprintRateLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("second claim returned nil error")
 	}
-	if !strings.Contains(err.Error(), "rate limit") {
-		t.Fatalf("error = %v, want rate limit error", err)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("error = %v, want ErrRateLimited", err)
 	}
 }
 
@@ -299,8 +306,8 @@ func TestPersistentReadServiceRiskEngineRejectsClaim(t *testing.T) {
 	if err == nil {
 		t.Fatal("create claim returned nil error")
 	}
-	if !strings.Contains(err.Error(), "risk rejected") {
-		t.Fatalf("error = %v, want risk rejection", err)
+	if !errors.Is(err, ErrClaimRejected) {
+		t.Fatalf("error = %v, want ErrClaimRejected", err)
 	}
 }
 
