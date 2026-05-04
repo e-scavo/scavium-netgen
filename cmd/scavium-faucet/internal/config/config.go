@@ -42,6 +42,7 @@ const (
 	// EnvCaptchaProvider selects the captcha backend: "disabled", "dev",
 	// "hcaptcha", "recaptcha", or "turnstile".
 	EnvCaptchaProvider  = "SCAVIUM_FAUCET_CAPTCHA_PROVIDER"
+	EnvCaptchaSiteKey   = "SCAVIUM_FAUCET_CAPTCHA_SITE_KEY"
 	EnvCaptchaSecret    = "SCAVIUM_FAUCET_CAPTCHA_SECRET"
 	EnvCaptchaVerifyURL = "SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL"
 
@@ -84,6 +85,8 @@ type Config struct {
 	// Captcha settings.
 	// CaptchaProvider selects the backend.  Defaults to "disabled".
 	CaptchaProvider string
+	// CaptchaSiteKey is the public browser-side site key for the chosen provider.
+	CaptchaSiteKey string
 	// CaptchaSecret is the server-side secret for the chosen provider.
 	// Never log this value.
 	CaptchaSecret    string
@@ -218,7 +221,8 @@ func FromEnv(lookup func(string) string) (Config, error) {
 		cfg.MinConfirmations = v
 	}
 
-	cfg.CaptchaProvider = envOrDefault(lookup, EnvCaptchaProvider, cfg.CaptchaProvider)
+	cfg.CaptchaProvider = strings.ToLower(envOrDefault(lookup, EnvCaptchaProvider, cfg.CaptchaProvider))
+	cfg.CaptchaSiteKey = strings.TrimSpace(lookup(EnvCaptchaSiteKey))
 	cfg.CaptchaSecret = strings.TrimSpace(lookup(EnvCaptchaSecret))
 	cfg.CaptchaVerifyURL = envOrDefault(lookup, EnvCaptchaVerifyURL, cfg.CaptchaVerifyURL)
 	cfg.FaucetMode = envOrDefault(lookup, EnvFaucetMode, cfg.FaucetMode)
@@ -293,6 +297,21 @@ func (c Config) Validate() error {
 			errs = append(errs, errors.New("CORS allowed origins must not contain wildcard"))
 		}
 	}
+	provider := strings.TrimSpace(strings.ToLower(c.CaptchaProvider))
+	switch provider {
+	case "", "disabled", "dev", "hcaptcha", "recaptcha", "turnstile":
+	default:
+		errs = append(errs, fmt.Errorf("unsupported captcha provider %q", c.CaptchaProvider))
+	}
+	if provider == "hcaptcha" || provider == "recaptcha" || provider == "turnstile" {
+		if strings.TrimSpace(c.CaptchaSiteKey) == "" {
+			errs = append(errs, fmt.Errorf("captcha provider %q requires site key", provider))
+		}
+		if strings.TrimSpace(c.CaptchaSecret) == "" {
+			errs = append(errs, fmt.Errorf("captcha provider %q requires secret", provider))
+		}
+	}
+
 	if c.WorkerPollSeconds <= 0 {
 		errs = append(errs, errors.New("worker poll seconds must be positive"))
 	}

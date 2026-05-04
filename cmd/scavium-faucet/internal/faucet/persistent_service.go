@@ -110,6 +110,8 @@ func (s *PersistentReadService) Config(context.Context) (ConfigResponse, error) 
 		DryRun:              s.cfg.DryRun,
 		RateLimitIPPerHour:  s.cfg.RateLimitIPPerHour,
 		RateLimitAddrPerDay: s.cfg.RateLimitAddrPerDay,
+		CaptchaProvider:     s.cfg.CaptchaProvider,
+		CaptchaSiteKey:      s.cfg.CaptchaSiteKey,
 	}, nil
 }
 
