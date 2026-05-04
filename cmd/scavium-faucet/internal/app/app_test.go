@@ -104,6 +104,25 @@ func TestAdminTokenIsPassedToHandler(t *testing.T) {
 	}
 }
 
+func TestCORSAllowedOriginsArePassedToHandler(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.CORSAllowedOrigins = []string{"https://wallet.example.test"}
+	application := newTestApp(t, cfg)
+	defer application.Close(context.Background()) //nolint:errcheck
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req.Header.Set("Origin", "https://wallet.example.test")
+	rec := httptest.NewRecorder()
+	application.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://wallet.example.test" {
+		t.Fatalf("access-control-allow-origin = %q", got)
+	}
+}
+
 func TestDryRunStartsWithoutRPCOrPrivateKey(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.DryRun = true

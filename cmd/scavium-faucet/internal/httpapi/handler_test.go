@@ -93,6 +93,107 @@ func TestRequestIDMiddlewareGeneratesMissingRequestID(t *testing.T) {
 	}
 }
 
+func TestCORSDisabledByDefault(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req.Header.Set("Origin", "https://wallet.example.test")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("access-control-allow-origin = %q, want empty", got)
+	}
+	if got := rec.Header().Get("Vary"); got != "" {
+		t.Fatalf("vary = %q, want empty", got)
+	}
+}
+
+func TestCORSAllowsExactOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req.Header.Set("Origin", "https://wallet.example.test")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testReadService(),
+		CORSOrigins: []string{"https://wallet.example.test", "https://faucet.example.test"},
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://wallet.example.test" {
+		t.Fatalf("access-control-allow-origin = %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); got != "GET, POST, OPTIONS" {
+		t.Fatalf("access-control-allow-methods = %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); got != "Content-Type, Idempotency-Key, Authorization, X-Request-ID" {
+		t.Fatalf("access-control-allow-headers = %q", got)
+	}
+	if got := rec.Header().Get("Vary"); got != "Origin" {
+		t.Fatalf("vary = %q, want Origin", got)
+	}
+}
+
+func TestCORSRejectsNonExactOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req.Header.Set("Origin", "https://evil.example.test")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testReadService(),
+		CORSOrigins: []string{"https://wallet.example.test"},
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("access-control-allow-origin = %q, want empty", got)
+	}
+}
+
+func TestCORSPreflightForAllowedOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/claim", nil)
+	req.Header.Set("Origin", "https://wallet.example.test")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testReadService(),
+		CORSOrigins: []string{"https://wallet.example.test"},
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://wallet.example.test" {
+		t.Fatalf("access-control-allow-origin = %q", got)
+	}
+	if got := rec.Header().Get(requestIDHeader); got != "" {
+		t.Fatalf("request id header = %q, want empty for short-circuited preflight", got)
+	}
+}
+
+func TestCORSSkipsAdminPaths(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard", nil)
+	req.Header.Set("Origin", "https://wallet.example.test")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testReadService(),
+		AdminToken:  testAdminToken,
+		CORSOrigins: []string{"https://wallet.example.test"},
+	}).ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("access-control-allow-origin = %q, want empty", got)
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestNotFoundUsesErrorEnvelope(t *testing.T) {
 	// Non-API paths now serve the frontend; /api/ paths return JSON 404.
 	req := httptest.NewRequest(http.MethodGet, "/api/missing", nil)
@@ -490,6 +591,32 @@ func TestCreateClaimMapsServiceErrors(t *testing.T) {
 				t.Fatalf("code = %q, want %q", body.Code, tt.wantCode)
 			}
 		})
+	}
+}
+
+func TestCreateClaimErrorMappingWithCORS(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://wallet.example.test")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: &failingClaimService{err: &faucet.ClaimError{Kind: faucet.ErrCaptchaFailed, Reason: "captcha failed"}},
+		CORSOrigins: []string{"https://wallet.example.test"},
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://wallet.example.test" {
+		t.Fatalf("access-control-allow-origin = %q", got)
+	}
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "captcha_failed" {
+		t.Fatalf("code = %q, want captcha_failed", body.Code)
 	}
 }
 

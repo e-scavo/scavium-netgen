@@ -28,6 +28,7 @@ const (
 	EnvRateLimitAddrPerDay = "SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY"
 	EnvDailyBudgetWei      = "SCAVIUM_FAUCET_DAILY_BUDGET_WEI"
 	EnvTrustedProxy        = "SCAVIUM_FAUCET_TRUSTED_PROXY"
+	EnvCORSAllowedOrigins  = "SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS"
 	EnvWorkerEnabled       = "SCAVIUM_FAUCET_WORKER_ENABLED"
 	EnvWorkerPollSeconds   = "SCAVIUM_FAUCET_WORKER_POLL_SECONDS"
 	EnvWatcherEnabled      = "SCAVIUM_FAUCET_WATCHER_ENABLED"
@@ -70,6 +71,7 @@ type Config struct {
 	RateLimitAddrPerDay int
 	DailyBudgetWei      *big.Int
 	TrustedProxy        string
+	CORSAllowedOrigins  []string
 	WorkerEnabled       bool
 	WorkerPollSeconds   int
 	WatcherEnabled      bool
@@ -175,6 +177,7 @@ func FromEnv(lookup func(string) string) (Config, error) {
 	}
 
 	cfg.TrustedProxy = strings.TrimSpace(lookup(EnvTrustedProxy))
+	cfg.CORSAllowedOrigins = splitCommaList(lookup(EnvCORSAllowedOrigins))
 	cfg.PrivateKeyHex = strings.TrimSpace(lookup(EnvPrivateKey))
 
 	if raw := strings.TrimSpace(lookup(EnvWorkerEnabled)); raw != "" {
@@ -242,6 +245,7 @@ func Defaults() Config {
 		RateLimitAddrPerDay: 3,
 		DailyBudgetWei:      nil,
 		TrustedProxy:        "",
+		CORSAllowedOrigins:  nil,
 		WorkerEnabled:       true,
 		WorkerPollSeconds:   5,
 		WatcherEnabled:      false,
@@ -284,6 +288,11 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.DatabasePath) == "" {
 		errs = append(errs, errors.New("database path is required"))
 	}
+	for _, origin := range c.CORSAllowedOrigins {
+		if strings.TrimSpace(origin) == "*" {
+			errs = append(errs, errors.New("CORS allowed origins must not contain wildcard"))
+		}
+	}
 	if c.WorkerPollSeconds <= 0 {
 		errs = append(errs, errors.New("worker poll seconds must be positive"))
 	}
@@ -303,4 +312,18 @@ func envOrDefault(lookup func(string) string, key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func splitCommaList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }

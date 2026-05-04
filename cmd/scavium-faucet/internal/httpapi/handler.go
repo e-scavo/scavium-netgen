@@ -59,6 +59,9 @@ type Dependencies struct {
 	// TrustedProxy enables X-Forwarded-For/X-Real-IP processing when RemoteAddr
 	// matches this proxy address.
 	TrustedProxy string
+	// CORSOrigins lists exact origins allowed for public API CORS.
+	// Empty means CORS is disabled and no CORS headers are emitted.
+	CORSOrigins []string
 }
 
 // NewHandler builds the public and admin HTTP routes for the faucet service.
@@ -104,7 +107,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux.HandleFunc("/api/v1/admin/audit", handleAdminAuditLog(deps.AdminService))
 	mux.Handle("/api/v1/admin/", admin.TokenAuthMiddleware(deps.AdminToken, adminMux))
 
-	return RequestIDMiddleware(mux)
+	return CORSHandler(RequestIDMiddleware(mux), deps.CORSOrigins)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
