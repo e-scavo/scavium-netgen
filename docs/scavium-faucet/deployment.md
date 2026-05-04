@@ -25,6 +25,17 @@ Verified post-deploy behavior:
 - request logging verified
 - RPC connectivity and transaction sending verified
 
+## Production Deployment Status (May 2026)
+
+Final production hardening validation confirms the current live posture:
+
+- TLS auto-renewal fully verified (`certbot renew --dry-run` completed successfully)
+- `certbot.timer` is active for scheduled renewal checks
+- renewal deploy hook is present at `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh`
+- UFW is installed and active with default deny incoming
+- allowed UFW ports are limited to `22/tcp`, `80/tcp`, and `443/tcp`
+- backend remains isolated on loopback-only bind (`127.0.0.1:18080`)
+
 ## Current runtime constraints
 
 Keep the deployment aligned with the current binary:

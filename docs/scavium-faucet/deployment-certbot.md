@@ -86,6 +86,17 @@ Typical post-renew hook:
 sudo systemctl reload nginx
 ```
 
+## Production verification (May 2026)
+
+The production host `faucet.testnet.scavium.network` has been verified with:
+
+- successful `certbot renew --dry-run` execution (no timeout)
+- active `certbot.timer`
+- deploy hook present at `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh`
+- nginx reload path confirmed via deploy hook
+
+TLS auto-renewal is validated and operational.
+
 ## Common failure points
 
 - DNS still points elsewhere
