@@ -418,6 +418,81 @@ func TestCreateClaimWalletAlias(t *testing.T) {
 	}
 }
 
+func TestCreateClaimMapsServiceErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "faucet unavailable",
+			path:       "/api/v1/claim",
+			err:        &faucet.ClaimError{Kind: faucet.ErrFaucetUnavailable, Reason: "faucet mode is paused"},
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "faucet_unavailable",
+		},
+		{
+			name:       "captcha failed",
+			path:       "/api/v1/claim",
+			err:        &faucet.ClaimError{Kind: faucet.ErrCaptchaFailed, Reason: "captcha failed"},
+			wantStatus: http.StatusUnprocessableEntity,
+			wantCode:   "captcha_failed",
+		},
+		{
+			name:       "risk rejected",
+			path:       "/api/v1/claim",
+			err:        &faucet.ClaimError{Kind: faucet.ErrClaimRejected, Reason: "blocklisted address"},
+			wantStatus: http.StatusForbidden,
+			wantCode:   "claim_rejected",
+		},
+		{
+			name:       "cooldown active",
+			path:       "/api/v1/claim",
+			err:        &faucet.ClaimError{Kind: faucet.ErrCooldownActive, Reason: "retry after 30 seconds", RetryAfterSeconds: 30},
+			wantStatus: http.StatusTooManyRequests,
+			wantCode:   "rate_limited",
+		},
+		{
+			name:       "rate limited wallet alias",
+			path:       "/api/v1/faucet/claim",
+			err:        &faucet.ClaimError{Kind: faucet.ErrRateLimited, Reason: "IP rate limit exceeded"},
+			wantStatus: http.StatusTooManyRequests,
+			wantCode:   "rate_limited",
+		},
+		{
+			name:       "internal error",
+			path:       "/api/v1/claim",
+			err:        fmt.Errorf("store unavailable"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "claim_unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			NewHandler(Dependencies{ReadService: &failingClaimService{err: tt.err}}).ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status code = %d, want %d", rec.Code, tt.wantStatus)
+			}
+
+			var body ErrorEnvelope
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body.Code != tt.wantCode {
+				t.Fatalf("code = %q, want %q", body.Code, tt.wantCode)
+			}
+		})
+	}
+}
+
 func TestCreateClaimPassesSecuritySignals(t *testing.T) {
 	service := &recordingClaimService{}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{
@@ -672,6 +747,30 @@ func (s *recordingClaimService) CreateClaim(_ context.Context, request faucet.Cl
 }
 
 func (s *recordingClaimService) GetClaim(context.Context, string) (faucet.ClaimResponse, bool, error) {
+	return faucet.ClaimResponse{}, false, nil
+}
+
+type failingClaimService struct {
+	err error
+}
+
+func (s *failingClaimService) Status(context.Context) (faucet.StatusResponse, error) {
+	return faucet.StatusResponse{}, nil
+}
+
+func (s *failingClaimService) Config(context.Context) (faucet.ConfigResponse, error) {
+	return faucet.ConfigResponse{}, nil
+}
+
+func (s *failingClaimService) AddressStatus(context.Context, common.Address) (faucet.AddressStatusResponse, error) {
+	return faucet.AddressStatusResponse{}, nil
+}
+
+func (s *failingClaimService) CreateClaim(context.Context, faucet.ClaimRequest) (faucet.ClaimResponse, error) {
+	return faucet.ClaimResponse{}, s.err
+}
+
+func (s *failingClaimService) GetClaim(context.Context, string) (faucet.ClaimResponse, bool, error) {
 	return faucet.ClaimResponse{}, false, nil
 }
 

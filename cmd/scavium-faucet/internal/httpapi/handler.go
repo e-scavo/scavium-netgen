@@ -254,12 +254,47 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string) http
 			Fingerprint:    strings.TrimSpace(body.Fingerprint),
 		})
 		if err != nil {
-			WriteError(w, r, http.StatusInternalServerError, "claim_unavailable", "claim unavailable", nil)
+			handleCreateClaimError(w, r, err)
 			return
 		}
 
 		WriteJSON(w, http.StatusAccepted, claim)
 	}
+}
+
+func handleCreateClaimError(w http.ResponseWriter, r *http.Request, err error) {
+	details := claimErrorDetails(err)
+	switch {
+	case errors.Is(err, faucet.ErrFaucetUnavailable):
+		WriteError(w, r, http.StatusServiceUnavailable, "faucet_unavailable", "faucet unavailable", details)
+	case errors.Is(err, faucet.ErrCaptchaFailed):
+		WriteError(w, r, http.StatusUnprocessableEntity, "captcha_failed", "captcha failed", details)
+	case errors.Is(err, faucet.ErrClaimRejected):
+		WriteError(w, r, http.StatusForbidden, "claim_rejected", "claim rejected", details)
+	case errors.Is(err, faucet.ErrCooldownActive), errors.Is(err, faucet.ErrRateLimited):
+		WriteError(w, r, http.StatusTooManyRequests, "rate_limited", "rate limited", details)
+	default:
+		WriteError(w, r, http.StatusInternalServerError, "claim_unavailable", "claim unavailable", nil)
+	}
+}
+
+func claimErrorDetails(err error) map[string]any {
+	var claimErr *faucet.ClaimError
+	if !errors.As(err, &claimErr) {
+		return nil
+	}
+
+	details := map[string]any{}
+	if claimErr.Reason != "" {
+		details["reason"] = claimErr.Reason
+	}
+	if claimErr.RetryAfterSeconds > 0 {
+		details["retry_after_seconds"] = claimErr.RetryAfterSeconds
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return details
 }
 
 func handleGetClaim(readService faucet.ReadService, prefix string) http.HandlerFunc {
