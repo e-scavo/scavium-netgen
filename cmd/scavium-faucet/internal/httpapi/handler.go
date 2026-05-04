@@ -67,6 +67,8 @@ type Dependencies struct {
 	CORSOrigins []string
 	// Logger receives production-safe request logs when provided.
 	Logger *observability.Logger
+	// Metrics receives lightweight in-process runtime counters when provided.
+	Metrics *observability.RuntimeMetrics
 }
 
 // NewHandler builds the public and admin HTTP routes for the faucet service.
@@ -80,6 +82,9 @@ func NewHandler(deps Dependencies) http.Handler {
 	if deps.VersionInfo == (version.Info{}) {
 		deps.VersionInfo = version.Current()
 	}
+	if deps.Metrics == nil {
+		deps.Metrics = observability.NewRuntimeMetrics(deps.VersionInfo)
+	}
 	if deps.AdminService == nil {
 		deps.AdminService = admin.NewInMemoryAdminService()
 	}
@@ -89,12 +94,12 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.HandleFunc("/ready", handleReady(deps.ReadinessChecks))
 	mux.HandleFunc("/api/v1/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/config", handleFaucetConfig(deps.ReadService))
-	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger))
+	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger, deps.Metrics))
 	mux.HandleFunc("/api/v1/claim/", handleGetClaim(deps.ReadService, "/api/v1/claim/"))
 	mux.HandleFunc("/api/v1/address/", handleAddressStatus(deps.ReadService, "/api/v1/address/", "/status"))
 	mux.HandleFunc("/api/v1/faucet/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/config", handleFaucetConfig(deps.ReadService))
-	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger))
+	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger, deps.Metrics))
 	mux.HandleFunc("/api/v1/faucet/claim/", handleGetClaim(deps.ReadService, "/api/v1/faucet/claim/"))
 	mux.HandleFunc("/api/v1/faucet/address/", handleAddressStatus(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
 	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
@@ -105,6 +110,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	// Admin routes — all protected by bearer-token auth.
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("/api/v1/admin/dashboard", handleAdminDashboard(deps.AdminService))
+	adminMux.HandleFunc("/api/v1/admin/metrics", handleAdminMetrics(deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/claims", handleAdminListClaims(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, "/api/v1/admin/claim/"))
 	adminMux.HandleFunc("/api/v1/admin/faucet/mode", handleAdminSetMode(deps.AdminService))
@@ -231,7 +237,7 @@ func handleAddressStatus(readService faucet.ReadService, prefix, suffix string) 
 	}
 }
 
-func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logger *observability.Logger) http.HandlerFunc {
+func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logger *observability.Logger, metrics *observability.RuntimeMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -268,11 +274,13 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 
 		claim, err := readService.CreateClaim(r.Context(), claimRequest)
 		if err != nil {
+			metrics.IncClaimRejected(claimErrorCode(err))
 			logClaimRejected(logger, r, claimRequest, err)
 			handleCreateClaimError(w, r, err)
 			return
 		}
 
+		metrics.IncClaimAccepted()
 		logClaimAccepted(logger, r, claimRequest, claim)
 		WriteJSON(w, http.StatusAccepted, claim)
 	}
@@ -501,6 +509,18 @@ func decodeNoTrailingTokens(decoder *json.Decoder, v any) error {
 }
 
 // --- Admin handlers --------------------------------------------------------
+
+func handleAdminMetrics(metrics *observability.RuntimeMetrics) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, metrics.Snapshot(time.Now().UTC()))
+	}
+}
 
 func actorFromRequest(r *http.Request) string {
 	addr := r.RemoteAddr
