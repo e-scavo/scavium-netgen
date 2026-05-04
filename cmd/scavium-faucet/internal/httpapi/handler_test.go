@@ -26,6 +26,7 @@ import (
 func TestHealth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	req.Header.Set(requestIDHeader, "test-request-id")
+	req.Header.Set(correlationIDHeader, "test-correlation-id")
 	rec := httptest.NewRecorder()
 
 	NewHandler(Dependencies{}).ServeHTTP(rec, req)
@@ -38,6 +39,9 @@ func TestHealth(t *testing.T) {
 	}
 	if got := rec.Header().Get(requestIDHeader); got != "test-request-id" {
 		t.Fatalf("request id header = %q, want test-request-id", got)
+	}
+	if got := rec.Header().Get(correlationIDHeader); got != "test-correlation-id" {
+		t.Fatalf("correlation id header = %q, want test-correlation-id", got)
 	}
 
 	var body healthResponse
@@ -95,11 +99,24 @@ func TestRequestIDMiddlewareGeneratesMissingRequestID(t *testing.T) {
 	}
 }
 
+func TestRequestIDMiddlewareDefaultsCorrelationIDToRequestID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set(requestIDHeader, "test-request-id")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{}).ServeHTTP(rec, req)
+
+	if got := rec.Header().Get(correlationIDHeader); got != "test-request-id" {
+		t.Fatalf("correlation id header = %q, want test-request-id", got)
+	}
+}
+
 func TestRequestLoggingMiddlewareWritesSafeFields(t *testing.T) {
 	var logs bytes.Buffer
 	req := httptest.NewRequest(http.MethodGet, "/health?private_key=do-not-log", nil)
 	req.RemoteAddr = "10.0.0.1:4567"
 	req.Header.Set(requestIDHeader, "test-request-id")
+	req.Header.Set(correlationIDHeader, "test-correlation-id")
 	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.1")
 	rec := httptest.NewRecorder()
 
@@ -121,6 +138,9 @@ func TestRequestLoggingMiddlewareWritesSafeFields(t *testing.T) {
 	}
 	if entry["request_id"] != "test-request-id" {
 		t.Fatalf("request_id = %q", entry["request_id"])
+	}
+	if entry["correlation_id"] != "test-correlation-id" {
+		t.Fatalf("correlation_id = %q", entry["correlation_id"])
 	}
 	if entry["method"] != http.MethodGet {
 		t.Fatalf("method = %q", entry["method"])
@@ -177,6 +197,75 @@ func TestRequestLoggingMiddlewareDoesNotLogClaimPayload(t *testing.T) {
 	}
 }
 
+func TestCreateClaimLogsAcceptedClaimFlowWithCorrelationID(t *testing.T) {
+	var logs bytes.Buffer
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{
+		"address":"0x52908400098527886E0F7030069857D2E4169EE7",
+		"captcha_token":"captcha-secret-value",
+		"fingerprint":"fingerprint-secret-value"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(requestIDHeader, "test-request-id")
+	req.Header.Set(correlationIDHeader, "test-correlation-id")
+	req.Header.Set(idempotencyKeyHeader, "idempotency-secret")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testClaimService(),
+		Logger:      observability.NewLogger(&logs),
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	var claimLog map[string]any
+	for _, entry := range entries {
+		if entry["message"] == "claim accepted" {
+			claimLog = entry
+			break
+		}
+	}
+	if claimLog == nil {
+		t.Fatalf("claim accepted log not found in %#v", entries)
+	}
+	if claimLog["request_id"] != "test-request-id" {
+		t.Fatalf("request_id = %q", claimLog["request_id"])
+	}
+	if claimLog["correlation_id"] != "test-correlation-id" {
+		t.Fatalf("correlation_id = %q", claimLog["correlation_id"])
+	}
+	if claimLog["claim_id"] != "claim_test" {
+		t.Fatalf("claim_id = %q", claimLog["claim_id"])
+	}
+	if claimLog["has_idempotency_key"] != true {
+		t.Fatalf("has_idempotency_key = %v", claimLog["has_idempotency_key"])
+	}
+	if claimLog["has_fingerprint"] != true {
+		t.Fatalf("has_fingerprint = %v", claimLog["has_fingerprint"])
+	}
+	if claimLog["captcha_token_present"] != true {
+		t.Fatalf("captcha_token_present = %v", claimLog["captcha_token_present"])
+	}
+}
+
+func decodeLogEntries(t *testing.T, data []byte) []map[string]any {
+	t.Helper()
+	var entries []map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal(line, &entry); err != nil {
+			t.Fatalf("decode log entry: %v", err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
 func TestCORSDisabledByDefault(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
 	req.Header.Set("Origin", "https://wallet.example.test")
@@ -211,7 +300,7 @@ func TestCORSAllowsExactOrigin(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Methods"); got != "GET, POST, OPTIONS" {
 		t.Fatalf("access-control-allow-methods = %q", got)
 	}
-	if got := rec.Header().Get("Access-Control-Allow-Headers"); got != "Content-Type, Idempotency-Key, Authorization, X-Request-ID" {
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); got != "Content-Type, Idempotency-Key, Authorization, X-Request-ID, X-Correlation-ID" {
 		t.Fatalf("access-control-allow-headers = %q", got)
 	}
 	if got := rec.Header().Get("Vary"); got != "Origin" {

@@ -25,9 +25,11 @@ import (
 )
 
 const requestIDHeader = "X-Request-ID"
+const correlationIDHeader = "X-Correlation-ID"
 const idempotencyKeyHeader = "Idempotency-Key"
 
 type requestIDContextKey struct{}
+type correlationIDContextKey struct{}
 
 type healthResponse struct {
 	Status string `json:"status"`
@@ -87,12 +89,12 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.HandleFunc("/ready", handleReady(deps.ReadinessChecks))
 	mux.HandleFunc("/api/v1/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/config", handleFaucetConfig(deps.ReadService))
-	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy))
+	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger))
 	mux.HandleFunc("/api/v1/claim/", handleGetClaim(deps.ReadService, "/api/v1/claim/"))
 	mux.HandleFunc("/api/v1/address/", handleAddressStatus(deps.ReadService, "/api/v1/address/", "/status"))
 	mux.HandleFunc("/api/v1/faucet/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/config", handleFaucetConfig(deps.ReadService))
-	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy))
+	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger))
 	mux.HandleFunc("/api/v1/faucet/claim/", handleGetClaim(deps.ReadService, "/api/v1/faucet/claim/"))
 	mux.HandleFunc("/api/v1/faucet/address/", handleAddressStatus(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
 	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
@@ -229,7 +231,7 @@ func handleAddressStatus(readService faucet.ReadService, prefix, suffix string) 
 	}
 }
 
-func handleCreateClaim(readService faucet.ReadService, trustedProxy string) http.HandlerFunc {
+func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logger *observability.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -255,19 +257,23 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string) http
 			return
 		}
 
-		claim, err := readService.CreateClaim(r.Context(), faucet.ClaimRequest{
+		claimRequest := faucet.ClaimRequest{
 			Address:        address,
 			IdempotencyKey: strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)),
 			RemoteIP:       iputil.RealIP(r, trustedProxy),
 			UserAgent:      r.UserAgent(),
 			CaptchaToken:   strings.TrimSpace(body.CaptchaToken),
 			Fingerprint:    strings.TrimSpace(body.Fingerprint),
-		})
+		}
+
+		claim, err := readService.CreateClaim(r.Context(), claimRequest)
 		if err != nil {
+			logClaimRejected(logger, r, claimRequest, err)
 			handleCreateClaimError(w, r, err)
 			return
 		}
 
+		logClaimAccepted(logger, r, claimRequest, claim)
 		WriteJSON(w, http.StatusAccepted, claim)
 	}
 }
@@ -309,6 +315,61 @@ func claimErrorDetails(err error) map[string]any {
 	return details
 }
 
+func logClaimAccepted(logger *observability.Logger, r *http.Request, request faucet.ClaimRequest, claim faucet.ClaimResponse) {
+	if logger == nil {
+		return
+	}
+	fields := claimLogFields(r, request)
+	fields["claim_id"] = claim.ID
+	fields["claim_status"] = string(claim.Status)
+	logger.Info("claim accepted", fields)
+}
+
+func logClaimRejected(logger *observability.Logger, r *http.Request, request faucet.ClaimRequest, err error) {
+	if logger == nil {
+		return
+	}
+	fields := claimLogFields(r, request)
+	fields["error_code"] = claimErrorCode(err)
+	if details := claimErrorDetails(err); details != nil {
+		if reason, ok := details["reason"].(string); ok && reason != "" {
+			fields["reason"] = reason
+		}
+		if retryAfter, ok := details["retry_after_seconds"]; ok {
+			fields["retry_after_seconds"] = retryAfter
+		}
+	}
+	logger.Info("claim rejected", fields)
+}
+
+func claimLogFields(r *http.Request, request faucet.ClaimRequest) map[string]any {
+	return map[string]any{
+		"request_id":            RequestID(r),
+		"correlation_id":        CorrelationID(r),
+		"remote_ip":             request.RemoteIP,
+		"has_idempotency_key":   request.IdempotencyKey != "",
+		"has_fingerprint":       request.Fingerprint != "",
+		"captcha_token_present": request.CaptchaToken != "",
+	}
+}
+
+func claimErrorCode(err error) string {
+	switch {
+	case errors.Is(err, faucet.ErrFaucetUnavailable):
+		return "faucet_unavailable"
+	case errors.Is(err, faucet.ErrCaptchaFailed):
+		return "captcha_failed"
+	case errors.Is(err, faucet.ErrClaimRejected):
+		return "claim_rejected"
+	case errors.Is(err, faucet.ErrDailyBudgetExceeded):
+		return "daily_budget_exceeded"
+	case errors.Is(err, faucet.ErrCooldownActive), errors.Is(err, faucet.ErrRateLimited):
+		return "rate_limited"
+	default:
+		return "claim_unavailable"
+	}
+}
+
 func handleGetClaim(readService faucet.ReadService, prefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -337,16 +398,24 @@ func handleGetClaim(readService faucet.ReadService, prefix string) http.HandlerF
 	}
 }
 
-// RequestIDMiddleware ensures each request carries a stable request ID.
+// RequestIDMiddleware ensures each request carries stable request and correlation IDs.
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := r.Header.Get(requestIDHeader)
+		requestID := strings.TrimSpace(r.Header.Get(requestIDHeader))
 		if requestID == "" {
 			requestID = newRequestID()
 		}
 
+		correlationID := strings.TrimSpace(r.Header.Get(correlationIDHeader))
+		if correlationID == "" {
+			correlationID = requestID
+		}
+
 		w.Header().Set(requestIDHeader, requestID)
+		w.Header().Set(correlationIDHeader, correlationID)
+
 		ctx := context.WithValue(r.Context(), requestIDContextKey{}, requestID)
+		ctx = context.WithValue(ctx, correlationIDContextKey{}, correlationID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -355,6 +424,12 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 func RequestID(r *http.Request) string {
 	requestID, _ := r.Context().Value(requestIDContextKey{}).(string)
 	return requestID
+}
+
+// CorrelationID returns the correlation ID attached by RequestIDMiddleware.
+func CorrelationID(r *http.Request) string {
+	correlationID, _ := r.Context().Value(correlationIDContextKey{}).(string)
+	return correlationID
 }
 
 // WriteJSON writes body as JSON with the provided HTTP status code.

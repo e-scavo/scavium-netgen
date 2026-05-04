@@ -7,7 +7,7 @@ import (
 
 const (
 	corsAllowedMethods = "GET, POST, OPTIONS"
-	corsAllowedHeaders = "Content-Type, Idempotency-Key, Authorization, X-Request-ID"
+	corsAllowedHeaders = "Content-Type, Idempotency-Key, Authorization, X-Request-ID, X-Correlation-ID"
 )
 
 // CORSHandler applies exact-origin CORS to public API routes only.
