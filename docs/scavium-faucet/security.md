@@ -57,6 +57,14 @@ When `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is set to `hcaptcha`, `recaptcha`, or `tu
 
 When a `domain.RiskEngine` is wired via `SetRiskEngine`, each claim request is evaluated against the engine before insertion. A rejected evaluation returns `403 claim_rejected` with the rejection reason in `details.reason`. The engine receives the request IP, Ethereum address, browser fingerprint, user-agent, and request timestamp. The default `app.New` wiring does not attach a risk engine; operators can inject one for production deployments that require additional abuse signals.
 
+### Durable abuse signals
+
+Claim intake now records production-safe abuse signals in SQLite through `domain.AbuseSignalRecorder`, wired by default in `app.New` using the same persistent store. The signal layer is observational and deliberately non-blocking: a storage failure while recording a signal does not change the public claim response or break existing API contracts.
+
+Recorded events include successful and failed captcha verification, risk-engine allow/reject decisions, cooldown denials, rate-limit denials, daily-budget denials, and accepted claims. Each signal stores the signal kind, Ethereum address when available, trusted-proxy-derived client IP, browser fingerprint when supplied, user-agent, optional claim ID, reason, score, and UTC timestamp. Captcha tokens, private keys, admin tokens, and captcha secrets are not stored.
+
+This gives operators a durable audit base for Phase 15.3+ blocklisting, adaptive throttling, and later admin review without introducing new hard-blocking behavior in 15.2.
+
 ### Daily budget enforcement
 
 `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` limits the total amount distributed per UTC calendar day. The check is enforced atomically inside a SQLite `BEGIN IMMEDIATE` transaction: the current day's sum across all active claim statuses (`received`, `validated`, `queued`, `sending`, `sent`, `confirmed`) is read, and the insert is rejected if adding the new claim would exceed the configured budget. A rejected claim returns `429 daily_budget_exceeded` with the used, requested, and maximum amounts in `details.reason`. The budget resets automatically at UTC midnight. An unset or zero budget means unlimited.
@@ -131,4 +139,4 @@ Use a dedicated faucet hot wallet with limited balance. Do not reuse treasury, v
 
 ## Recommended operator stance
 
-The binary provides persistent claim storage, real readiness probes, persistent rate limiting, captcha verification, risk engine support, daily budget enforcement, configurable exact-origin CORS, trusted-proxy IP extraction, structured per-request logging, and an active admin API. It is suitable for a testnet faucet deployment behind a reverse proxy with TLS. With captcha enabled it is appropriate for a public faucet deployment.
+The binary provides persistent claim storage, real readiness probes, persistent rate limiting, captcha verification, durable abuse signal capture, risk engine support, daily budget enforcement, configurable exact-origin CORS, trusted-proxy IP extraction, structured per-request logging, and an active admin API. It is suitable for a testnet faucet deployment behind a reverse proxy with TLS. With captcha enabled it is appropriate for a public faucet deployment.
