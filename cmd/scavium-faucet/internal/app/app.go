@@ -22,6 +22,7 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/observability"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/store/sqlite"
+	"scavium-netgen/cmd/scavium-faucet/internal/version"
 	"scavium-netgen/cmd/scavium-faucet/internal/worker"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -85,6 +86,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 	}
 	readService.SetCaptchaVerifier(captchaVerifier)
 	readinessChecks := runtimeChecks(cfg, store, senderBundle.chainClient, senderBundle.signer)
+	metrics := observability.NewRuntimeMetrics(version.Current())
 	app := &App{
 		Config: cfg,
 		Handler: httpapi.NewHandler(httpapi.Dependencies{
@@ -94,6 +96,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 			TrustedProxy:    cfg.TrustedProxy,
 			CORSOrigins:     cfg.CORSAllowedOrigins,
 			Logger:          logger,
+			Metrics:         metrics,
 		}),
 		ctx:    ctx,
 		cancel: cancel,
