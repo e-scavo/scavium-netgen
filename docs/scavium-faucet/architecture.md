@@ -23,7 +23,9 @@ scavium-faucet http.Server
   |
   +-- /health, /ready, /api/v1/*
   |     |
+  |     +-- CORSHandler                  -> exact-origin CORS for public paths
   |     +-- RequestIDMiddleware
+  |     +-- RequestLoggingMiddleware      -> structured JSON access log per request
   |     +-- httpapi public handlers
   |     +-- runtimeChecks()               -> real DB/queue (+ RPC/wallet) probes
   |     +-- faucet.PersistentReadService  -> SQLite-backed claims/idempotency
@@ -54,7 +56,8 @@ POST /api/v1/claim
   +-- captcha verification (if provider configured)
   +-- risk evaluation
   +-- persistent rate-limit check (IP per hour, address per day, fingerprint)
-  +-- persist claim to SQLite with status "queued"
+  +-- daily budget check (if DAILY_BUDGET_WEI set)
+  +-- persist claim to SQLite with status "received"
   `-- 202 Accepted with claim payload
 ```
 
@@ -85,7 +88,7 @@ Migrations (`001_initial.sql`, `002_queue.sql`) run automatically on startup ins
 |---|---|
 | `cmd/scavium-faucet` | Binary entrypoint and server startup |
 | `internal/config` | Loads and validates environment configuration |
-| `internal/httpapi` | Route registration, JSON helpers, request IDs, admin middleware |
+| `internal/httpapi` | Route registration, JSON helpers, request IDs, CORS middleware, request-logging middleware, admin middleware |
 | `internal/frontend` | Embedded UI served at `/` |
 | `internal/faucet` | SQLite-backed persistent read/claim service (`PersistentReadService`) |
 | `internal/ready` | Real DB/queue probes, optional RPC/wallet probes, and aggregate result shaping |
