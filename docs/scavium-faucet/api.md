@@ -156,7 +156,8 @@ Current behavior:
 - `UserAgent` is forwarded from the request header
 - the address cooldown is checked against the SQLite store
 - persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided)
-- captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; a failed verification returns `500 claim_unavailable`
+- the global daily budget is enforced as a faucet-wide limit
+- captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; a failed verification returns `422 captcha_failed`
 - risk evaluation runs when a risk engine is configured
 - the accepted claim is persisted to SQLite with initial status `received`, then enqueued as `queued`
 - repeated requests with the same `Idempotency-Key` return the same persisted claim without creating a duplicate
@@ -167,7 +168,23 @@ Common errors:
 |---|---|---|
 | 400 | `invalid_json` | Malformed JSON body |
 | 400 | `invalid_address` | Address failed validation |
-| 500 | `claim_unavailable` | Claim service failure |
+| 422 | `captcha_failed` | Captcha verification failed |
+| 403 | `claim_rejected` | Claim rejected by abuse or risk policy |
+| 429 | `rate_limited` | IP, address, fingerprint, or cooldown limit exceeded |
+| 429 | `daily_budget_exceeded` | Global daily faucet budget exceeded |
+| 503 | `faucet_unavailable` | Faucet is paused, in maintenance, or unavailable |
+| 500 | `claim_unavailable` | Unexpected claim service failure |
+
+For `rate_limited`, `daily_budget_exceeded`, and other mapped claim errors, the `details` object may include:
+
+```json
+{
+  "reason": "retry after 30 seconds",
+  "retry_after_seconds": 30
+}
+```
+
+`retry_after_seconds` is advisory and appears when the server can calculate a retry delay. A `Retry-After` header may be added in future versions.
 
 ### `GET /api/v1/claim/{id}`
 ### `GET /api/v1/faucet/claim/{id}`
