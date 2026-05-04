@@ -5,319 +5,223 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SCAVIUM Faucet</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0b1220;
+      --surface: #111a2b;
+      --surface-2: #14203a;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --border: #253248;
+      --primary: #f97316;
+      --support: #2563eb;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --radius: 14px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
     body {
-      font-family: system-ui, sans-serif;
-      background: #0f0f0f;
-      color: #e0e0e0;
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(circle at 20% 0%, #172747 0%, var(--bg) 55%);
+      color: var(--text);
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
       padding: 2rem 1rem;
     }
-    header { margin-bottom: 2rem; text-align: center; }
-    header h1 { font-size: 1.8rem; color: #7cfc00; letter-spacing: 0.05em; }
-    header p { font-size: 0.9rem; color: #888; margin-top: 0.4rem; }
-    main { width: 100%; max-width: 520px; }
-    .card {
-      background: #1a1a1a;
-      border: 1px solid #2a2a2a;
-      border-radius: 8px;
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-    .card h2 { font-size: 1rem; color: #aaa; margin-bottom: 1rem; text-transform: uppercase; letter-spacing: 0.06em; }
-    label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 0.3rem; }
-    input[type="text"] {
+
+    .layout {
       width: 100%;
-      padding: 0.6rem 0.75rem;
-      background: #111;
-      border: 1px solid #333;
-      border-radius: 4px;
-      color: #e0e0e0;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 1.5rem;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--primary);
+      letter-spacing: 0.02em;
+      font-size: clamp(1.6rem, 2.5vw, 2rem);
+    }
+
+    .subtitle {
+      margin-top: 0.4rem;
+      color: var(--muted);
       font-size: 0.95rem;
+    }
+
+    .card {
+      background: linear-gradient(180deg, var(--surface) 0%, #0f1727 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.24);
+    }
+
+    .card h2 {
+      margin: 0 0 0.9rem;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #cbd5e1;
+    }
+
+    .status {
+      display: none;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      padding: 0.65rem 0.8rem;
+      font-size: 0.9rem;
+      margin-top: 0.8rem;
+      line-height: 1.4;
+    }
+
+    .status.visible { display: block; }
+    .status.info { background: rgba(37, 99, 235, 0.13); border-color: rgba(37, 99, 235, 0.35); }
+    .status.success { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); }
+    .status.warn { background: rgba(245, 158, 11, 0.13); border-color: rgba(245, 158, 11, 0.35); }
+    .status.error { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.35); }
+
+    .field {
+      display: block;
+      width: 100%;
       margin-bottom: 0.75rem;
     }
-    input[type="text"]:focus { outline: none; border-color: #7cfc00; }
+
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin-bottom: 0.35rem;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 0.7rem 0.8rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 0.94rem;
+    }
+
+    input[type="text"]:focus {
+      outline: 2px solid rgba(37, 99, 235, 0.4);
+      border-color: var(--support);
+    }
+
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.2rem;
+    }
+
     button {
       width: 100%;
-      padding: 0.7rem;
-      background: #7cfc00;
-      color: #0f0f0f;
-      border: none;
-      border-radius: 4px;
-      font-size: 1rem;
-      font-weight: 600;
+      border: 0;
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: #fff;
+      background: linear-gradient(135deg, var(--primary), #ea580c);
       cursor: pointer;
-      transition: background 0.15s;
     }
-    button:hover:not(:disabled) { background: #6ae800; }
-    button:disabled { background: #3a5a00; color: #666; cursor: not-allowed; }
-    .status-line {
-      font-size: 0.85rem;
-      margin-top: 0.75rem;
-      padding: 0.5rem 0.75rem;
-      border-radius: 4px;
+
+    button.secondary {
+      background: linear-gradient(135deg, var(--support), #1d4ed8);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 0.45rem;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+      font-size: 0.88rem;
+    }
+
+    .kv:last-child { border-bottom: 0; }
+    .kv .key { color: var(--muted); }
+    .kv .val { word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .network-banner {
       display: none;
+      margin-bottom: 0.9rem;
+      border: 1px solid rgba(37, 99, 235, 0.35);
+      background: rgba(37, 99, 235, 0.14);
+      color: #dbeafe;
+      border-radius: 10px;
+      padding: 0.55rem 0.8rem;
+      font-size: 0.84rem;
     }
-    .status-line.visible { display: block; }
-    .status-line.info    { background: #1a2a1a; border: 1px solid #2a5a2a; color: #90ee90; }
-    .status-line.warn    { background: #2a2a1a; border: 1px solid #5a5a2a; color: #f0c040; }
-    .status-line.error   { background: #2a1a1a; border: 1px solid #5a2a2a; color: #ff7070; }
-    .kv { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 0.2rem 0; border-bottom: 1px solid #222; }
-    .kv:last-child { border-bottom: none; }
-    .kv .key { color: #888; }
-    .kv .val { color: #e0e0e0; font-family: monospace; word-break: break-all; text-align: right; max-width: 65%; }
-    a { color: #7cfc00; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .claim-result { display: none; }
-    .claim-result.visible { display: block; }
-    #network-banner {
-      font-size: 0.8rem;
+
+    .network-banner.visible { display: block; }
+
+    .hidden { display: none !important; }
+
+    footer {
       text-align: center;
-      padding: 0.3rem;
-      background: #1a2a1a;
-      border-radius: 4px;
-      margin-bottom: 1rem;
-      color: #7cfc00;
-      display: none;
+      color: #64748b;
+      font-size: 0.78rem;
+      margin-top: 1.4rem;
     }
-    #network-banner.visible { display: block; }
-    footer { margin-top: 2rem; font-size: 0.75rem; color: #555; text-align: center; }
   </style>
 </head>
 <body>
-  <header>
-    <h1>SCAVIUM Faucet</h1>
-    <p>Request testnet funds</p>
-  </header>
+  <main class="layout">
+    <header>
+      <h1>SCAVIUM Faucet</h1>
+      <p class="subtitle">Request testnet funds</p>
+    </header>
 
-  <main>
-    <div id="network-banner"></div>
+    <div id="network-banner" class="network-banner"></div>
+    <div id="pause-banner" class="status"></div>
 
-    <div id="pause-banner" class="status-line" style="margin-bottom:1rem;"></div>
-
-    <div class="card">
+    <section class="card">
       <h2>Request Funds</h2>
-      <label for="address">Ethereum Address</label>
-      <input type="text" id="address" placeholder="0x..." autocomplete="off" spellcheck="false" />
-      <div id="captcha-row" style="display:none;">
-        <label for="captcha-token">Captcha Token</label>
-        <input type="text" id="captcha-token" placeholder="Paste token here" autocomplete="off" />
-      </div>
-      <button id="btn-send" onclick="submitClaim()">Send Funds</button>
-      <div id="msg" class="status-line"></div>
-    </div>
+      <form id="claim-form" novalidate>
+        <div class="field">
+          <label for="address">Ethereum Address</label>
+          <input type="text" id="address" placeholder="0x..." autocomplete="off" spellcheck="false" />
+        </div>
+        <div id="captcha-row" class="field hidden">
+          <label for="captcha-token">Captcha Token</label>
+          <input type="text" id="captcha-token" placeholder="Paste token here" autocomplete="off" />
+        </div>
+        <div class="actions">
+          <button id="btn-send" type="submit">Send Funds</button>
+          <button id="btn-refresh" class="secondary" type="button">Refresh Status</button>
+        </div>
+      </form>
+      <div id="msg" class="status"></div>
+    </section>
 
-    <div id="claim-result" class="card claim-result">
+    <section id="claim-result" class="card hidden">
       <h2>Claim Status</h2>
       <div id="claim-kv"></div>
-      <div id="explorer-link" style="margin-top:0.75rem; font-size:0.85rem;"></div>
-    </div>
+      <div id="explorer-link" class="status info hidden"></div>
+    </section>
 
-    <div id="config-card" class="card" style="display:none;">
+    <section id="config-card" class="card hidden">
       <h2>Network Info</h2>
       <div id="config-kv"></div>
-    </div>
+    </section>
+
+    <footer>Powered by SCAVIUM</footer>
   </main>
 
-  <footer>Powered by SCAVIUM</footer>
-
-  <script>
-    var explorerTxURL = "";
-    var currentClaimID = "";
-    var pollTimer = null;
-    var captchaProvider = "disabled";
-
-    function show(el, cls) {
-      el.className = "status-line visible " + (cls || "info");
-    }
-
-    function setMsg(text, cls) {
-      var el = document.getElementById("msg");
-      el.textContent = text;
-      show(el, cls || "info");
-    }
-
-    function setPauseBanner(text, cls) {
-      var el = document.getElementById("pause-banner");
-      if (!text) { el.className = "status-line"; return; }
-      el.textContent = text;
-      show(el, cls || "warn");
-    }
-
-    function loadConfig() {
-      fetch("/api/v1/config")
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          explorerTxURL = data.explorer_tx_url || "";
-          captchaProvider = data.captcha_provider || "disabled";
-
-          var banner = document.getElementById("network-banner");
-          if (data.network_name) {
-            banner.textContent = "Network: " + data.network_name + (data.symbol ? " \u00b7 " + data.symbol : "");
-            banner.className = "visible";
-          }
-
-          var card = document.getElementById("config-card");
-          var kv = document.getElementById("config-kv");
-          var rows = [];
-          if (data.network_name)    rows.push(["Network",   data.network_name]);
-          if (data.symbol)          rows.push(["Symbol",    data.symbol]);
-          if (data.amount_eth)      rows.push(["Amount",    data.amount_eth + " " + (data.symbol || "")]);
-          if (data.cooldown_seconds != null) rows.push(["Cooldown", data.cooldown_seconds + "s"]);
-          if (data.dry_run != null) rows.push(["Dry Run",   data.dry_run ? "yes" : "no"]);
-          kv.innerHTML = rows.map(function(r) {
-            return '<div class="kv"><span class="key">' + r[0] + '</span><span class="val">' + esc(r[1]) + '</span></div>';
-          }).join("");
-          if (rows.length) card.style.display = "";
-
-          if (captchaProvider && captchaProvider !== "disabled" && captchaProvider !== "") {
-            document.getElementById("captcha-row").style.display = "";
-          }
-        })
-        .catch(function() {});
-    }
-
-    function loadStatus() {
-      fetch("/api/v1/status")
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var mode = data.mode || "active";
-          if (mode === "paused") {
-            setPauseBanner("\u26a0 Faucet is currently paused. Please try again later.", "warn");
-            document.getElementById("btn-send").disabled = true;
-          } else if (mode === "maintenance") {
-            setPauseBanner("\ud83d\udd27 Faucet is under maintenance.", "warn");
-            document.getElementById("btn-send").disabled = true;
-          } else if (mode === "no_funds") {
-            setPauseBanner("\u26a0 Faucet has no funds at the moment.", "warn");
-            document.getElementById("btn-send").disabled = true;
-          } else {
-            setPauseBanner("");
-            document.getElementById("btn-send").disabled = false;
-          }
-        })
-        .catch(function() {});
-    }
-
-    function submitClaim() {
-      var addr = document.getElementById("address").value.trim();
-      if (!addr) { setMsg("Please enter an address.", "error"); return; }
-      if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
-        setMsg("Invalid Ethereum address.", "error"); return;
-      }
-
-      var btn = document.getElementById("btn-send");
-      btn.disabled = true;
-      setMsg("Submitting\u2026", "info");
-
-      var body = { address: addr };
-      var captchaToken = document.getElementById("captcha-token").value.trim();
-      if (captchaToken) body.captcha_token = captchaToken;
-
-      fetch("/api/v1/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      })
-      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
-      .then(function(res) {
-        btn.disabled = false;
-        if (!res.ok) {
-          handleClaimError(res.status, res.data);
-          return;
-        }
-        var claimID = res.data.id || res.data.claim_id || "";
-        if (claimID) {
-          setMsg("Claim submitted! Tracking\u2026", "info");
-          currentClaimID = claimID;
-          startPolling(claimID);
-        } else {
-          setMsg("Claim submitted.", "info");
-          showClaimData(res.data);
-        }
-      })
-      .catch(function() {
-        btn.disabled = false;
-        setMsg("Network error. Please try again.", "error");
-      });
-    }
-
-    function handleClaimError(status, data) {
-      var code = (data && data.code) || "";
-      var msg  = (data && data.message) || "Request failed.";
-      if (code === "cooldown_active") {
-        var secs = data && data.details && data.details.cooldown_remaining_seconds;
-        setMsg("Cooldown active. Try again in " + (secs ? secs + "s" : "a while") + ".", "warn");
-      } else if (code === "faucet_paused") {
-        setMsg("Faucet is paused. Please try again later.", "warn");
-      } else if (code === "faucet_maintenance") {
-        setMsg("Faucet is under maintenance.", "warn");
-      } else if (code === "rate_limited") {
-        setMsg("Rate limited. Please try again later.", "warn");
-      } else if (code === "blocked") {
-        setMsg("Your address or IP is blocked.", "error");
-      } else {
-        setMsg(msg, "error");
-      }
-    }
-
-    function startPolling(claimID) {
-      clearInterval(pollTimer);
-      pollOnce(claimID);
-      pollTimer = setInterval(function() { pollOnce(claimID); }, 3000);
-    }
-
-    function pollOnce(claimID) {
-      fetch("/api/v1/claim/" + encodeURIComponent(claimID))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          showClaimData(data);
-          var s = data.status || "";
-          if (s === "confirmed" || s === "failed" || s === "rejected") {
-            clearInterval(pollTimer);
-          }
-        })
-        .catch(function() {});
-    }
-
-    function showClaimData(data) {
-      var card = document.getElementById("claim-result");
-      var kv   = document.getElementById("claim-kv");
-      var rows = [];
-      if (data.id)         rows.push(["Claim ID", data.id]);
-      if (data.status)     rows.push(["Status",   data.status]);
-      if (data.address)    rows.push(["Address",  data.address]);
-      if (data.amount_eth) rows.push(["Amount",   data.amount_eth + (data.symbol ? " " + data.symbol : "")]);
-      if (data.tx_hash)    rows.push(["Tx Hash",  data.tx_hash]);
-      if (data.created_at) rows.push(["Created",  data.created_at]);
-      if (data.updated_at) rows.push(["Updated",  data.updated_at]);
-      kv.innerHTML = rows.map(function(r) {
-        return '<div class="kv"><span class="key">' + r[0] + '</span><span class="val">' + esc(r[1]) + '</span></div>';
-      }).join("");
-      card.className = "card claim-result visible";
-
-      var txLink = document.getElementById("explorer-link");
-      if (data.tx_hash && explorerTxURL) {
-        var href = explorerTxURL.replace("{txHash}", encodeURIComponent(data.tx_hash));
-        txLink.innerHTML = '<a href="' + esc(href) + '" target="_blank" rel="noopener">View on Explorer \u2197</a>';
-      } else {
-        txLink.innerHTML = "";
-      }
-    }
-
-    function esc(s) {
-      return String(s)
-        .replace(/&/g,"&amp;")
-        .replace(/</g,"&lt;")
-        .replace(/>/g,"&gt;")
-        .replace(/"/g,"&quot;");
-    }
-
-    loadConfig();
-    loadStatus();
-  </script>
+  <script src="/static/faucet.js" defer></script>
 </body>
 </html>
