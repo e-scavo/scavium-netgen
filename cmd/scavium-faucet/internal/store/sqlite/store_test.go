@@ -908,3 +908,36 @@ func TestRecordAndListAbuseSignals(t *testing.T) {
 		t.Fatalf("created_at = %s, want %s", signal.CreatedAt, now)
 	}
 }
+
+func TestCountRecentAbuseSignalsScopesByIP(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 4, 16, 0, 0, 0, time.UTC)
+	for _, signal := range []domain.AbuseSignal{
+		{Kind: domain.AbuseSignalCaptchaFailed, RemoteIP: "203.0.113.10", CreatedAt: now.Add(-10 * time.Minute)},
+		{Kind: domain.AbuseSignalRateLimited, RemoteIP: "203.0.113.10", CreatedAt: now.Add(-5 * time.Minute)},
+		{Kind: domain.AbuseSignalClaimAccepted, RemoteIP: "203.0.113.10", CreatedAt: now.Add(-4 * time.Minute)},
+		{Kind: domain.AbuseSignalCaptchaFailed, RemoteIP: "203.0.113.20", CreatedAt: now.Add(-3 * time.Minute)},
+		{Kind: domain.AbuseSignalCaptchaFailed, RemoteIP: "203.0.113.10", CreatedAt: now.Add(-2 * time.Hour)},
+	} {
+		if err := store.RecordAbuseSignal(context.Background(), signal); err != nil {
+			t.Fatalf("record signal: %v", err)
+		}
+	}
+
+	count, err := store.CountRecentAbuseSignals(context.Background(), domain.AbuseSignalFilter{
+		Kinds: []domain.AbuseSignalKind{
+			domain.AbuseSignalCaptchaFailed,
+			domain.AbuseSignalRateLimited,
+		},
+		RemoteIP: "203.0.113.10",
+		Since:    now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("count recent abuse signals: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2", count)
+	}
+}

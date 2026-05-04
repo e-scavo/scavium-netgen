@@ -31,6 +31,20 @@ type AbuseSignalRecorder interface {
 	RecordAbuseSignal(ctx context.Context, signal AbuseSignal) error
 }
 
+// AbuseSignalCounter exposes aggregate signal counts for progressive enforcement.
+type AbuseSignalCounter interface {
+	CountRecentAbuseSignals(ctx context.Context, filter AbuseSignalFilter) (int, error)
+}
+
+// AbuseSignalFilter scopes recent abuse signal lookups.
+type AbuseSignalFilter struct {
+	Kinds       []AbuseSignalKind
+	Address     common.Address
+	RemoteIP    string
+	Fingerprint string
+	Since       time.Time
+}
+
 // RateLimiter evaluates whether a key can proceed within a sliding window.
 type RateLimiter interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (RateLimitDecision, error)

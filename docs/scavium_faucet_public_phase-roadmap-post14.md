@@ -30,12 +30,15 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 - Captcha, risk, cooldown, rate-limit, budget, and accepted-claim observations
 - Non-blocking telemetry layer for later adaptive policy and admin review
 
-### 15.3 — Blacklisting
-- IP blocking
-- Address blocking
-- CIDR rules
+### 15.3 — Progressive Abuse Enforcement
+- Conservative signal-based enforcement using the Phase 15.2 abuse signal ledger
+- Temporary claim rejection when recent negative signals exceed configured IP, address, or fingerprint thresholds
+- Runtime-configurable enforcement window and thresholds
+- No public API contract changes; reuses existing `claim_rejected` error envelope
 
-### 15.4 — Adaptive Rate Limiting
+### 15.4 — Blocklist & Adaptive Rate Limiting
+- IP/address/fingerprint blocklist controls
+- CIDR rules
 - Dynamic throttling
 - Escalation logic
 

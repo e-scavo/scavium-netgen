@@ -65,6 +65,15 @@ Recorded events include successful and failed captcha verification, risk-engine 
 
 This gives operators a durable audit base for Phase 15.3+ blocklisting, adaptive throttling, and later admin review without introducing new hard-blocking behavior in 15.2.
 
+### Progressive abuse enforcement
+
+Phase 15.3 turns the Phase 15.2 signal ledger into a conservative runtime control. The faucet now evaluates recent negative signals (`captcha_failed`, `risk_rejected`, `rate_limited`, `cooldown_active`, and `daily_budget_exceeded`) before claim creation proceeds past risk evaluation. Enforcement is scoped independently by source IP, wallet address, and browser fingerprint.
+
+The default posture is intentionally gradual: enforcement is enabled, the lookback window is one hour, and thresholds are high enough to avoid interfering with ordinary users while still giving operators a production-safe brake during abuse bursts. A rejected request uses the existing `claim_rejected` error contract and records a `risk_rejected` abuse signal with the observed score, preserving API compatibility and extending the audit trail.
+
+Operators can disable the full enforcement layer with `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ENABLED=false`, or disable one scope by setting its threshold to `0`. This keeps Phase 15.3 deployable without schema changes, new external services, or direct backend exposure.
+
+
 ### Daily budget enforcement
 
 `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` limits the total amount distributed per UTC calendar day. The check is enforced atomically inside a SQLite `BEGIN IMMEDIATE` transaction: the current day's sum across all active claim statuses (`received`, `validated`, `queued`, `sending`, `sent`, `confirmed`) is read, and the insert is rejected if adding the new claim would exceed the configured budget. A rejected claim returns `429 daily_budget_exceeded` with the used, requested, and maximum amounts in `details.reason`. The budget resets automatically at UTC midnight. An unset or zero budget means unlimited.

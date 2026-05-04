@@ -23,6 +23,7 @@ var _ domain.ClaimStore = (*Store)(nil)
 var _ domain.DailyBudgetStore = (*Store)(nil)
 var _ domain.RateLimiter = (*Store)(nil)
 var _ domain.AbuseSignalRecorder = (*Store)(nil)
+var _ domain.AbuseSignalCounter = (*Store)(nil)
 var _ domain.QueueStore = (*Store)(nil)
 
 // ErrNotFound reports that the requested record does not exist.
@@ -160,6 +161,57 @@ func (s *Store) RecordAbuseSignal(ctx context.Context, signal domain.AbuseSignal
 		return fmt.Errorf("record abuse signal: %w", err)
 	}
 	return nil
+}
+
+// CountRecentAbuseSignals returns a scoped count of abuse signals after the
+// filter's Since timestamp.  Empty key fields are ignored so callers can count
+// by IP, address, or fingerprint without exposing raw signal rows.
+func (s *Store) CountRecentAbuseSignals(ctx context.Context, filter domain.AbuseSignalFilter) (int, error) {
+	if filter.Since.IsZero() {
+		return 0, nil
+	}
+	if len(filter.Kinds) == 0 {
+		return 0, nil
+	}
+
+	clauses := []string{"created_at >= ?"}
+	args := []any{formatTime(filter.Since)}
+
+	kindPlaceholders := make([]string, 0, len(filter.Kinds))
+	for _, kind := range filter.Kinds {
+		if kind == "" {
+			continue
+		}
+		kindPlaceholders = append(kindPlaceholders, "?")
+		args = append(args, string(kind))
+	}
+	if len(kindPlaceholders) == 0 {
+		return 0, nil
+	}
+	clauses = append(clauses, "kind IN ("+strings.Join(kindPlaceholders, ",")+")")
+
+	if remoteIP := strings.TrimSpace(filter.RemoteIP); remoteIP != "" {
+		clauses = append(clauses, "remote_ip = ?")
+		args = append(args, remoteIP)
+	}
+	if filter.Address != (common.Address{}) {
+		clauses = append(clauses, "address = ?")
+		args = append(args, filter.Address.Hex())
+	}
+	if fingerprint := strings.TrimSpace(filter.Fingerprint); fingerprint != "" {
+		clauses = append(clauses, "fingerprint = ?")
+		args = append(args, fingerprint)
+	}
+	if len(clauses) <= 2 {
+		return 0, nil
+	}
+
+	query := "SELECT COUNT(*) FROM abuse_signals WHERE " + strings.Join(clauses, " AND ")
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count recent abuse signals: %w", err)
+	}
+	return count, nil
 }
 
 // ListAbuseSignals returns recent abuse signals for tests and future admin

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/captcha"
 	"scavium-netgen/cmd/scavium-faucet/internal/chain"
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
@@ -67,6 +68,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 
 	readService := faucet.NewPersistentReadService(cfg, store, store, store)
 	readService.SetAbuseSignalRecorder(store)
+	readService.SetRiskEngine(abuse.NewProgressiveEnforcer(cfg, store))
 	captchaVerifier, err := newCaptchaVerifier(cfg)
 	if err != nil {
 		_ = store.Close()
