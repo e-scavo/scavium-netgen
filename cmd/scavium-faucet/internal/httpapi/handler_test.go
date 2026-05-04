@@ -563,6 +563,13 @@ func TestCreateClaimMapsServiceErrors(t *testing.T) {
 			wantCode:   "rate_limited",
 		},
 		{
+			name:       "daily budget exceeded",
+			path:       "/api/v1/claim",
+			err:        &faucet.ClaimError{Kind: faucet.ErrDailyBudgetExceeded, Reason: "daily budget exceeded"},
+			wantStatus: http.StatusTooManyRequests,
+			wantCode:   "daily_budget_exceeded",
+		},
+		{
 			name:       "internal error",
 			path:       "/api/v1/claim",
 			err:        fmt.Errorf("store unavailable"),

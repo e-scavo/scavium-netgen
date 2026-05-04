@@ -20,6 +20,7 @@ import (
 )
 
 var _ domain.ClaimStore = (*Store)(nil)
+var _ domain.DailyBudgetStore = (*Store)(nil)
 var _ domain.RateLimiter = (*Store)(nil)
 var _ domain.QueueStore = (*Store)(nil)
 
@@ -177,6 +178,97 @@ func (s *Store) CreateClaimWithIdempotency(ctx context.Context, claim domain.Cla
 	return claim, nil
 }
 
+// CreateClaimWithIdempotencyAndDailyBudget checks the UTC-day budget and inserts
+// the claim in one SQLite write transaction.
+func (s *Store) CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, claim domain.Claim, idempotencyKey string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return domain.Claim{}, nil, false, err
+	}
+	defer conn.Close() //nolint:errcheck
+
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return domain.Claim{}, nil, false, fmt.Errorf("begin daily budget tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	if idempotencyKey != "" {
+		row := conn.QueryRowContext(ctx, `
+			SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+			FROM requests
+			WHERE idempotency_key = NULLIF(?, '')
+		`, idempotencyKey)
+		existing, err := scanClaim(row)
+		if err == nil {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return domain.Claim{}, nil, false, fmt.Errorf("commit existing idempotent claim: %w", err)
+			}
+			committed = true
+			return existing, big.NewInt(0), false, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return domain.Claim{}, nil, false, err
+		}
+	}
+
+	used, err := claimAmountWei(ctx, conn, dayStart, dayEnd, statuses)
+	if err != nil {
+		return domain.Claim{}, nil, false, err
+	}
+	if budgetWei != nil && budgetWei.Sign() > 0 {
+		claimAmount := big.NewInt(0)
+		if claim.AmountWei != nil {
+			claimAmount = new(big.Int).Set(claim.AmountWei)
+		}
+		if new(big.Int).Add(used, claimAmount).Cmp(budgetWei) > 0 {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return domain.Claim{}, nil, false, fmt.Errorf("commit exceeded daily budget check: %w", err)
+			}
+			committed = true
+			return domain.Claim{}, used, true, nil
+		}
+	}
+
+	if claim.AmountWei == nil {
+		claim.AmountWei = big.NewInt(0)
+	}
+	if claim.CreatedAt.IsZero() {
+		claim.CreatedAt = time.Now().UTC()
+	}
+	if claim.UpdatedAt.IsZero() {
+		claim.UpdatedAt = claim.CreatedAt
+	}
+
+	_, err = conn.ExecContext(ctx, `
+		INSERT INTO requests (
+			id, address, amount_wei, status, reason, idempotency_key, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+	`,
+		claim.ID,
+		claim.Address.Hex(),
+		claim.AmountWei.String(),
+		string(claim.Status),
+		claim.Reason,
+		idempotencyKey,
+		formatTime(claim.CreatedAt),
+		formatTime(claim.UpdatedAt),
+	)
+	if err != nil {
+		return domain.Claim{}, nil, false, err
+	}
+
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return domain.Claim{}, nil, false, fmt.Errorf("commit daily budget claim create: %w", err)
+	}
+	committed = true
+	return claim, used, false, nil
+}
+
 // GetClaimByIdempotencyKey returns the claim previously created for idempotencyKey.
 func (s *Store) GetClaimByIdempotencyKey(ctx context.Context, idempotencyKey string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
@@ -273,6 +365,61 @@ func (s *Store) LastClaimByAddress(ctx context.Context, address common.Address) 
 		return domain.Claim{}, err
 	}
 	return claim, nil
+}
+
+// DailyClaimAmountWei sums persisted claim amounts in [dayStart, dayEnd) for the given statuses.
+func (s *Store) DailyClaimAmountWei(ctx context.Context, dayStart, dayEnd time.Time, statuses []domain.ClaimStatus) (*big.Int, error) {
+	return claimAmountWei(ctx, s.db, dayStart, dayEnd, statuses)
+}
+
+type claimAmountQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func claimAmountWei(ctx context.Context, q claimAmountQuerier, dayStart, dayEnd time.Time, statuses []domain.ClaimStatus) (*big.Int, error) {
+	if len(statuses) == 0 {
+		return big.NewInt(0), nil
+	}
+
+	placeholders := make([]string, len(statuses))
+	args := make([]any, 0, len(statuses)+2)
+	args = append(args, formatBudgetBound(dayStart), formatBudgetBound(dayEnd))
+	for i, status := range statuses {
+		placeholders[i] = "?"
+		args = append(args, string(status))
+	}
+
+	rows, err := q.QueryContext(ctx, `
+		SELECT amount_wei
+		FROM requests
+		WHERE created_at >= ? AND created_at < ?
+			AND status IN (`+strings.Join(placeholders, ", ")+`)
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	total := big.NewInt(0)
+	for rows.Next() {
+		var amountWei string
+		if err := rows.Scan(&amountWei); err != nil {
+			return nil, err
+		}
+		amount, ok := new(big.Int).SetString(amountWei, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid stored amount wei: %s", amountWei)
+		}
+		total.Add(total, amount)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return total, nil
+}
+
+func formatBudgetBound(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
 }
 
 type claimScanner interface {

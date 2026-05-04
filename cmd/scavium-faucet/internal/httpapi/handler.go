@@ -274,6 +274,8 @@ func handleCreateClaimError(w http.ResponseWriter, r *http.Request, err error) {
 		WriteError(w, r, http.StatusUnprocessableEntity, "captcha_failed", "captcha failed", details)
 	case errors.Is(err, faucet.ErrClaimRejected):
 		WriteError(w, r, http.StatusForbidden, "claim_rejected", "claim rejected", details)
+	case errors.Is(err, faucet.ErrDailyBudgetExceeded):
+		WriteError(w, r, http.StatusTooManyRequests, "daily_budget_exceeded", "daily budget exceeded", details)
 	case errors.Is(err, faucet.ErrCooldownActive), errors.Is(err, faucet.ErrRateLimited):
 		WriteError(w, r, http.StatusTooManyRequests, "rate_limited", "rate limited", details)
 	default:
