@@ -26,12 +26,13 @@ func RequestLoggingMiddleware(next http.Handler, logger *observability.Logger, t
 		}
 
 		logger.Info("http request", map[string]any{
-			"request_id": RequestID(r),
-			"method":     r.Method,
-			"path":       r.URL.EscapedPath(),
-			"status":     status,
-			"duration":   time.Since(start).String(),
-			"remote_ip":  iputil.RealIP(r, trustedProxy),
+			"request_id":     RequestID(r),
+			"correlation_id": CorrelationID(r),
+			"method":         r.Method,
+			"path":           r.URL.EscapedPath(),
+			"status":         status,
+			"duration":       time.Since(start).String(),
+			"remote_ip":      iputil.RealIP(r, trustedProxy),
 		})
 	})
 }
