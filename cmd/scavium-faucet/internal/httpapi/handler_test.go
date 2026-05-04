@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
+	"scavium-netgen/cmd/scavium-faucet/internal/observability"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/version"
 
@@ -90,6 +92,88 @@ func TestRequestIDMiddlewareGeneratesMissingRequestID(t *testing.T) {
 
 	if got := rec.Header().Get(requestIDHeader); got == "" {
 		t.Fatal("request id header is empty")
+	}
+}
+
+func TestRequestLoggingMiddlewareWritesSafeFields(t *testing.T) {
+	var logs bytes.Buffer
+	req := httptest.NewRequest(http.MethodGet, "/health?private_key=do-not-log", nil)
+	req.RemoteAddr = "10.0.0.1:4567"
+	req.Header.Set(requestIDHeader, "test-request-id")
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.1")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		Logger:       observability.NewLogger(&logs),
+		TrustedProxy: "10.0.0.1",
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var entry map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+		t.Fatalf("decode log entry: %v", err)
+	}
+	if entry["message"] != "http request" {
+		t.Fatalf("message = %q, want http request", entry["message"])
+	}
+	if entry["request_id"] != "test-request-id" {
+		t.Fatalf("request_id = %q", entry["request_id"])
+	}
+	if entry["method"] != http.MethodGet {
+		t.Fatalf("method = %q", entry["method"])
+	}
+	if entry["path"] != "/health" {
+		t.Fatalf("path = %q", entry["path"])
+	}
+	if entry["status"] != float64(http.StatusOK) {
+		t.Fatalf("status = %v, want %d", entry["status"], http.StatusOK)
+	}
+	if entry["remote_ip"] != "203.0.113.9" {
+		t.Fatalf("remote_ip = %q, want 203.0.113.9", entry["remote_ip"])
+	}
+	if entry["duration"] == "" {
+		t.Fatal("duration is empty")
+	}
+	if strings.Contains(logs.String(), "do-not-log") {
+		t.Fatalf("log contains query secret: %s", logs.String())
+	}
+}
+
+func TestRequestLoggingMiddlewareDoesNotLogClaimPayload(t *testing.T) {
+	var logs bytes.Buffer
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{
+		"address":"0x52908400098527886E0F7030069857D2E4169EE7",
+		"captcha_token":"captcha-secret-value",
+		"fingerprint":"fingerprint-secret-value"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer admin-token-secret")
+	req.Header.Set(idempotencyKeyHeader, "idempotency-secret")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testClaimService(),
+		Logger:      observability.NewLogger(&logs),
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+
+	logText := logs.String()
+	for _, secret := range []string{
+		"52908400098527886E0F7030069857D2E4169EE7",
+		"captcha-secret-value",
+		"fingerprint-secret-value",
+		"admin-token-secret",
+		"idempotency-secret",
+	} {
+		if strings.Contains(logText, secret) {
+			t.Fatalf("log contains sensitive value %q: %s", secret, logText)
+		}
 	}
 }
 

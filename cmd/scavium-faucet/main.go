@@ -23,7 +23,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	application, err := app.New(cfg)
+	application, err := app.NewWithLogger(cfg, logger)
 	if err != nil {
 		logger.Error("create application failed", map[string]any{"error": err.Error()})
 		os.Exit(1)
