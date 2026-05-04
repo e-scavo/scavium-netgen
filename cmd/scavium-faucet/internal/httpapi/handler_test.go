@@ -54,6 +54,9 @@ func TestHealth(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339, body.Time); err != nil {
 		t.Fatalf("time = %q, want RFC3339: %v", body.Time, err)
 	}
+	if body.UptimeSeconds < 0 {
+		t.Fatalf("uptime_seconds = %d, want non-negative", body.UptimeSeconds)
+	}
 }
 
 func TestHealthRejectsUnsupportedMethod(t *testing.T) {
@@ -416,6 +419,14 @@ func TestReadyReportsOK(t *testing.T) {
 	if len(body.Checks) != 2 {
 		t.Fatalf("checks length = %d, want 2", len(body.Checks))
 	}
+	if body.Summary.Total != 2 || body.Summary.OK != 2 || body.Summary.Degraded != 0 {
+		t.Fatalf("summary = %#v", body.Summary)
+	}
+	for _, check := range body.Checks {
+		if check.DurationMS < 0 {
+			t.Fatalf("check duration = %d, want non-negative", check.DurationMS)
+		}
+	}
 }
 
 func TestReadyReportsDegraded(t *testing.T) {
@@ -444,6 +455,9 @@ func TestReadyReportsDegraded(t *testing.T) {
 	}
 	if body.Checks[1].Name != "rpc" || body.Checks[1].Error != "rpc unavailable" {
 		t.Fatalf("rpc check = %#v", body.Checks[1])
+	}
+	if body.Summary.Total != 2 || body.Summary.OK != 1 || body.Summary.Degraded != 1 {
+		t.Fatalf("summary = %#v", body.Summary)
 	}
 }
 

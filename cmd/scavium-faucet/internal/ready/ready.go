@@ -32,16 +32,25 @@ type Check struct {
 
 // CheckResult is the JSON-friendly outcome of one readiness check.
 type CheckResult struct {
-	Name   string `json:"name"`
-	Status Status `json:"status"`
-	Error  string `json:"error,omitempty"`
+	Name       string `json:"name"`
+	Status     Status `json:"status"`
+	DurationMS int64  `json:"duration_ms"`
+	Error      string `json:"error,omitempty"`
+}
+
+// Summary captures aggregate readiness counters without requiring clients to inspect each check.
+type Summary struct {
+	Total    int `json:"total"`
+	OK       int `json:"ok"`
+	Degraded int `json:"degraded"`
 }
 
 // Result is the aggregated readiness response returned by the API.
 type Result struct {
-	Status Status        `json:"status"`
-	Checks []CheckResult `json:"checks"`
-	Time   string        `json:"time"`
+	Status  Status        `json:"status"`
+	Checks  []CheckResult `json:"checks"`
+	Summary Summary       `json:"summary"`
+	Time    string        `json:"time"`
 }
 
 // DefaultChecks returns the default startup readiness probes.
@@ -135,8 +144,10 @@ func WalletCheck(client BalanceClient, signer AddressProvider) Check {
 func Evaluate(ctx context.Context, checks []Check) Result {
 	results := make([]CheckResult, 0, len(checks))
 	status := StatusOK
+	summary := Summary{Total: len(checks)}
 
 	for _, check := range checks {
+		startedAt := time.Now()
 		result := CheckResult{
 			Name:   check.Name,
 			Status: StatusOK,
@@ -150,8 +161,12 @@ func Evaluate(ctx context.Context, checks []Check) Result {
 			result.Error = err.Error()
 		}
 
+		result.DurationMS = time.Since(startedAt).Milliseconds()
 		if result.Status != StatusOK {
 			status = StatusDegraded
+			summary.Degraded++
+		} else {
+			summary.OK++
 		}
 		results = append(results, result)
 	}
@@ -161,9 +176,10 @@ func Evaluate(ctx context.Context, checks []Check) Result {
 	})
 
 	return Result{
-		Status: status,
-		Checks: results,
-		Time:   time.Now().UTC().Format(time.RFC3339),
+		Status:  status,
+		Checks:  results,
+		Summary: summary,
+		Time:    time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
