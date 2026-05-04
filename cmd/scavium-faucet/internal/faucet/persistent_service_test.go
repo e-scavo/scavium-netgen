@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 	"scavium-netgen/cmd/scavium-faucet/internal/store/sqlite"
@@ -493,6 +494,52 @@ func TestPersistentReadServiceRecordsRateLimitSignal(t *testing.T) {
 	}
 	if signals[1].Reason == "" {
 		t.Fatal("rate limit signal reason is empty")
+	}
+}
+
+func TestPersistentReadServiceProgressiveAbuseEnforcementRejects(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+
+	now := persistentTestNow()
+	cfg := persistentTestConfig()
+	cfg.AbuseEnforcementEnabled = true
+	cfg.AbuseEnforcementWindowSeconds = 3600
+	cfg.AbuseEnforcementIPThreshold = 2
+	cfg.AbuseEnforcementAddressThreshold = 0
+	cfg.AbuseEnforcementFingerprintThreshold = 0
+
+	for i := 0; i < 2; i++ {
+		if err := store.RecordAbuseSignal(context.Background(), domain.AbuseSignal{
+			Kind:      domain.AbuseSignalCaptchaFailed,
+			RemoteIP:  "203.0.113.10",
+			CreatedAt: now.Add(-time.Duration(i+1) * time.Minute),
+		}); err != nil {
+			t.Fatalf("record previous abuse signal: %v", err)
+		}
+	}
+
+	service := newPersistentTestService(t, store, cfg, now)
+	service.SetAbuseSignalRecorder(store)
+	service.SetRiskEngine(abuse.NewProgressiveEnforcer(cfg, store).WithClock(func() time.Time { return now }))
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:  persistentTestAddress(),
+		RemoteIP: "203.0.113.10",
+	})
+	if err == nil {
+		t.Fatal("create claim returned nil error")
+	}
+	if !errors.Is(err, ErrClaimRejected) {
+		t.Fatalf("error = %v, want ErrClaimRejected", err)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	if got := signals[len(signals)-1]; got.Kind != domain.AbuseSignalRiskRejected || got.Score != 2 {
+		t.Fatalf("last signal = %+v, want risk_rejected score 2", got)
 	}
 }
 

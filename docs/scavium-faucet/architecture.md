@@ -112,3 +112,17 @@ Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`) run aut
 - The server listens on `SCAVIUM_FAUCET_BIND_ADDR` and defaults to `127.0.0.1:18080`.
 - Timeouts are set in `main.go`: `ReadHeaderTimeout=5s`, `ReadTimeout=10s`, `WriteTimeout=10s`, `IdleTimeout=60s`.
 - SIGINT and SIGTERM trigger graceful shutdown with a `10s` timeout.
+
+
+## Phase 15.3 — Progressive Abuse Enforcement
+
+The claim path now wires `internal/abuse.ProgressiveEnforcer` as the read service risk engine. The enforcer does not persist state itself; it queries aggregate counts through `domain.AbuseSignalCounter`, implemented by the SQLite store over the `abuse_signals` table introduced in Phase 15.2.
+
+The design keeps enforcement inside the existing claim intake pipeline:
+
+1. Captcha verification still runs first when configured.
+2. Progressive enforcement counts recent negative signals by IP, address, and fingerprint.
+3. If a configured threshold is reached, the existing risk rejection path returns `claim_rejected` and records a new `risk_rejected` signal.
+4. Cooldown, rate limits, budget checks, claim persistence, queueing, and worker processing remain unchanged.
+
+This preserves the public API surface while allowing production operators to activate a measured anti-abuse brake before moving to explicit blocklists and adaptive throttling.

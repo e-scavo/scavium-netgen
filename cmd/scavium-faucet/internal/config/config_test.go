@@ -49,34 +49,39 @@ func TestFromEnvUsesDevelopmentDefaults(t *testing.T) {
 
 func TestFromEnvOverridesValues(t *testing.T) {
 	values := map[string]string{
-		EnvBindAddr:            "127.0.0.1:19090",
-		EnvPublicBaseURL:       "https://faucet.example.test",
-		EnvRPCURL:              "http://127.0.0.1:28545",
-		EnvChainID:             "999",
-		EnvNetworkName:         "scavium-test",
-		EnvSymbol:              "tSCAV",
-		EnvExplorerTxURL:       "https://explorer.example.test/tx/{txHash}",
-		EnvAmountWei:           "42",
-		EnvCooldownSeconds:     "60",
-		EnvDryRun:              "false",
-		EnvDatabasePath:        "/tmp/scavium-faucet-test.db",
-		EnvRateLimitIPPerHour:  "20",
-		EnvRateLimitAddrPerDay: "5",
-		EnvDailyBudgetWei:      "9999",
-		EnvTrustedProxy:        "127.0.0.1",
-		EnvCORSAllowedOrigins:  "https://faucet.example.test, https://wallet.example.test ",
-		EnvWorkerEnabled:       "false",
-		EnvWorkerPollSeconds:   "7",
-		EnvWatcherEnabled:      "true",
-		EnvWatcherPollSeconds:  "21",
-		EnvMinConfirmations:    "3",
-		EnvPrivateKey:          "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-		EnvCaptchaProvider:     "hcaptcha",
-		EnvCaptchaSiteKey:      "10000000-ffff-ffff-ffff-000000000001",
-		EnvCaptchaSecret:       "0x-test-secret",
-		EnvCaptchaVerifyURL:    "https://hcaptcha.example.test/siteverify",
-		EnvFaucetMode:          "paused",
-		EnvAdminToken:          "test-admin-token-xyz",
+		EnvBindAddr:                             "127.0.0.1:19090",
+		EnvPublicBaseURL:                        "https://faucet.example.test",
+		EnvRPCURL:                               "http://127.0.0.1:28545",
+		EnvChainID:                              "999",
+		EnvNetworkName:                          "scavium-test",
+		EnvSymbol:                               "tSCAV",
+		EnvExplorerTxURL:                        "https://explorer.example.test/tx/{txHash}",
+		EnvAmountWei:                            "42",
+		EnvCooldownSeconds:                      "60",
+		EnvDryRun:                               "false",
+		EnvDatabasePath:                         "/tmp/scavium-faucet-test.db",
+		EnvRateLimitIPPerHour:                   "20",
+		EnvRateLimitAddrPerDay:                  "5",
+		EnvDailyBudgetWei:                       "9999",
+		EnvAbuseEnforcementEnabled:              "false",
+		EnvAbuseEnforcementWindowSeconds:        "1800",
+		EnvAbuseEnforcementIPThreshold:          "9",
+		EnvAbuseEnforcementAddressThreshold:     "8",
+		EnvAbuseEnforcementFingerprintThreshold: "7",
+		EnvTrustedProxy:                         "127.0.0.1",
+		EnvCORSAllowedOrigins:                   "https://faucet.example.test, https://wallet.example.test ",
+		EnvWorkerEnabled:                        "false",
+		EnvWorkerPollSeconds:                    "7",
+		EnvWatcherEnabled:                       "true",
+		EnvWatcherPollSeconds:                   "21",
+		EnvMinConfirmations:                     "3",
+		EnvPrivateKey:                           "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+		EnvCaptchaProvider:                      "hcaptcha",
+		EnvCaptchaSiteKey:                       "10000000-ffff-ffff-ffff-000000000001",
+		EnvCaptchaSecret:                        "0x-test-secret",
+		EnvCaptchaVerifyURL:                     "https://hcaptcha.example.test/siteverify",
+		EnvFaucetMode:                           "paused",
+		EnvAdminToken:                           "test-admin-token-xyz",
 	}
 
 	cfg, err := FromEnv(func(key string) string { return values[key] })
@@ -128,6 +133,15 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	}
 	if cfg.DailyBudgetWei == nil || cfg.DailyBudgetWei.Cmp(big.NewInt(9999)) != 0 {
 		t.Fatalf("daily budget wei = %v", cfg.DailyBudgetWei)
+	}
+	if cfg.AbuseEnforcementEnabled {
+		t.Fatal("abuse enforcement enabled = true, want false")
+	}
+	if cfg.AbuseEnforcementWindowSeconds != 1800 {
+		t.Fatalf("abuse enforcement window seconds = %d", cfg.AbuseEnforcementWindowSeconds)
+	}
+	if cfg.AbuseEnforcementIPThreshold != 9 || cfg.AbuseEnforcementAddressThreshold != 8 || cfg.AbuseEnforcementFingerprintThreshold != 7 {
+		t.Fatalf("abuse enforcement thresholds = ip:%d address:%d fingerprint:%d", cfg.AbuseEnforcementIPThreshold, cfg.AbuseEnforcementAddressThreshold, cfg.AbuseEnforcementFingerprintThreshold)
 	}
 	if cfg.TrustedProxy != "127.0.0.1" {
 		t.Fatalf("trusted proxy = %q", cfg.TrustedProxy)

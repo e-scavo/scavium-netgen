@@ -52,3 +52,10 @@ go run ./cmd/scavium-faucet
 ```
 
 See [configuration.md](configuration.md) for the environment reference and [runbook.md](runbook.md) for operational notes.
+
+
+## Phase 15.3 — Progressive Abuse Enforcement
+
+Phase 15.3 builds directly on the Phase 15.2 abuse signal ledger. The faucet now evaluates recent negative signals during claim intake and can reject a request when the configured IP, address, or fingerprint threshold is reached within the enforcement window.
+
+The implementation remains production-safe and contract-preserving: no public endpoint changes were introduced, no schema migration was required, and rejected requests reuse the existing `claim_rejected` envelope. Each enforcement rejection is also recorded back into `abuse_signals`, keeping the audit trail cumulative for later admin controls, blocklists, and adaptive rate limiting.

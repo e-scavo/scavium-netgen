@@ -20,6 +20,11 @@ Configuration is loaded from environment variables at startup via `internal/conf
 | `SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR` | `10` | Maximum claims per source IP per hour; enforced by the persistent rate limiter on claim creation; exposed by `/api/v1/config` |
 | `SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY` | `3` | Maximum claims per Ethereum address per day; enforced by the persistent rate limiter on claim creation; exposed by `/api/v1/config` |
 | `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` | empty | Maximum total amount distributed per UTC day; unset means unlimited |
+| `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ENABLED` | `true` | Enables progressive enforcement using recent abuse signals |
+| `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_WINDOW_SECONDS` | `3600` | Lookback window for progressive abuse enforcement |
+| `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_IP_THRESHOLD` | `20` | Negative signal threshold for a source IP within the enforcement window; `0` disables this scope |
+| `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ADDRESS_THRESHOLD` | `12` | Negative signal threshold for a wallet address within the enforcement window; `0` disables this scope |
+| `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_FINGERPRINT_THRESHOLD` | `15` | Negative signal threshold for a browser fingerprint within the enforcement window; `0` disables this scope |
 | `SCAVIUM_FAUCET_TRUSTED_PROXY` | empty | When set to the reverse proxy's IP, the handler extracts the real client IP from `X-Forwarded-For` / `X-Real-IP` via `internal/iputil`; used for rate limiting and logging |
 | `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` | empty | Comma-separated exact origins allowed for public API CORS; empty disables CORS headers; wildcard `*` is not allowed |
 | `SCAVIUM_FAUCET_PRIVATE_KEY` | empty | Hex-encoded signer key; required and validated at startup when `DRY_RUN=false`; used by `chain.EthSender` to sign transactions |
@@ -102,4 +107,5 @@ SCAVIUM_FAUCET_ADMIN_TOKEN=replace-me
 - Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to the loopback or reverse proxy address so that IP-based rate limiting uses the real client IP rather than `127.0.0.1`.
 - Set `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` only to exact public origins that should call the API from browsers. Leave it empty to disable CORS headers; `*` is rejected.
 - `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced against queued, sent, and confirmed claims and resets at UTC midnight.
+- `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_*` is intentionally conservative: it reads only negative abuse signals from the configured lookback window and rejects new claims only when a configured threshold is reached. Set a threshold to `0` to disable that specific scope while keeping the rest of the enforcement layer active.
 - In dry-run mode (`DRY_RUN=true`), the `PRIVATE_KEY` is not required; `DryRunSender` is used and no on-chain transactions are submitted.

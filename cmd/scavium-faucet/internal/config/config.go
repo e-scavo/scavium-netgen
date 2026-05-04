@@ -13,27 +13,32 @@ import (
 
 // Environment variable names consumed by the faucet configuration loader.
 const (
-	EnvBindAddr            = "SCAVIUM_FAUCET_BIND_ADDR"
-	EnvPublicBaseURL       = "SCAVIUM_FAUCET_PUBLIC_BASE_URL"
-	EnvRPCURL              = "SCAVIUM_FAUCET_RPC_URL"
-	EnvChainID             = "SCAVIUM_FAUCET_CHAIN_ID"
-	EnvNetworkName         = "SCAVIUM_FAUCET_NETWORK_NAME"
-	EnvSymbol              = "SCAVIUM_FAUCET_SYMBOL"
-	EnvExplorerTxURL       = "SCAVIUM_FAUCET_EXPLORER_TX_URL"
-	EnvAmountWei           = "SCAVIUM_FAUCET_AMOUNT_WEI"
-	EnvCooldownSeconds     = "SCAVIUM_FAUCET_COOLDOWN_SECONDS"
-	EnvDryRun              = "SCAVIUM_FAUCET_DRY_RUN"
-	EnvDatabasePath        = "SCAVIUM_FAUCET_DATABASE_PATH"
-	EnvRateLimitIPPerHour  = "SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR"
-	EnvRateLimitAddrPerDay = "SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY"
-	EnvDailyBudgetWei      = "SCAVIUM_FAUCET_DAILY_BUDGET_WEI"
-	EnvTrustedProxy        = "SCAVIUM_FAUCET_TRUSTED_PROXY"
-	EnvCORSAllowedOrigins  = "SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS"
-	EnvWorkerEnabled       = "SCAVIUM_FAUCET_WORKER_ENABLED"
-	EnvWorkerPollSeconds   = "SCAVIUM_FAUCET_WORKER_POLL_SECONDS"
-	EnvWatcherEnabled      = "SCAVIUM_FAUCET_WATCHER_ENABLED"
-	EnvWatcherPollSeconds  = "SCAVIUM_FAUCET_WATCHER_POLL_SECONDS"
-	EnvMinConfirmations    = "SCAVIUM_FAUCET_MIN_CONFIRMATIONS"
+	EnvBindAddr                             = "SCAVIUM_FAUCET_BIND_ADDR"
+	EnvPublicBaseURL                        = "SCAVIUM_FAUCET_PUBLIC_BASE_URL"
+	EnvRPCURL                               = "SCAVIUM_FAUCET_RPC_URL"
+	EnvChainID                              = "SCAVIUM_FAUCET_CHAIN_ID"
+	EnvNetworkName                          = "SCAVIUM_FAUCET_NETWORK_NAME"
+	EnvSymbol                               = "SCAVIUM_FAUCET_SYMBOL"
+	EnvExplorerTxURL                        = "SCAVIUM_FAUCET_EXPLORER_TX_URL"
+	EnvAmountWei                            = "SCAVIUM_FAUCET_AMOUNT_WEI"
+	EnvCooldownSeconds                      = "SCAVIUM_FAUCET_COOLDOWN_SECONDS"
+	EnvDryRun                               = "SCAVIUM_FAUCET_DRY_RUN"
+	EnvDatabasePath                         = "SCAVIUM_FAUCET_DATABASE_PATH"
+	EnvRateLimitIPPerHour                   = "SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR"
+	EnvRateLimitAddrPerDay                  = "SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY"
+	EnvDailyBudgetWei                       = "SCAVIUM_FAUCET_DAILY_BUDGET_WEI"
+	EnvAbuseEnforcementEnabled              = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ENABLED"
+	EnvAbuseEnforcementWindowSeconds        = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_WINDOW_SECONDS"
+	EnvAbuseEnforcementIPThreshold          = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_IP_THRESHOLD"
+	EnvAbuseEnforcementAddressThreshold     = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ADDRESS_THRESHOLD"
+	EnvAbuseEnforcementFingerprintThreshold = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_FINGERPRINT_THRESHOLD"
+	EnvTrustedProxy                         = "SCAVIUM_FAUCET_TRUSTED_PROXY"
+	EnvCORSAllowedOrigins                   = "SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS"
+	EnvWorkerEnabled                        = "SCAVIUM_FAUCET_WORKER_ENABLED"
+	EnvWorkerPollSeconds                    = "SCAVIUM_FAUCET_WORKER_POLL_SECONDS"
+	EnvWatcherEnabled                       = "SCAVIUM_FAUCET_WATCHER_ENABLED"
+	EnvWatcherPollSeconds                   = "SCAVIUM_FAUCET_WATCHER_POLL_SECONDS"
+	EnvMinConfirmations                     = "SCAVIUM_FAUCET_MIN_CONFIRMATIONS"
 	// EnvPrivateKey holds the hex-encoded private key used to sign transactions.
 	// Never log this value.
 	EnvPrivateKey = "SCAVIUM_FAUCET_PRIVATE_KEY"
@@ -57,27 +62,32 @@ const (
 
 // Config is the validated runtime configuration required by the faucet service.
 type Config struct {
-	BindAddr            string
-	PublicBaseURL       string
-	RPCURL              string
-	ChainID             int64
-	NetworkName         string
-	Symbol              string
-	ExplorerTxURL       string
-	AmountWei           *big.Int
-	CooldownSeconds     int
-	DryRun              bool
-	DatabasePath        string
-	RateLimitIPPerHour  int
-	RateLimitAddrPerDay int
-	DailyBudgetWei      *big.Int
-	TrustedProxy        string
-	CORSAllowedOrigins  []string
-	WorkerEnabled       bool
-	WorkerPollSeconds   int
-	WatcherEnabled      bool
-	WatcherPollSeconds  int
-	MinConfirmations    uint64
+	BindAddr                             string
+	PublicBaseURL                        string
+	RPCURL                               string
+	ChainID                              int64
+	NetworkName                          string
+	Symbol                               string
+	ExplorerTxURL                        string
+	AmountWei                            *big.Int
+	CooldownSeconds                      int
+	DryRun                               bool
+	DatabasePath                         string
+	RateLimitIPPerHour                   int
+	RateLimitAddrPerDay                  int
+	DailyBudgetWei                       *big.Int
+	AbuseEnforcementEnabled              bool
+	AbuseEnforcementWindowSeconds        int
+	AbuseEnforcementIPThreshold          int
+	AbuseEnforcementAddressThreshold     int
+	AbuseEnforcementFingerprintThreshold int
+	TrustedProxy                         string
+	CORSAllowedOrigins                   []string
+	WorkerEnabled                        bool
+	WorkerPollSeconds                    int
+	WatcherEnabled                       bool
+	WatcherPollSeconds                   int
+	MinConfirmations                     uint64
 	// PrivateKeyHex is the hex-encoded signer key. Not required when DryRun=true.
 	// Never log this value.
 	PrivateKeyHex string
@@ -179,6 +189,42 @@ func FromEnv(lookup func(string) string) (Config, error) {
 		cfg.DailyBudgetWei = v
 	}
 
+	if raw := strings.TrimSpace(lookup(EnvAbuseEnforcementEnabled)); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseEnforcementEnabled, err)
+		}
+		cfg.AbuseEnforcementEnabled = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseEnforcementWindowSeconds)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseEnforcementWindowSeconds, err)
+		}
+		cfg.AbuseEnforcementWindowSeconds = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseEnforcementIPThreshold)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseEnforcementIPThreshold, err)
+		}
+		cfg.AbuseEnforcementIPThreshold = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseEnforcementAddressThreshold)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseEnforcementAddressThreshold, err)
+		}
+		cfg.AbuseEnforcementAddressThreshold = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseEnforcementFingerprintThreshold)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseEnforcementFingerprintThreshold, err)
+		}
+		cfg.AbuseEnforcementFingerprintThreshold = v
+	}
+
 	cfg.TrustedProxy = strings.TrimSpace(lookup(EnvTrustedProxy))
 	cfg.CORSAllowedOrigins = splitCommaList(lookup(EnvCORSAllowedOrigins))
 	cfg.PrivateKeyHex = strings.TrimSpace(lookup(EnvPrivateKey))
@@ -234,30 +280,35 @@ func FromEnv(lookup func(string) string) (Config, error) {
 // Defaults returns the development-safe faucet configuration baseline.
 func Defaults() Config {
 	return Config{
-		BindAddr:            "127.0.0.1:18080",
-		PublicBaseURL:       "http://127.0.0.1:18080",
-		RPCURL:              "http://127.0.0.1:18545",
-		ChainID:             31337,
-		NetworkName:         "scavium-dev",
-		Symbol:              "SCAV",
-		ExplorerTxURL:       "",
-		AmountWei:           big.NewInt(1_000_000_000_000_000_000),
-		CooldownSeconds:     int((24 * time.Hour).Seconds()),
-		DryRun:              true,
-		DatabasePath:        "cmd/scavium-faucet/data/scavium-faucet.db",
-		RateLimitIPPerHour:  10,
-		RateLimitAddrPerDay: 3,
-		DailyBudgetWei:      nil,
-		TrustedProxy:        "",
-		CORSAllowedOrigins:  nil,
-		WorkerEnabled:       true,
-		WorkerPollSeconds:   5,
-		WatcherEnabled:      false,
-		WatcherPollSeconds:  15,
-		MinConfirmations:    1,
-		CaptchaProvider:     "disabled",
-		CaptchaVerifyURL:    "",
-		FaucetMode:          "active",
+		BindAddr:                             "127.0.0.1:18080",
+		PublicBaseURL:                        "http://127.0.0.1:18080",
+		RPCURL:                               "http://127.0.0.1:18545",
+		ChainID:                              31337,
+		NetworkName:                          "scavium-dev",
+		Symbol:                               "SCAV",
+		ExplorerTxURL:                        "",
+		AmountWei:                            big.NewInt(1_000_000_000_000_000_000),
+		CooldownSeconds:                      int((24 * time.Hour).Seconds()),
+		DryRun:                               true,
+		DatabasePath:                         "cmd/scavium-faucet/data/scavium-faucet.db",
+		RateLimitIPPerHour:                   10,
+		RateLimitAddrPerDay:                  3,
+		DailyBudgetWei:                       nil,
+		AbuseEnforcementEnabled:              true,
+		AbuseEnforcementWindowSeconds:        3600,
+		AbuseEnforcementIPThreshold:          20,
+		AbuseEnforcementAddressThreshold:     12,
+		AbuseEnforcementFingerprintThreshold: 15,
+		TrustedProxy:                         "",
+		CORSAllowedOrigins:                   nil,
+		WorkerEnabled:                        true,
+		WorkerPollSeconds:                    5,
+		WatcherEnabled:                       false,
+		WatcherPollSeconds:                   15,
+		MinConfirmations:                     1,
+		CaptchaProvider:                      "disabled",
+		CaptchaVerifyURL:                     "",
+		FaucetMode:                           "active",
 	}
 }
 
@@ -288,6 +339,18 @@ func (c Config) Validate() error {
 	}
 	if c.CooldownSeconds < 0 {
 		errs = append(errs, errors.New("cooldown seconds must be zero or positive"))
+	}
+	if c.AbuseEnforcementWindowSeconds <= 0 {
+		errs = append(errs, errors.New("abuse enforcement window seconds must be positive"))
+	}
+	if c.AbuseEnforcementIPThreshold < 0 {
+		errs = append(errs, errors.New("abuse enforcement IP threshold must be zero or positive"))
+	}
+	if c.AbuseEnforcementAddressThreshold < 0 {
+		errs = append(errs, errors.New("abuse enforcement address threshold must be zero or positive"))
+	}
+	if c.AbuseEnforcementFingerprintThreshold < 0 {
+		errs = append(errs, errors.New("abuse enforcement fingerprint threshold must be zero or positive"))
 	}
 	if strings.TrimSpace(c.DatabasePath) == "" {
 		errs = append(errs, errors.New("database path is required"))
