@@ -1,141 +1,272 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SCAVIUM Faucet</title>
   <style>
     :root {
-      --bg: #0b1220;
-      --surface: #111a2b;
-      --surface-2: #14203a;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --border: #253248;
-      --primary: #f97316;
-      --support: #2563eb;
-      --ok: #22c55e;
-      --warn: #f59e0b;
-      --danger: #ef4444;
-      --radius: 14px;
+      --scavo-brand-primary: #F97316;
+      --scavo-brand-primary-soft: #FDBA74;
+      --scavo-brand-accent: #2563EB;
+      --scavo-brand-on-primary: #FFFFFF;
+      --scavo-danger: #EF4444;
+      --scavo-warning: #F59E0B;
+      --scavo-success: #22C55E;
+      --scavo-info: #2563EB;
+
+      --scavo-canvas: #0B1220;
+      --scavo-layer: #0F1A2E;
+      --scavo-surface-base: #0F1A2E;
+      --scavo-surface-raised: #13213A;
+      --scavo-border: #1F2A44;
+      --scavo-border-subtle: #17213A;
+      --scavo-text-primary: #F5F7FB;
+      --scavo-text-secondary: #9EABC7;
+      --scavo-text-muted: #6B7895;
+      --scavo-focus-ring: #F97316;
+
+      --scavo-radius-sm: 12px;
+      --scavo-radius-md: 18px;
+      --scavo-radius-lg: 24px;
+      --scavo-space-sm: 12px;
+      --scavo-space-md: 16px;
+      --scavo-space-lg: 24px;
+      --scavo-space-xl: 32px;
+      --scavo-font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
     *, *::before, *::after { box-sizing: border-box; }
 
     body {
       margin: 0;
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: radial-gradient(circle at 20% 0%, #172747 0%, var(--bg) 55%);
-      color: var(--text);
       min-height: 100vh;
-      padding: 2rem 1rem;
+      font-family: var(--scavo-font-family);
+      background:
+        radial-gradient(circle at 18% 0%, rgba(249, 115, 22, 0.16), transparent 30%),
+        radial-gradient(circle at 82% 8%, rgba(37, 99, 235, 0.18), transparent 32%),
+        linear-gradient(180deg, #0B1220 0%, #07101F 100%);
+      color: var(--scavo-text-primary);
+    }
+
+    .topbar {
+      border-bottom: 1px solid var(--scavo-border-subtle);
+      background: rgba(15, 26, 46, 0.78);
+      backdrop-filter: blur(14px);
+    }
+
+    .topbar-inner {
+      width: min(1080px, calc(100% - 32px));
+      margin: 0 auto;
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, var(--scavo-brand-primary), #EA580C);
+      color: var(--scavo-brand-on-primary);
+      font-weight: 900;
+      font-size: 20px;
+      box-shadow: 0 16px 36px rgba(249, 115, 22, 0.24);
+    }
+
+    .brand-title {
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      font-size: 15px;
+    }
+
+    .brand-subtitle {
+      margin-top: 2px;
+      color: var(--scavo-text-secondary);
+      font-size: 12px;
+    }
+
+    .top-links {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .top-links a {
+      color: var(--scavo-text-secondary);
+      text-decoration: none;
+      border: 1px solid var(--scavo-border);
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      background: rgba(19, 33, 58, 0.55);
+    }
+
+    .top-links a:hover {
+      color: var(--scavo-text-primary);
+      border-color: rgba(249, 115, 22, 0.65);
     }
 
     .layout {
-      width: 100%;
-      max-width: 640px;
+      width: min(720px, calc(100% - 32px));
       margin: 0 auto;
+      padding: 38px 0 32px;
     }
 
-    header {
-      margin-bottom: 1.5rem;
+    header.hero {
       text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--scavo-brand-primary-soft);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
     }
 
     h1 {
       margin: 0;
-      color: var(--primary);
+      color: var(--scavo-brand-primary);
       letter-spacing: 0.02em;
-      font-size: clamp(1.6rem, 2.5vw, 2rem);
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      font-weight: 900;
     }
 
     .subtitle {
-      margin-top: 0.4rem;
-      color: var(--muted);
-      font-size: 0.95rem;
+      max-width: 580px;
+      margin: 12px auto 0;
+      color: var(--scavo-text-secondary);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .status-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 0 0 16px;
+    }
+
+    .mini-card {
+      background: rgba(15, 26, 46, 0.72);
+      border: 1px solid var(--scavo-border);
+      border-radius: var(--scavo-radius-md);
+      padding: 14px;
+    }
+
+    .mini-card strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .mini-card span {
+      display: block;
+      margin-top: 4px;
+      color: var(--scavo-text-muted);
+      font-size: 12px;
     }
 
     .card {
-      background: linear-gradient(180deg, var(--surface) 0%, #0f1727 100%);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1rem;
-      margin-bottom: 1rem;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.24);
+      background: linear-gradient(180deg, rgba(15, 26, 46, 0.96), rgba(10, 18, 34, 0.98));
+      border: 1px solid var(--scavo-border);
+      border-radius: var(--scavo-radius-lg);
+      padding: 22px;
+      margin-bottom: 16px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
     }
 
     .card h2 {
-      margin: 0 0 0.9rem;
-      font-size: 0.9rem;
+      margin: 0 0 18px;
+      font-size: 14px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #cbd5e1;
+      letter-spacing: 0.12em;
+      color: var(--scavo-text-primary);
     }
 
     .status {
       display: none;
-      border-radius: 10px;
+      border-radius: var(--scavo-radius-sm);
       border: 1px solid transparent;
-      padding: 0.65rem 0.8rem;
-      font-size: 0.9rem;
-      margin-top: 0.8rem;
-      line-height: 1.4;
+      padding: 12px 14px;
+      font-size: 14px;
+      margin-top: 14px;
+      line-height: 1.45;
     }
 
     .status.visible { display: block; }
     .status.info { background: rgba(37, 99, 235, 0.13); border-color: rgba(37, 99, 235, 0.35); }
-    .status.success { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); }
-    .status.warn { background: rgba(245, 158, 11, 0.13); border-color: rgba(245, 158, 11, 0.35); }
-    .status.error { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.35); }
+    .status.success { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); color: #BBF7D0; }
+    .status.warn { background: rgba(245, 158, 11, 0.13); border-color: rgba(245, 158, 11, 0.35); color: #FDE68A; }
+    .status.error { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.35); color: #FECACA; }
 
     .field {
       display: block;
       width: 100%;
-      margin-bottom: 0.75rem;
+      margin-bottom: 14px;
     }
 
     label {
       display: block;
-      color: var(--muted);
-      font-size: 0.84rem;
-      margin-bottom: 0.35rem;
+      color: var(--scavo-text-secondary);
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 7px;
     }
 
     input[type="text"] {
       width: 100%;
-      padding: 0.7rem 0.8rem;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: var(--surface-2);
-      color: var(--text);
-      font-size: 0.94rem;
+      padding: 13px 14px;
+      border-radius: var(--scavo-radius-sm);
+      border: 1px solid var(--scavo-border);
+      background: var(--scavo-surface-raised);
+      color: var(--scavo-text-primary);
+      font-size: 15px;
     }
 
     input[type="text"]:focus {
-      outline: 2px solid rgba(37, 99, 235, 0.4);
-      border-color: var(--support);
+      outline: 2px solid rgba(249, 115, 22, 0.34);
+      border-color: var(--scavo-focus-ring);
     }
 
     .actions {
-      display: flex;
-      gap: 0.5rem;
-      margin-top: 0.2rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 4px;
     }
 
     button {
       width: 100%;
       border: 0;
-      border-radius: 10px;
-      padding: 0.75rem 0.9rem;
-      font-weight: 700;
-      font-size: 0.95rem;
+      border-radius: var(--scavo-radius-sm);
+      padding: 13px 16px;
+      font-weight: 800;
+      font-size: 15px;
       color: #fff;
-      background: linear-gradient(135deg, var(--primary), #ea580c);
+      background: linear-gradient(135deg, var(--scavo-brand-primary), #EA580C);
       cursor: pointer;
+      box-shadow: 0 14px 36px rgba(249, 115, 22, 0.16);
     }
 
     button.secondary {
-      background: linear-gradient(135deg, var(--support), #1d4ed8);
+      background: linear-gradient(135deg, var(--scavo-brand-accent), #1D4ED8);
+      box-shadow: 0 14px 36px rgba(37, 99, 235, 0.16);
     }
 
     button:disabled {
@@ -145,46 +276,108 @@
 
     .kv {
       display: grid;
-      grid-template-columns: 130px 1fr;
-      gap: 0.45rem;
-      padding: 0.4rem 0;
+      grid-template-columns: 140px 1fr;
+      gap: 10px;
+      padding: 10px 0;
       border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-      font-size: 0.88rem;
+      font-size: 14px;
     }
 
     .kv:last-child { border-bottom: 0; }
-    .kv .key { color: var(--muted); }
+    .kv .key { color: var(--scavo-text-muted); }
     .kv .val { word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
     .network-banner {
       display: none;
-      margin-bottom: 0.9rem;
+      margin-bottom: 14px;
       border: 1px solid rgba(37, 99, 235, 0.35);
       background: rgba(37, 99, 235, 0.14);
-      color: #dbeafe;
-      border-radius: 10px;
-      padding: 0.55rem 0.8rem;
-      font-size: 0.84rem;
+      color: #DBEAFE;
+      border-radius: var(--scavo-radius-sm);
+      padding: 11px 14px;
+      font-size: 13px;
     }
 
     .network-banner.visible { display: block; }
-
     .hidden { display: none !important; }
+
+    .note {
+      margin-top: 12px;
+      color: var(--scavo-text-muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
 
     footer {
       text-align: center;
-      color: #64748b;
-      font-size: 0.78rem;
-      margin-top: 1.4rem;
+      color: var(--scavo-text-muted);
+      font-size: 12px;
+      margin-top: 28px;
+    }
+
+    @media (max-width: 640px) {
+      .topbar-inner {
+        min-height: auto;
+        padding: 14px 0;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .top-links {
+        justify-content: flex-start;
+      }
+
+      .status-strip,
+      .actions {
+        grid-template-columns: 1fr;
+      }
+
+      .kv {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 <body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark">S</div>
+        <div>
+          <div class="brand-title">SCAVIUM</div>
+          <div class="brand-subtitle">EVM blockchain ecosystem</div>
+        </div>
+      </div>
+      <nav class="top-links" aria-label="SCAVIUM links">
+        <a href="https://scavium.network" target="_blank" rel="noreferrer">Website</a>
+        <a href="https://explorer.testnet.scavium.network" target="_blank" rel="noreferrer">Explorer</a>
+      </nav>
+    </div>
+  </div>
+
   <main class="layout">
-    <header>
+    <header class="hero">
+      <p class="eyebrow">Public Testnet Faucet</p>
       <h1>SCAVIUM Faucet</h1>
-      <p class="subtitle">Request testnet funds</p>
+      <p class="subtitle">
+        Request SCAV testnet tokens for development, wallet testing and transaction validation on the SCAVIUM network.
+      </p>
     </header>
+
+    <section class="status-strip" aria-label="Faucet highlights">
+      <div class="mini-card">
+        <strong>Testnet only</strong>
+        <span>No real-world value</span>
+      </div>
+      <div class="mini-card">
+        <strong>Rate limited</strong>
+        <span>Fair usage enforced</span>
+      </div>
+      <div class="mini-card">
+        <strong>On-chain</strong>
+        <span>Tracked by explorer</span>
+      </div>
+    </section>
 
     <div id="network-banner" class="network-banner"></div>
     <div id="pause-banner" class="status"></div>
@@ -193,7 +386,7 @@
       <h2>Request Funds</h2>
       <form id="claim-form" novalidate>
         <div class="field">
-          <label for="address">Ethereum Address</label>
+          <label for="address">Scavium Address</label>
           <input type="text" id="address" placeholder="0x..." autocomplete="off" spellcheck="false" />
         </div>
         <div id="captcha-row" class="field hidden">
@@ -205,6 +398,9 @@
           <button id="btn-refresh" class="secondary" type="button">Refresh Status</button>
         </div>
       </form>
+      <p class="note">
+        Funds are intended for developers and testers. Claims are subject to cooldown, daily limits and abuse protection.
+      </p>
       <div id="msg" class="status"></div>
     </section>
 
@@ -219,7 +415,9 @@
       <div id="config-kv"></div>
     </section>
 
-    <footer>Powered by SCAVIUM</footer>
+    <footer>
+      Powered by SCAVIUM · Testnet chain · No real value
+    </footer>
   </main>
 
   <script src="/static/faucet.js" defer></script>
