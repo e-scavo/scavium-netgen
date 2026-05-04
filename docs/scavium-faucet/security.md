@@ -158,3 +158,9 @@ Phase 15.4 keeps abuse protection operationally safe by bounding the durability 
 The default retention is 30 days. Setting the value to `0` disables pruning for incident investigation or temporary forensic capture, while negative values are rejected during config validation. Pruning touches only `abuse_signals`; claims, transactions, queue state, rate-limit counters, and idempotency records are not affected.
 
 The same store also exposes internal aggregate summaries by signal kind through `domain.AbuseSignalReporter`. These summaries are intentionally not wired to public HTTP endpoints in Phase 15.4; they prepare the data contract needed for Phase 16 observability and later admin review without exposing raw abuse metadata.
+
+## Phase 15.close — Abuse Protection Closure
+
+Phase 15 is closed with a layered abuse-protection posture active for the public faucet. Captcha validation acts as the public entry barrier, `abuse_signals` records claim-intake behavior, progressive enforcement can reject requests through the existing `claim_rejected` contract, and retention keeps the signal ledger bounded for long-running SQLite operation.
+
+This closure does not introduce hard bans, new public endpoints, direct backend exposure, or additional third-party dependencies. It establishes the security baseline that Phase 16 observability will measure: captcha outcomes, risk decisions, rate-limit pressure, cooldown activity, budget exhaustion, accepted claims, and enforcement rejections.

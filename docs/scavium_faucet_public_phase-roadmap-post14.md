@@ -19,6 +19,8 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 
 ## Phase 15 — Public Faucet Hardening & Abuse Protection
 
+**Status:** CLOSED. Phase 15 is complete as the faucet abuse-protection baseline for the current public testnet deployment. The phase introduced human verification, durable abuse telemetry, conservative enforcement, and operational retention without changing the existing public API contract or exposing the backend directly.
+
 ### 15.1 — Captcha Integration
 - hCaptcha or Cloudflare Turnstile
 - Frontend widget integration
@@ -41,6 +43,12 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 - Startup pruning of expired abuse signals
 - Internal aggregate summaries by signal kind for future operator surfaces
 - Operational tuning documentation before Phase 16 metrics/admin exposure
+
+### 15.close — Phase Closure
+- Abuse Protection consolidated as a closed production-ready phase
+- 15.1 through 15.4 recorded as cumulative, deploy-compatible increments
+- No code, API, schema, nginx, systemd, or runtime configuration changes required for closure
+- Phase 16 explicitly starts from the structured abuse dataset, request logs, and operational boundaries already established
 
 ---
 
@@ -115,7 +123,7 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 The faucet has reached a stable production baseline.
 
 Remaining phases focus on:
-- Abuse prevention
-- Observability
+- Observability and operator feedback loops
 - Feature expansion
+- Admin/control-plane maturation
 - Mainnet readiness

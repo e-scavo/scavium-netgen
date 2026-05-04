@@ -8,7 +8,7 @@ This directory documents the **implemented project surface**, not the full roadm
 
 `scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
 
-Phase 14 deployment work is COMPLETED for the testnet public faucet target.
+Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is also CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention now documented as the active production baseline.
 
 The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, and loopback-isolated backend exposure.
 
@@ -66,3 +66,9 @@ The implementation remains production-safe and contract-preserving: no public en
 Phase 15.4 completes the operational side of Abuse Protection. The faucet now prunes old `abuse_signals` at startup according to `SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS`, defaulting to 30 days and allowing `0` as an explicit opt-out.
 
 This keeps the abuse ledger useful for progressive enforcement and investigation without allowing unbounded SQLite growth. Internal aggregate summaries by signal kind were also added for future observability/admin work, but no new public endpoint was exposed and existing API contracts remain unchanged.
+
+## Phase 15.close — Abuse Protection Closure
+
+Phase 15 is now closed as a cumulative abuse-protection layer for the production-ready public faucet. The implemented path covers human verification, durable claim-intake signals, conservative progressive enforcement, and bounded retention for the abuse ledger.
+
+The closure is documentary only: no runtime code, public API contract, deployment topology, nginx exposure model, or database schema changes are required. Phase 16 can now build observability and operator feedback loops on top of the stable abuse dataset and existing structured request logs.
