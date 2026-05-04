@@ -27,9 +27,9 @@ Claim creation and address-status lookups validate the supplied EVM address and 
 
 `internal/admin.TokenAuthMiddleware` uses constant-time comparison for bearer token checks. If the handler is instantiated with an admin token, the comparison itself avoids basic timing side channels.
 
-### Structured logging
+### Structured logging and request logging
 
-The binary logs structured JSON events through `internal/observability`. The current startup path logs listen and error events and does not print configuration values by default.
+The binary logs structured JSON events through `internal/observability`. Startup events (listen address, configuration errors) and per-request access entries are written to stdout as JSON lines. Each access log entry contains: `request_id`, `method`, `path`, `status`, `duration`, and `remote_ip`. Request bodies, captcha tokens, browser fingerprints, and sensitive configuration values (`PRIVATE_KEY`, `ADMIN_TOKEN`, `CAPTCHA_SECRET`) are never included in log output.
 
 ### Persistent rate limiting
 
@@ -53,13 +53,36 @@ When `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is set to `hcaptcha`, `recaptcha`, or `tu
 
 `SCAVIUM_FAUCET_TRUSTED_PROXY` controls whether the handler trusts `X-Forwarded-For` / `X-Real-IP` headers. Set to the loopback or proxy address to ensure rate limiting operates on real client IPs.
 
+### Risk engine blocking
+
+When a `domain.RiskEngine` is wired via `SetRiskEngine`, each claim request is evaluated against the engine before insertion. A rejected evaluation returns `403 claim_rejected` with the rejection reason in `details.reason`. The engine receives the request IP, Ethereum address, browser fingerprint, user-agent, and request timestamp. The default `app.New` wiring does not attach a risk engine; operators can inject one for production deployments that require additional abuse signals.
+
+### Daily budget enforcement
+
+`SCAVIUM_FAUCET_DAILY_BUDGET_WEI` limits the total amount distributed per UTC calendar day. The check is enforced atomically inside a SQLite `BEGIN IMMEDIATE` transaction: the current day's sum across all active claim statuses (`received`, `validated`, `queued`, `sending`, `sent`, `confirmed`) is read, and the insert is rejected if adding the new claim would exceed the configured budget. A rejected claim returns `429 daily_budget_exceeded` with the used, requested, and maximum amounts in `details.reason`. The budget resets automatically at UTC midnight. An unset or zero budget means unlimited.
+
+### CORS policy
+
+`CORSHandler` applies exact-origin CORS to public API routes. Behaviour:
+
+- **Empty `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS`**: no CORS headers are emitted. This is the safe default.
+- **Configured origins**: each request `Origin` is matched exactly against the allowed set. Only matching origins receive `Access-Control-Allow-Origin`.
+- `Vary: Origin` is set when CORS is active to prevent cache poisoning.
+- OPTIONS preflight requests return `204 No Content` for allowed origins.
+- Admin paths (`/api/v1/admin/*`) are excluded from CORS regardless of configuration.
+- Wildcard `*` in the allowed origins list is rejected at startup by `Config.Validate()`.
+
+### Admin API isolation
+
+Admin endpoints (`/api/v1/admin/*`) are protected by bearer-token authentication and are explicitly excluded from CORS. Browser-based clients cannot reach admin endpoints cross-origin even when CORS is configured for public routes.
+
 ## Remaining gaps
 
-The following protections are not yet implemented:
+The following limitations remain in the current binary:
 
-- CORS policy
-- daily budget enforcement (`SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is loaded but not checked)
-- service-level error differentiation for rate-limit and captcha failures (currently both return `500 claim_unavailable`; a future improvement would return `429` or `403` with precise error codes)
+- **CORS wildcard not supported.** `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` does not accept `*`. Operators must supply an explicit origin list. This is by design to prevent overly permissive cross-origin access.
+- **`Retry-After` header not set.** Rate-limited and budget-exceeded responses (429) include `details.retry_after_seconds` in the JSON body but do not set the standard `Retry-After` HTTP response header.
+- **Single-node daily budget.** `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced atomically within a single SQLite instance. Multi-replica deployments sharing one database are not a supported configuration; each instance would enforce the budget independently.
 
 ## Deployment guidance
 
@@ -102,8 +125,10 @@ Use a dedicated faucet hot wallet with limited balance. Do not reuse treasury, v
 - [ ] leave `SCAVIUM_FAUCET_DRY_RUN=true` in development
 - [ ] set `SCAVIUM_FAUCET_TRUSTED_PROXY` to the reverse proxy address
 - [ ] set `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` for public deployments
+- [ ] set `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` to the exact frontend origin when serving browser clients
+- [ ] set `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` to limit total daily distribution
 - [ ] rotate the admin token if it is ever exposed
 
 ## Recommended operator stance
 
-The binary provides persistent claim storage, real readiness probes, persistent rate limiting, captcha support, trusted-proxy IP extraction, and an active admin API. It is suitable for a testnet faucet deployment behind a reverse proxy with TLS. Remaining gaps are CORS policy and daily budget enforcement.
+The binary provides persistent claim storage, real readiness probes, persistent rate limiting, captcha verification, risk engine support, daily budget enforcement, configurable exact-origin CORS, trusted-proxy IP extraction, structured per-request logging, and an active admin API. It is suitable for a testnet faucet deployment behind a reverse proxy with TLS. With captcha enabled it is appropriate for a public faucet deployment.
