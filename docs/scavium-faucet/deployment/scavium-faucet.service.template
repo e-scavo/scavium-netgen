@@ -31,6 +31,8 @@ LockPersonality=true
 RestrictNamespaces=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
+# If the first boot fails on the target host, test by temporarily commenting
+# MemoryDenyWriteExecute=true, then run systemctl daemon-reload and restart.
 MemoryDenyWriteExecute=true
 CapabilityBoundingSet=
 AmbientCapabilities=

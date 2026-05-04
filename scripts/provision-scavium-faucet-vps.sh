@@ -109,11 +109,6 @@ env_has_placeholders() {
 
 write_bootstrap_nginx_config() {
     cat >/etc/nginx/sites-available/scavium-faucet <<'EOF'
-upstream scavium_faucet_backend {
-    server 127.0.0.1:18080;
-    keepalive 32;
-}
-
 limit_req_zone $binary_remote_addr zone=faucet_req:10m rate=10r/s;
 limit_conn_zone $binary_remote_addr zone=faucet_conn:10m;
 
@@ -133,18 +128,14 @@ server {
     location / {
         limit_req zone=faucet_req burst=20 nodelay;
         limit_conn faucet_conn 20;
+        add_header Retry-After 300 always;
+        return 503;
+    }
 
-        proxy_pass http://scavium_faucet_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Request-ID $request_id;
-        proxy_connect_timeout 5s;
-        proxy_send_timeout 30s;
-        proxy_read_timeout 30s;
+    error_page 503 @bootstrap_maintenance;
+    location @bootstrap_maintenance {
+        default_type text/plain;
+        return 503 'TLS bootstrap in progress. Retry after certificate installation.';
     }
 }
 EOF
@@ -226,18 +217,24 @@ cat <<'EOF'
 
 Manual next steps:
 1. Edit /etc/scavium-faucet/scavium-faucet.env and fill REPLACE_WITH_* values.
-2. Confirm DNS A/AAAA for faucet.testnet.scavium.network points to this host.
-3. Run certbot dry-run:
+2. Start the service only after the env file is complete:
+    Option A: rerun this script with --execute --start-service
+    Option B: systemctl start scavium-faucet.service
+3. If the first boot fails, test by temporarily commenting MemoryDenyWriteExecute=true in /etc/systemd/system/scavium-faucet.service, then run:
+    systemctl daemon-reload
+    systemctl restart scavium-faucet.service
+4. Confirm DNS A/AAAA for faucet.testnet.scavium.network points to this host.
+5. Run certbot dry-run:
     certbot --nginx -d faucet.testnet.scavium.network --agree-tos --email OPS_EMAIL --redirect --dry-run
-4. Run certbot live:
+6. Run certbot live:
     certbot --nginx -d faucet.testnet.scavium.network --agree-tos --email OPS_EMAIL --redirect
-5. After certbot succeeds, switch nginx to HTTPS template and reload:
+7. After certbot succeeds, switch nginx to HTTPS template and reload:
     sudo cp /etc/nginx/sites-available/scavium-faucet.https.template /etc/nginx/sites-available/scavium-faucet
     sudo nginx -t && sudo systemctl reload nginx
-6. Smoke checks:
+8. Smoke checks after the service is running:
    curl -fsS http://127.0.0.1:18080/health
    curl -fsS http://127.0.0.1:18080/ready
    curl -fsS https://faucet.testnet.scavium.network/health
-7. Logs:
+9. Logs:
    journalctl -u scavium-faucet.service -f
 EOF
