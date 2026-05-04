@@ -8,9 +8,9 @@ This directory documents the **implemented project surface**, not the full roadm
 
 `scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
 
-Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is also CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention now documented as the active production baseline.
+Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is also CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention now documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service.
 
-The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, and loopback-isolated backend exposure.
+The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, and enriched health/readiness probes.
 
 ## Documentation
 
@@ -38,7 +38,11 @@ The service is production-ready for the current testnet scope, including validat
 - Captcha verification, durable abuse signal capture, trusted-proxy IP extraction, user-agent forwarding, and persistent rate limits (IP per hour, address per day) are active in claim creation.
 - CORS is configurable via `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS`; exact-origin matching only, wildcard `*` rejected at startup, admin paths always excluded. Empty (default) disables CORS headers entirely.
 - Daily distribution is optionally capped by `SCAVIUM_FAUCET_DAILY_BUDGET_WEI`; the limit is enforced atomically in SQLite and resets at UTC midnight.
-- Each request produces a structured JSON access log line on stdout containing `request_id`, `method`, `path`, `status`, `duration`, and `remote_ip`; no secrets or request bodies are logged.
+- Each request produces a structured JSON access log line on stdout containing `request_id`, `correlation_id`, `method`, `path`, `status`, `duration`, and `remote_ip`; no secrets or request bodies are logged.
+- `X-Request-ID` and `X-Correlation-ID` are echoed on responses; when no correlation ID is supplied, the request ID is used as the correlation ID.
+- The claim path emits safe structured events for accepted and rejected claims without logging addresses, raw fingerprints, captcha tokens, request bodies, secrets, or idempotency-key values.
+- `GET /api/v1/admin/metrics` exposes lightweight in-process runtime counters when `SCAVIUM_FAUCET_ADMIN_TOKEN` is configured.
+- `/health` includes uptime and build metadata; `/ready` includes per-check duration and aggregate readiness summary while keeping the real DB/queue/RPC/wallet probes.
 
 ## Quick start
 
@@ -72,3 +76,9 @@ This keeps the abuse ledger useful for progressive enforcement and investigation
 Phase 15 is now closed as a cumulative abuse-protection layer for the production-ready public faucet. The implemented path covers human verification, durable claim-intake signals, conservative progressive enforcement, and bounded retention for the abuse ledger.
 
 The closure is documentary only: no runtime code, public API contract, deployment topology, nginx exposure model, or database schema changes are required. Phase 16 can now build observability and operator feedback loops on top of the stable abuse dataset and existing structured request logs.
+
+## Phase 16.close — Observability & Operations Closure
+
+Phase 16 is closed as an incremental observability layer over the production faucet. Request correlation, safe structured logging, runtime counters, admin-protected metrics, and enriched health/readiness responses are now part of the active operational baseline.
+
+The closure remains contract-preserving: no public claim response shape changed, no backend exposure model changed, no database migration was added, and no external metrics service was required. Phase 17 can now extend token support with enough runtime visibility to diagnose claim intake, rejection classes, readiness degradation, and deployed build identity.

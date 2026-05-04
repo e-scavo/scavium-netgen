@@ -2,7 +2,7 @@
 
 Base path: `/api/v1`
 
-All API responses are JSON. Every request gets an `X-Request-ID` response header; if the client does not send one, the server generates one.
+All API responses are JSON. Every request gets an `X-Request-ID` response header; if the client does not send one, the server generates one. The server also echoes `X-Correlation-ID`; when the client does not send one, the correlation ID falls back to the request ID.
 
 Normalized error responses use this shape:
 
@@ -26,7 +26,13 @@ Liveness endpoint.
 ```json
 {
   "status": "ok",
-  "time": "2026-05-03T12:00:00Z"
+  "time": "2026-05-03T12:00:00Z",
+  "uptime_seconds": 3600,
+  "build": {
+    "version": "dev",
+    "commit": "unknown",
+    "build_date": "unknown"
+  }
 }
 ```
 
@@ -47,11 +53,16 @@ Healthy example:
 {
   "status": "ok",
   "checks": [
-    { "name": "db", "status": "ok" },
-    { "name": "queue", "status": "ok" },
-    { "name": "rpc", "status": "ok" },
-    { "name": "wallet", "status": "ok" }
+    { "name": "db", "status": "ok", "duration_ms": 1 },
+    { "name": "queue", "status": "ok", "duration_ms": 1 },
+    { "name": "rpc", "status": "ok", "duration_ms": 4 },
+    { "name": "wallet", "status": "ok", "duration_ms": 8 }
   ],
+  "summary": {
+    "total": 4,
+    "ok": 4,
+    "degraded": 0
+  },
   "time": "2026-05-03T12:00:00Z"
 }
 ```
@@ -227,6 +238,38 @@ Authorization: Bearer <SCAVIUM_FAUCET_ADMIN_TOKEN>
 ```
 
 Wrong or missing token returns `401`. Empty configured token returns `503`.
+
+### `GET /api/v1/admin/metrics`
+
+Returns lightweight in-process runtime counters and build/runtime metadata. The endpoint is protected by the same bearer-token middleware as the rest of `/api/v1/admin/*`. Counters reset when the faucet process restarts and are intended for immediate operational diagnostics, not durable accounting.
+
+```json
+{
+  "started_at": "2026-05-03T12:00:00Z",
+  "uptime_seconds": 3600,
+  "build": {
+    "version": "dev",
+    "commit": "unknown",
+    "build_date": "unknown"
+  },
+  "claims": {
+    "accepted": 12,
+    "rejected": 3,
+    "rejected_by_risk": 1,
+    "faucet_unavailable": 0,
+    "claim_unavailable": 0
+  },
+  "captcha": {
+    "failed": 1
+  },
+  "rate_limits": {
+    "limited": 1
+  },
+  "budgets": {
+    "daily_exceeded": 1
+  }
+}
+```
 
 ### `GET /api/v1/admin/dashboard`
 

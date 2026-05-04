@@ -34,7 +34,7 @@ Configuration is loaded from environment variables at startup via `internal/conf
 | `SCAVIUM_FAUCET_CAPTCHA_SECRET` | empty | Server-side secret for the chosen captcha provider; required when provider is `hcaptcha`, `recaptcha`, or `turnstile` |
 | `SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL` | provider default | Optional verification URL override. When empty, the runtime uses the provider default (`hcaptcha`, `recaptcha`, or Cloudflare Turnstile) |
 | `SCAVIUM_FAUCET_MODE` | `active` | Operational mode reported by `/api/v1/status`; `active`, `paused`, or `maintenance` |
-| `SCAVIUM_FAUCET_ADMIN_TOKEN` | empty | Bearer token for `/api/v1/admin/*` endpoints; admin API is active when non-empty and uses constant-time comparison; never logged |
+| `SCAVIUM_FAUCET_ADMIN_TOKEN` | empty | Bearer token for `/api/v1/admin/*` endpoints, including `/api/v1/admin/metrics`; admin API is active when non-empty and uses constant-time comparison; never logged |
 | `SCAVIUM_FAUCET_WORKER_ENABLED` | `true` | Enables the background worker that processes the SQLite claim queue; default is enabled |
 | `SCAVIUM_FAUCET_WORKER_POLL_SECONDS` | `5` | Worker polling interval in seconds |
 | `SCAVIUM_FAUCET_WATCHER_ENABLED` | `false` (dry-run), auto `true` (non-dry-run) | Enables the background watcher that polls for on-chain confirmations; automatically enabled in production (`DRY_RUN=false`) unless explicitly set |
@@ -106,6 +106,7 @@ SCAVIUM_FAUCET_ADMIN_TOKEN=replace-me
 - Keep secrets in an external environment file or service manager, not in the repository.
 - Set `SCAVIUM_FAUCET_BIND_ADDR` to loopback and terminate TLS in a reverse proxy.
 - Treat `SCAVIUM_FAUCET_ADMIN_TOKEN`, `SCAVIUM_FAUCET_PRIVATE_KEY`, and `SCAVIUM_FAUCET_CAPTCHA_SECRET` as secrets; none are logged by the binary. `SCAVIUM_FAUCET_CAPTCHA_SITE_KEY` is intentionally public and is surfaced to the frontend.
+- No extra environment variable is required for Phase 16 observability. Request correlation, structured logs, health/readiness enrichment, and process-local metrics are active in the binary. `/api/v1/admin/metrics` is available only when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set.
 - Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to the loopback or reverse proxy address so that IP-based rate limiting uses the real client IP rather than `127.0.0.1`.
 - Set `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` only to exact public origins that should call the API from browsers. Leave it empty to disable CORS headers; `*` is rejected.
 - `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced against queued, sent, and confirmed claims and resets at UTC midnight.

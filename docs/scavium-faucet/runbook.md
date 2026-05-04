@@ -18,10 +18,13 @@ Validated production topology:
 Validated production outcomes:
 
 - `/health` and `/ready` successful
+- `/health` exposes uptime and build metadata
+- `/ready` exposes real probe status, per-check duration, and readiness summary
 - claim flow successful through `queued` -> `sending` -> `confirmed`
 - rate limiting observed (`429`)
 - CORS configuration active and verified
-- request logging active in journald
+- request and correlation logging active in journald
+- admin-protected runtime metrics available when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set
 - RPC connectivity and transaction sending verified
 
 Operational confirmations (Phase 14 final validation):
@@ -63,8 +66,8 @@ curl -s http://127.0.0.1:18080/api/v1/version
 
 What to expect:
 
-- `/health` returns `{"status":"ok",...}`
-- `/ready` returns `status: "ok"` with real DB and queue probes; in non-dry-run mode also includes RPC and wallet probes
+- `/health` returns `status: "ok"` plus `uptime_seconds` and build metadata
+- `/ready` returns `status: "ok"` with real DB and queue probes; in non-dry-run mode also includes RPC and wallet probes; each check includes `duration_ms` and the response includes a `summary` object
 - `/api/v1/status` returns the configured network name, symbol, and `dry_run` flag
 
 ## Manual API smoke test
@@ -102,10 +105,11 @@ In dry-run mode the background worker picks up the queued claim and advances its
 - The background worker processes queued claims automatically (enabled by default, polls every 5 s).
 - `/ready` runs real probes: DB and queue always; RPC and wallet when `DRY_RUN=false`.
 - The admin API (`/api/v1/admin/*`) is active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set.
+- `/api/v1/admin/metrics` reports process-local runtime counters and resets on process restart.
 - In dry-run mode no on-chain transactions are submitted; the `DryRunSender` simulates success.
 - The watcher (on-chain confirmation poller) is only active when `DRY_RUN=false`.
 
-## CORS, daily budget, and logging
+## CORS, daily budget, metrics, and logging
 
 ### CORS
 
@@ -127,15 +131,27 @@ Example — limit to 100 ether per day on a network with 18-decimal tokens:
 export SCAVIUM_FAUCET_DAILY_BUDGET_WEI=100000000000000000000
 ```
 
+
+### Runtime metrics
+
+`GET /api/v1/admin/metrics` is available when `SCAVIUM_FAUCET_ADMIN_TOKEN` is configured. It uses the same bearer-token contract as the rest of the admin API:
+
+```bash
+curl -s http://127.0.0.1:18080/api/v1/admin/metrics \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+```
+
+The response includes process-local counters for accepted claims, rejected claims, captcha failures, rate-limit hits, daily-budget exceedances, faucet-unavailable responses, claim-unavailable responses, and risk rejections. It also includes build metadata and uptime. These counters are operational diagnostics only and reset when the process restarts; durable claim history remains in SQLite.
+
 ### Request logging
 
 The binary writes one JSON log line per request to stdout. Each line contains:
 
 ```json
-{"time":"2026-05-04T12:00:00Z","level":"info","message":"http request","request_id":"abc123","method":"POST","path":"/api/v1/claim","status":202,"duration":"3ms","remote_ip":"1.2.3.4"}
+{"time":"2026-05-04T12:00:00Z","level":"info","message":"http request","request_id":"abc123","correlation_id":"abc123","method":"POST","path":"/api/v1/claim","status":202,"duration":"3ms","remote_ip":"1.2.3.4"}
 ```
 
-Request bodies, captcha tokens, fingerprints, and secret configuration values are never logged. Collect stdout with `journalctl` or forward to a log aggregator.
+Request bodies, captcha tokens, raw fingerprints, wallet addresses, idempotency-key values, and secret configuration values are never logged. Claim-flow events log only safe booleans such as `has_fingerprint`, `captcha_token_present`, and `has_idempotency_key`, plus rejection code/retry metadata when present. Collect stdout with `journalctl` or forward to a log aggregator.
 
 ## Service manager example
 
@@ -162,6 +178,7 @@ The following command set was used during successful production rollout and vali
 - `journalctl -u scavium-faucet.service -f`
 - `curl -fsS http://127.0.0.1:18080/health`
 - `curl -fsS http://127.0.0.1:18080/ready`
+- `curl -fsS http://127.0.0.1:18080/api/v1/admin/metrics -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"`
 - `curl -fsS https://faucet.testnet.scavium.network/health`
 
 ## Deployment notes
@@ -206,6 +223,10 @@ This should not happen with the current binary. Claims are persisted in SQLite. 
 
 `503` means `SCAVIUM_FAUCET_ADMIN_TOKEN` is empty or not set. Set the token in the environment file and restart the service.
 
+### `/api/v1/admin/metrics` returns `401`
+
+`401` means the metrics endpoint is active but the request is missing `Authorization: Bearer <token>` or the supplied token does not match `SCAVIUM_FAUCET_ADMIN_TOKEN`. Use the same token contract as the rest of the admin API.
+
 
 ## Abuse signal retention
 
@@ -223,3 +244,15 @@ Example manual inspection from the VPS:
 ```bash
 sqlite3 /var/lib/scavium-faucet/scavium-faucet.db   "SELECT kind, COUNT(*) FROM abuse_signals WHERE created_at >= datetime('now','-24 hours') GROUP BY kind ORDER BY COUNT(*) DESC;"
 ```
+
+## Phase 16 observability closure
+
+Phase 16 closes with the following operational baseline:
+
+- request and correlation IDs are available as response headers and structured log fields
+- access logs and claim-flow logs are JSON and safe for journald/log aggregation
+- `/api/v1/admin/metrics` provides lightweight process-local counters behind the admin bearer token
+- `/health` carries liveness, uptime, and build identity
+- `/ready` carries real dependency probes, per-check duration, and aggregate summary counts
+
+No reverse-proxy exposure change is required. Keep the backend bound to loopback and expose only through nginx/TLS.
