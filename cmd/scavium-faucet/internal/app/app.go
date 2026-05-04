@@ -66,6 +66,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 	}
 
 	readService := faucet.NewPersistentReadService(cfg, store, store, store)
+	readService.SetAbuseSignalRecorder(store)
 	captchaVerifier, err := newCaptchaVerifier(cfg)
 	if err != nil {
 		_ = store.Close()

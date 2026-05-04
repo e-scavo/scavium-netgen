@@ -24,9 +24,11 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 - Frontend widget integration
 - Backend verification
 
-### 15.2 — Fingerprinting
-- IP + User-Agent correlation
-- Optional entropy/fingerprint layer
+### 15.2 — Claim Abuse Signals
+- Durable SQLite-backed abuse signal capture
+- IP + User-Agent + address + fingerprint correlation
+- Captcha, risk, cooldown, rate-limit, budget, and accepted-claim observations
+- Non-blocking telemetry layer for later adaptive policy and admin review
 
 ### 15.3 — Blacklisting
 - IP blocking

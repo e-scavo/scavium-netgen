@@ -26,6 +26,11 @@ type DailyBudgetStore interface {
 	DailyClaimAmountWei(ctx context.Context, dayStart, dayEnd time.Time, statuses []ClaimStatus) (*big.Int, error)
 }
 
+// AbuseSignalRecorder persists claim intake abuse signals for later analysis.
+type AbuseSignalRecorder interface {
+	RecordAbuseSignal(ctx context.Context, signal AbuseSignal) error
+}
+
 // RateLimiter evaluates whether a key can proceed within a sliding window.
 type RateLimiter interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (RateLimitDecision, error)

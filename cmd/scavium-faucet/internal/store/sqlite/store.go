@@ -22,6 +22,7 @@ import (
 var _ domain.ClaimStore = (*Store)(nil)
 var _ domain.DailyBudgetStore = (*Store)(nil)
 var _ domain.RateLimiter = (*Store)(nil)
+var _ domain.AbuseSignalRecorder = (*Store)(nil)
 var _ domain.QueueStore = (*Store)(nil)
 
 // ErrNotFound reports that the requested record does not exist.
@@ -124,6 +125,90 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// RecordAbuseSignal persists a production-safe anti-abuse signal.  Signal
+// writes are intentionally best-effort at the service layer, but this method
+// returns errors so tests and future admin tooling can surface storage issues.
+func (s *Store) RecordAbuseSignal(ctx context.Context, signal domain.AbuseSignal) error {
+	if signal.Kind == "" {
+		return errors.New("abuse signal kind is required")
+	}
+	if signal.CreatedAt.IsZero() {
+		signal.CreatedAt = time.Now().UTC()
+	}
+	address := ""
+	if signal.Address != (common.Address{}) {
+		address = signal.Address.Hex()
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO abuse_signals (
+			kind, address, remote_ip, fingerprint, user_agent, claim_id, reason, score, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		string(signal.Kind),
+		address,
+		strings.TrimSpace(signal.RemoteIP),
+		strings.TrimSpace(signal.Fingerprint),
+		strings.TrimSpace(signal.UserAgent),
+		strings.TrimSpace(signal.ClaimID),
+		strings.TrimSpace(signal.Reason),
+		signal.Score,
+		formatTime(signal.CreatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("record abuse signal: %w", err)
+	}
+	return nil
+}
+
+// ListAbuseSignals returns recent abuse signals for tests and future admin
+// diagnostics.  It is deliberately not exposed on the public API.
+func (s *Store) ListAbuseSignals(ctx context.Context, limit int) ([]domain.AbuseSignal, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, kind, address, remote_ip, fingerprint, user_agent, claim_id, reason, score, created_at
+		FROM abuse_signals
+		ORDER BY id ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list abuse signals: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.AbuseSignal
+	for rows.Next() {
+		var signal domain.AbuseSignal
+		var kind, address, createdAt string
+		if err := rows.Scan(
+			&signal.ID,
+			&kind,
+			&address,
+			&signal.RemoteIP,
+			&signal.Fingerprint,
+			&signal.UserAgent,
+			&signal.ClaimID,
+			&signal.Reason,
+			&signal.Score,
+			&createdAt,
+		); err != nil {
+			return nil, err
+		}
+		signal.Kind = domain.AbuseSignalKind(kind)
+		if address != "" {
+			signal.Address = common.HexToAddress(address)
+		}
+		created, err := parseTime(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid abuse signal created_at: %w", err)
+		}
+		signal.CreatedAt = created
+		out = append(out, signal)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) CreateClaim(ctx context.Context, claim domain.Claim) (domain.Claim, error) {

@@ -384,6 +384,118 @@ func TestPersistentReadServiceRiskEngineRejectsClaim(t *testing.T) {
 	}
 }
 
+func TestPersistentReadServiceRecordsAbuseSignals(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+	service.SetAbuseSignalRecorder(store)
+	service.SetCaptchaVerifier(fakeCaptchaVerifier{passed: true})
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:      persistentTestAddress(),
+		RemoteIP:     "203.0.113.10",
+		UserAgent:    "wallet-test/1.0",
+		CaptchaToken: "ok-token",
+		Fingerprint:  "browser-1",
+	})
+	if err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	if len(signals) != 2 {
+		t.Fatalf("signals len = %d, want 2", len(signals))
+	}
+	if signals[0].Kind != domain.AbuseSignalCaptchaPassed {
+		t.Fatalf("first signal kind = %q", signals[0].Kind)
+	}
+	if signals[1].Kind != domain.AbuseSignalClaimAccepted {
+		t.Fatalf("second signal kind = %q", signals[1].Kind)
+	}
+	if signals[1].ClaimID == "" {
+		t.Fatal("accepted signal claim id is empty")
+	}
+	if signals[1].RemoteIP != "203.0.113.10" || signals[1].Fingerprint != "browser-1" {
+		t.Fatalf("unexpected signal metadata: %+v", signals[1])
+	}
+}
+
+func TestPersistentReadServiceRecordsFailedCaptchaSignal(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+	service.SetAbuseSignalRecorder(store)
+	service.SetCaptchaVerifier(fakeCaptchaVerifier{passed: false, reason: "captcha failed"})
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:      persistentTestAddress(),
+		RemoteIP:     "203.0.113.10",
+		CaptchaToken: "bad-token",
+	})
+	if err == nil {
+		t.Fatal("create claim returned nil error")
+	}
+	if !errors.Is(err, ErrCaptchaFailed) {
+		t.Fatalf("error = %v, want ErrCaptchaFailed", err)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Fatalf("signals len = %d, want 1", len(signals))
+	}
+	if signals[0].Kind != domain.AbuseSignalCaptchaFailed || signals[0].Reason != "captcha failed" {
+		t.Fatalf("unexpected signal: %+v", signals[0])
+	}
+}
+
+func TestPersistentReadServiceRecordsRateLimitSignal(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.RateLimitAddrPerDay = 100
+	cfg.RateLimitIPPerHour = 1
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	service.SetAbuseSignalRecorder(store)
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:  persistentTestAddress(),
+		RemoteIP: "203.0.113.10",
+	}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:  persistentSecondTestAddress(),
+		RemoteIP: "203.0.113.10",
+	})
+	if err == nil {
+		t.Fatal("second claim returned nil error")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("error = %v, want ErrRateLimited", err)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	if len(signals) != 2 {
+		t.Fatalf("signals len = %d, want 2", len(signals))
+	}
+	if signals[1].Kind != domain.AbuseSignalRateLimited {
+		t.Fatalf("second signal kind = %q", signals[1].Kind)
+	}
+	if signals[1].Reason == "" {
+		t.Fatal("rate limit signal reason is empty")
+	}
+}
+
 func openPersistentTestStore(t *testing.T, path string) *sqlite.Store {
 	t.Helper()
 	if path == "" {

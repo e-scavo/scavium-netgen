@@ -6,6 +6,7 @@
 
 - opens SQLite (WAL mode, 5 s busy timeout) from `SCAVIUM_FAUCET_DATABASE_PATH` and runs embedded migrations automatically
 - `faucet.NewPersistentReadService(cfg, store, store, store)` for public read and claim routes
+- SQLite-backed abuse signal recorder attached to the persistent read service
 - captcha verifier selected by `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` (`disabled`, `dev`, `hcaptcha`, `recaptcha`, `turnstile`)
 - `runtimeChecks()` — real DB and queue probes; RPC and wallet probes when not in dry-run mode
 - `AdminToken: cfg.AdminToken` passed into `httpapi.Dependencies`, enabling the admin API when the token is set
@@ -30,6 +31,7 @@ scavium-faucet http.Server
   |     +-- runtimeChecks()               -> real DB/queue (+ RPC/wallet) probes
   |     +-- faucet.PersistentReadService  -> SQLite-backed claims/idempotency
   |     +-- captcha verifier              -> configured provider or nil
+  |     +-- abuse signal recorder         -> SQLite-backed non-blocking telemetry
   |     +-- rate limiter                  -> SQLite-backed IP/address limits
   |     +-- admin middleware              -> bearer token when AdminToken set
   |     `-- version.Current()
@@ -55,6 +57,7 @@ POST /api/v1/claim
   +-- optional Idempotency-Key header lookup
   +-- captcha verification (if provider configured)
   +-- risk evaluation
+  +-- record captcha/risk/cooldown/rate-limit/budget/accepted-claim signals
   +-- persistent rate-limit check (IP per hour, address per day, fingerprint)
   +-- daily budget check (if DAILY_BUDGET_WEI set)
   +-- persist claim to SQLite with status "received"
@@ -79,8 +82,9 @@ The live binary persists state in SQLite (WAL journal mode, 5 s busy timeout):
 - idempotency key index for duplicate-safe claim submission
 - rate-limit counters per IP (hourly) and per address (daily)
 - queue metadata (`next_attempt_at`, retry count) used by the background worker
+- abuse signals with kind, address, remote IP, fingerprint, user-agent, claim ID, reason, score, and timestamp
 
-Migrations (`001_initial.sql`, `002_queue.sql`) run automatically on startup inside `sqlite.Open()`. Restarting the process does not lose queued or in-flight claims.
+Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`) run automatically on startup inside `sqlite.Open()`. Restarting the process does not lose queued or in-flight claims or recorded abuse observations.
 
 ## Package roles
 
@@ -93,14 +97,14 @@ Migrations (`001_initial.sql`, `002_queue.sql`) run automatically on startup ins
 | `internal/faucet` | SQLite-backed persistent read/claim service (`PersistentReadService`) |
 | `internal/ready` | Real DB/queue probes, optional RPC/wallet probes, and aggregate result shaping |
 | `internal/admin` | In-memory admin service and bearer-token middleware; enabled when `AdminToken` is set |
-| `internal/domain` | Shared claim and status types plus address validation |
+| `internal/domain` | Shared claim, abuse signal, status, and validation contracts |
 | `internal/observability` | Structured JSON logger |
 | `internal/version` | Build metadata payload for `/api/v1/version` |
 | `internal/iputil` | Trusted-proxy IP extraction; wired into claim handler |
 | `internal/captcha` | Captcha verifier selection and HTTP-based verification; wired into `PersistentReadService` |
 | `internal/abuse` | Risk evaluation helpers used during claim creation |
 | `internal/chain` | RPC client, signer, `EthSender`, `DryRunSender`, and `Watcher`; wired at startup based on `DryRun` |
-| `internal/store/sqlite` | SQLite persistence layer: claims, queue, rate limits, migrations |
+| `internal/store/sqlite` | SQLite persistence layer: claims, queue, rate limits, abuse signals, migrations |
 | `internal/worker` | Background worker polling SQLite queue and dispatching the configured sender |
 
 ## Startup and shutdown

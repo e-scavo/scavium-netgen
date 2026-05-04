@@ -58,6 +58,44 @@ type Transaction struct {
 	UpdatedAt   time.Time
 }
 
+// AbuseSignalKind classifies production-safe signals captured during claim intake.
+type AbuseSignalKind string
+
+const (
+	// AbuseSignalCaptchaPassed records a successful captcha verification.
+	AbuseSignalCaptchaPassed AbuseSignalKind = "captcha_passed"
+	// AbuseSignalCaptchaFailed records a failed captcha verification.
+	AbuseSignalCaptchaFailed AbuseSignalKind = "captcha_failed"
+	// AbuseSignalRiskAllowed records an allow decision from the risk engine.
+	AbuseSignalRiskAllowed AbuseSignalKind = "risk_allowed"
+	// AbuseSignalRiskRejected records a reject decision from the risk engine.
+	AbuseSignalRiskRejected AbuseSignalKind = "risk_rejected"
+	// AbuseSignalCooldownActive records a claim denied by wallet cooldown.
+	AbuseSignalCooldownActive AbuseSignalKind = "cooldown_active"
+	// AbuseSignalRateLimited records a claim denied by IP/address/fingerprint limits.
+	AbuseSignalRateLimited AbuseSignalKind = "rate_limited"
+	// AbuseSignalDailyBudgetExceeded records a claim denied by the daily faucet budget.
+	AbuseSignalDailyBudgetExceeded AbuseSignalKind = "daily_budget_exceeded"
+	// AbuseSignalClaimAccepted records a claim accepted into durable storage.
+	AbuseSignalClaimAccepted AbuseSignalKind = "claim_accepted"
+)
+
+// AbuseSignal is a durable, production-safe anti-abuse observation.
+// It stores request metadata required for later analysis without changing
+// the public claim contract or hard-blocking behavior.
+type AbuseSignal struct {
+	ID          int64
+	Kind        AbuseSignalKind
+	Address     common.Address
+	RemoteIP    string
+	Fingerprint string
+	UserAgent   string
+	ClaimID     string
+	Reason      string
+	Score       int
+	CreatedAt   time.Time
+}
+
 // FaucetConfig is the read model exposed by faucet status/config endpoints.
 type FaucetConfig struct {
 	NetworkName     string

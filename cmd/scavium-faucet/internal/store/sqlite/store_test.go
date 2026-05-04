@@ -18,7 +18,7 @@ func TestMigrateCreatesRequiredTables(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "schema_migrations"} {
+	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "schema_migrations"} {
 		if !tableExists(t, store.db, table) {
 			t.Fatalf("table %s does not exist", table)
 		}
@@ -29,7 +29,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at"} {
+	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip"} {
 		if !indexExists(t, store.db, index) {
 			t.Fatalf("index %s does not exist", index)
 		}
@@ -858,5 +858,53 @@ func TestListStuckSendingExcludesRecentClaims(t *testing.T) {
 	}
 	if len(stuck) != 0 {
 		t.Fatalf("expected 0 stuck claims, got %d", len(stuck))
+	}
+}
+
+func TestRecordAndListAbuseSignals(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 4, 13, 0, 0, 0, time.UTC)
+	address := common.HexToAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if err := store.RecordAbuseSignal(context.Background(), domain.AbuseSignal{
+		Kind:        domain.AbuseSignalCaptchaFailed,
+		Address:     address,
+		RemoteIP:    " 203.0.113.10 ",
+		Fingerprint: " browser-1 ",
+		UserAgent:   " wallet-test/1.0 ",
+		ClaimID:     " claim_1 ",
+		Reason:      " bad captcha ",
+		Score:       7,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("record abuse signal: %v", err)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Fatalf("signals len = %d, want 1", len(signals))
+	}
+	signal := signals[0]
+	if signal.Kind != domain.AbuseSignalCaptchaFailed {
+		t.Fatalf("kind = %q", signal.Kind)
+	}
+	if signal.Address != address {
+		t.Fatalf("address = %s", signal.Address.Hex())
+	}
+	if signal.RemoteIP != "203.0.113.10" {
+		t.Fatalf("remote ip = %q", signal.RemoteIP)
+	}
+	if signal.Fingerprint != "browser-1" || signal.ClaimID != "claim_1" || signal.Reason != "bad captcha" {
+		t.Fatalf("unexpected signal metadata: %+v", signal)
+	}
+	if signal.Score != 7 {
+		t.Fatalf("score = %d, want 7", signal.Score)
+	}
+	if !signal.CreatedAt.Equal(now) {
+		t.Fatalf("created_at = %s, want %s", signal.CreatedAt, now)
 	}
 }

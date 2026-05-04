@@ -38,6 +38,7 @@ type PersistentReadService struct {
 	rateLimiter     domain.RateLimiter
 	captchaVerifier domain.CaptchaVerifier
 	riskEngine      domain.RiskEngine
+	abuseSignals    domain.AbuseSignalRecorder
 	now             func() time.Time
 	generateClaimID func() (string, error)
 }
@@ -82,6 +83,11 @@ func (s *PersistentReadService) SetCaptchaVerifier(verifier domain.CaptchaVerifi
 // SetRiskEngine enables anti-abuse risk evaluation for claim creation.
 func (s *PersistentReadService) SetRiskEngine(engine domain.RiskEngine) {
 	s.riskEngine = engine
+}
+
+// SetAbuseSignalRecorder enables durable claim intake signal recording.
+func (s *PersistentReadService) SetAbuseSignalRecorder(recorder domain.AbuseSignalRecorder) {
+	s.abuseSignals = recorder
 }
 
 func (s *PersistentReadService) Status(context.Context) (StatusResponse, error) {
@@ -167,10 +173,18 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, err
 	}
 	if remaining > 0 {
-		return ClaimResponse{}, claimRetryError(ErrCooldownActive, fmt.Sprintf("retry after %d seconds", remaining), remaining)
+		reason := fmt.Sprintf("retry after %d seconds", remaining)
+		s.recordAbuseSignal(ctx, request, domain.AbuseSignalCooldownActive, "", reason, 0)
+		return ClaimResponse{}, claimRetryError(ErrCooldownActive, reason, remaining)
 	}
 
 	if err := s.enforceRateLimits(ctx, request); err != nil {
+		reason := err.Error()
+		var claimErr *ClaimError
+		if errors.As(err, &claimErr) && claimErr.Reason != "" {
+			reason = claimErr.Reason
+		}
+		s.recordAbuseSignal(ctx, request, domain.AbuseSignalRateLimited, "", reason, 0)
 		return ClaimResponse{}, err
 	}
 
@@ -190,11 +204,21 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 
 	created, err := s.createClaim(ctx, claim, idempotencyKey)
 	if err != nil {
+		if errors.Is(err, ErrDailyBudgetExceeded) {
+			var claimErr *ClaimError
+			reason := err.Error()
+			if errors.As(err, &claimErr) && claimErr.Reason != "" {
+				reason = claimErr.Reason
+			}
+			s.recordAbuseSignal(ctx, request, domain.AbuseSignalDailyBudgetExceeded, "", reason, 0)
+		}
 		return ClaimResponse{}, err
 	}
 	if created.ID != claim.ID {
 		return claimResponse(created, idempotencyKey), nil
 	}
+
+	s.recordAbuseSignal(ctx, request, domain.AbuseSignalClaimAccepted, created.ID, "", 0)
 
 	if err := s.queue.Enqueue(ctx, created.ID); err != nil {
 		return ClaimResponse{}, fmt.Errorf("enqueue claim: %w", err)
@@ -319,10 +343,13 @@ func (s *PersistentReadService) verifyCaptcha(ctx context.Context, request Claim
 		return err
 	}
 	if decision.Passed {
+		s.recordAbuseSignal(ctx, request, domain.AbuseSignalCaptchaPassed, "", decision.Reason, 0)
 		return nil
 	}
-	if decision.Reason != "" {
-		return claimError(ErrCaptchaFailed, decision.Reason)
+	reason := decision.Reason
+	s.recordAbuseSignal(ctx, request, domain.AbuseSignalCaptchaFailed, "", reason, 0)
+	if reason != "" {
+		return claimError(ErrCaptchaFailed, reason)
 	}
 	return claimError(ErrCaptchaFailed, "")
 }
@@ -342,12 +369,15 @@ func (s *PersistentReadService) evaluateRisk(ctx context.Context, request ClaimR
 		return err
 	}
 	if decision.Allowed {
+		s.recordAbuseSignal(ctx, request, domain.AbuseSignalRiskAllowed, "", decision.Reason, decision.Score)
 		return nil
 	}
-	if decision.Reason != "" {
-		return claimError(ErrClaimRejected, decision.Reason)
+	reason := decision.Reason
+	if reason == "" {
+		reason = "claim rejected by risk engine"
 	}
-	return claimError(ErrClaimRejected, "claim rejected by risk engine")
+	s.recordAbuseSignal(ctx, request, domain.AbuseSignalRiskRejected, "", reason, decision.Score)
+	return claimError(ErrClaimRejected, reason)
 }
 
 func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request ClaimRequest) error {
@@ -365,6 +395,23 @@ func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request C
 		return err
 	}
 	return nil
+}
+
+func (s *PersistentReadService) recordAbuseSignal(ctx context.Context, request ClaimRequest, kind domain.AbuseSignalKind, claimID, reason string, score int) {
+	if s.abuseSignals == nil {
+		return
+	}
+	_ = s.abuseSignals.RecordAbuseSignal(ctx, domain.AbuseSignal{
+		Kind:        kind,
+		Address:     request.Address,
+		RemoteIP:    strings.TrimSpace(request.RemoteIP),
+		Fingerprint: strings.TrimSpace(request.Fingerprint),
+		UserAgent:   strings.TrimSpace(request.UserAgent),
+		ClaimID:     strings.TrimSpace(claimID),
+		Reason:      strings.TrimSpace(reason),
+		Score:       score,
+		CreatedAt:   s.now(),
+	})
 }
 
 func (s *PersistentReadService) allowRateLimit(ctx context.Context, key string, limit int, window time.Duration, fallbackReason string) error {
