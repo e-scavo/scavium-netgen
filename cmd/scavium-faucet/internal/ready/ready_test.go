@@ -19,6 +19,9 @@ func TestEvaluateReportsOK(t *testing.T) {
 	if len(result.Checks) != 4 {
 		t.Fatalf("checks length = %d, want 4", len(result.Checks))
 	}
+	if result.Summary.Total != 4 || result.Summary.OK != 4 || result.Summary.Degraded != 0 {
+		t.Fatalf("summary = %#v", result.Summary)
+	}
 	if _, err := time.Parse(time.RFC3339, result.Time); err != nil {
 		t.Fatalf("time = %q, want RFC3339: %v", result.Time, err)
 	}
@@ -49,6 +52,9 @@ func TestEvaluateReportsDegradedCheck(t *testing.T) {
 	if result.Checks[1].Error != "rpc unavailable" {
 		t.Fatalf("rpc error = %q", result.Checks[1].Error)
 	}
+	if result.Summary.Total != 2 || result.Summary.OK != 1 || result.Summary.Degraded != 1 {
+		t.Fatalf("summary = %#v", result.Summary)
+	}
 }
 
 func TestEvaluateReportsMissingCheckFunction(t *testing.T) {
@@ -59,6 +65,9 @@ func TestEvaluateReportsMissingCheckFunction(t *testing.T) {
 	}
 	if result.Checks[0].Error != "check is not configured" {
 		t.Fatalf("error = %q", result.Checks[0].Error)
+	}
+	if result.Checks[0].DurationMS < 0 {
+		t.Fatalf("duration = %d, want non-negative", result.Checks[0].DurationMS)
 	}
 }
 

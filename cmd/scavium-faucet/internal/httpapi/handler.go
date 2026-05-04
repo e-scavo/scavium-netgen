@@ -32,8 +32,10 @@ type requestIDContextKey struct{}
 type correlationIDContextKey struct{}
 
 type healthResponse struct {
-	Status string `json:"status"`
-	Time   string `json:"time"`
+	Status        string                            `json:"status"`
+	Time          string                            `json:"time"`
+	UptimeSeconds int64                             `json:"uptime_seconds"`
+	Build         observability.RuntimeMetricsBuild `json:"build"`
 }
 
 type ErrorEnvelope struct {
@@ -90,7 +92,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/health", handleHealth(deps.Metrics))
 	mux.HandleFunc("/ready", handleReady(deps.ReadinessChecks))
 	mux.HandleFunc("/api/v1/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/config", handleFaucetConfig(deps.ReadService))
@@ -125,17 +127,23 @@ func NewHandler(deps Dependencies) http.Handler {
 	return CORSHandler(RequestIDMiddleware(handler), deps.CORSOrigins)
 }
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
-		return
-	}
+func handleHealth(metrics *observability.RuntimeMetrics) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
 
-	WriteJSON(w, http.StatusOK, healthResponse{
-		Status: "ok",
-		Time:   time.Now().UTC().Format(time.RFC3339),
-	})
+		now := time.Now().UTC()
+		snapshot := metrics.Snapshot(now)
+		WriteJSON(w, http.StatusOK, healthResponse{
+			Status:        "ok",
+			Time:          now.Format(time.RFC3339),
+			UptimeSeconds: snapshot.UptimeSeconds,
+			Build:         snapshot.Build,
+		})
+	}
 }
 
 func handleNotFound(w http.ResponseWriter, r *http.Request) {
