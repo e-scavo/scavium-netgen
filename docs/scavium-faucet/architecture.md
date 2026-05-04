@@ -9,6 +9,7 @@
 - SQLite-backed abuse signal recorder attached to the persistent read service
 - captcha verifier selected by `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` (`disabled`, `dev`, `hcaptcha`, `recaptcha`, `turnstile`)
 - `runtimeChecks()` — real DB and queue probes; RPC and wallet probes when not in dry-run mode
+- `observability.NewRuntimeMetrics(version.Current())` — process-local counters and build/runtime metadata for health and admin metrics
 - `AdminToken: cfg.AdminToken` passed into `httpapi.Dependencies`, enabling the admin API when the token is set
 - `TrustedProxy` wired for trusted-proxy IP extraction, fingerprint, and user-agent forwarding
 - background worker (enabled by default) processing the SQLite-backed claim queue
@@ -25,10 +26,11 @@ scavium-faucet http.Server
   +-- /health, /ready, /api/v1/*
   |     |
   |     +-- CORSHandler                  -> exact-origin CORS for public paths
-  |     +-- RequestIDMiddleware
+  |     +-- RequestIDMiddleware            -> request ID + correlation ID
   |     +-- RequestLoggingMiddleware      -> structured JSON access log per request
   |     +-- httpapi public handlers
   |     +-- runtimeChecks()               -> real DB/queue (+ RPC/wallet) probes
+  |     +-- RuntimeMetrics                -> process-local counters + uptime/build metadata
   |     +-- faucet.PersistentReadService  -> SQLite-backed claims/idempotency
   |     +-- captcha verifier              -> configured provider or nil
   |     +-- abuse signal recorder         -> SQLite-backed non-blocking telemetry
@@ -92,13 +94,13 @@ Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`) run aut
 |---|---|
 | `cmd/scavium-faucet` | Binary entrypoint and server startup |
 | `internal/config` | Loads and validates environment configuration |
-| `internal/httpapi` | Route registration, JSON helpers, request IDs, CORS middleware, request-logging middleware, admin middleware |
+| `internal/httpapi` | Route registration, JSON helpers, request IDs, correlation IDs, CORS middleware, request-logging middleware, admin middleware, health/ready/metrics handlers |
 | `internal/frontend` | Embedded UI served at `/` |
 | `internal/faucet` | SQLite-backed persistent read/claim service (`PersistentReadService`) |
 | `internal/ready` | Real DB/queue probes, optional RPC/wallet probes, and aggregate result shaping |
 | `internal/admin` | In-memory admin service and bearer-token middleware; enabled when `AdminToken` is set |
 | `internal/domain` | Shared claim, abuse signal, status, and validation contracts |
-| `internal/observability` | Structured JSON logger |
+| `internal/observability` | Structured JSON logger and lightweight process-local runtime metrics |
 | `internal/version` | Build metadata payload for `/api/v1/version` |
 | `internal/iputil` | Trusted-proxy IP extraction; wired into claim handler |
 | `internal/captcha` | Captcha verifier selection and HTTP-based verification; wired into `PersistentReadService` |
@@ -141,3 +143,32 @@ No public API route was added. The new summary contract is internal-only and exi
 The Phase 15 architecture is closed around a conservative claim-intake control loop: captcha verification, abuse signal recording, progressive signal-based enforcement, persistent rate limits, budget checks, claim persistence, and background dispatch remain ordered inside the existing runtime.
 
 No new external service boundary was added beyond the already-configured captcha provider, and no public API route was introduced for abuse operations. The internal contracts added during Phase 15 (`AbuseSignalRecorder`, `AbuseSignalCounter`, `AbuseSignalPruner`, and `AbuseSignalReporter`) now form the stable bridge into Phase 16 metrics and later Phase 18 admin surfaces.
+
+## Phase 16 — Observability & Operations Architecture
+
+Phase 16 adds observability without changing the service topology. The faucet still runs as one loopback-bound Go process behind nginx, with SQLite persistence and the existing background worker/watcher model. The added observability surfaces are internal to the same binary and avoid new external dependencies.
+
+### Request correlation
+
+`RequestIDMiddleware` now manages both `X-Request-ID` and `X-Correlation-ID`. A caller-supplied request ID is preserved; otherwise the backend generates one. A caller-supplied correlation ID is preserved; otherwise it falls back to the request ID. Both values are attached to the request context and echoed as response headers.
+
+Structured access logs include both IDs so nginx, backend logs, claim-flow events, and client-side troubleshooting can be correlated without changing public response contracts.
+
+### Claim-flow logging
+
+The claim handler logs safe structured events for accepted and rejected claims. The fields intentionally avoid sensitive or high-cardinality raw data: no request bodies, wallet addresses, captcha tokens, raw fingerprints, secrets, or idempotency-key values are emitted. Instead, the handler records operational booleans such as whether a fingerprint, captcha token, or idempotency key was present, along with the rejection code and retry metadata when applicable.
+
+### Runtime metrics
+
+`internal/observability.RuntimeMetrics` is constructed during `app.New` and passed into `httpapi.Dependencies`. It uses atomic counters and process-local state only. The snapshot includes:
+
+- process start time and uptime
+- build metadata from `internal/version`
+- accepted and rejected claim counts
+- classified rejection counters for captcha failures, rate-limit hits, daily-budget exceedances, faucet-unavailable, claim-unavailable, and risk rejections
+
+`GET /api/v1/admin/metrics` exposes that snapshot behind the existing admin bearer-token middleware. Counters reset on process restart and are diagnostic rather than durable accounting; durable claim and abuse data remains in SQLite.
+
+### Health and readiness enrichment
+
+`/health` remains a liveness endpoint and now includes uptime plus build metadata. `/ready` keeps the existing real probes and enriches each check with elapsed duration and a response-level summary. Dry-run deployments still probe DB and queue only; non-dry-run deployments also probe RPC and wallet readiness.

@@ -243,6 +243,10 @@
 
 ## 10. Observabilidad
 
+### Implemented observability baseline
+
+The current production faucet has already implemented the first operational observability layer: structured JSON access logs, request and correlation IDs, safe claim-flow logs, admin-protected process-local runtime counters at `/api/v1/admin/metrics`, and enriched `/health` and `/ready` responses. The remaining backlog in this section still tracks future external monitoring, Prometheus-style scraping, alert routing, and longer-term operator surfaces.
+
 | Feature | Descripción |
 |---|---|
 | **Logs JSON** | Producción operable. |

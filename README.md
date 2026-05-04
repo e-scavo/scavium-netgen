@@ -165,10 +165,11 @@ Current milestone documented in:
 
 ### scavium-faucet
 
-Go faucet MVP with embedded web UI, public status/config/claim endpoints, and code-aligned project documentation.
+Go production-ready public faucet with external/embedded frontend assets, public status/config/claim endpoints, SQLite persistence, abuse protection, structured observability, admin-protected runtime metrics, and code-aligned project documentation.
 
 - Source: [`cmd/scavium-faucet/`](cmd/scavium-faucet/)
 - Documentation: [`docs/scavium-faucet/`](docs/scavium-faucet/)
+- Post-Phase-14 roadmap: [`docs/scavium_faucet_public_phase-roadmap-post14.md`](docs/scavium_faucet_public_phase-roadmap-post14.md)
 
 ## Roadmap
 

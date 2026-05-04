@@ -54,20 +54,32 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 
 ## Phase 16 — Observability & Operations
 
-### 16.1 — Metrics
-- Prometheus integration
-- Claims/sec
-- Failures
-- RPC latency
+**Status:** CLOSED. Phase 16 is complete as the first production observability layer for the public faucet. The phase added request correlation, safe structured claim-flow logs, lightweight runtime counters, an admin-protected metrics endpoint, and richer liveness/readiness payloads without changing the public claim contract or introducing external observability dependencies.
 
-### 16.2 — Alerts
-- Faucet empty
-- RPC down
-- High failure rate
+### 16.1 — Structured Logging + Request Correlation
+- `X-Request-ID` preserved or generated for every request
+- `X-Correlation-ID` accepted and echoed, falling back to the request ID when absent
+- Structured JSON access logs now include both identifiers
+- Claim acceptance and rejection emit safe, structured diagnostic events
+- Request bodies, captcha tokens, raw fingerprints, secrets, addresses, and idempotency-key values are not logged
 
-### 16.3 — Logging Improvements
-- Structured logs expansion
-- Correlation IDs
+### 16.2 — Metrics Endpoint + Internal Runtime Counters
+- Lightweight in-process runtime counters in `internal/observability`
+- Admin-protected `GET /api/v1/admin/metrics` endpoint
+- Claims accepted/rejected, captcha failures, rate-limit hits, daily-budget exceedances, faucet-unavailable, claim-unavailable, and risk-rejection counters
+- Build metadata and uptime included in the metrics snapshot
+- No Prometheus dependency or new external service requirement introduced in this phase
+
+### 16.3 — Health / Readiness Observability Enrichment
+- `/health` now includes uptime and build metadata while remaining a liveness endpoint
+- `/ready` keeps the existing DB, queue, RPC, and wallet probes and now includes per-check duration plus aggregate summary counts
+- Dry-run readiness continues to use DB and queue checks only
+- Non-dry-run readiness continues to include RPC and wallet checks
+
+### 16.4 — Operational Documentation + Observability Closure
+- Phase 16 endpoints, headers, logs, runtime counters, and operator commands documented cumulatively
+- Existing trunk documentation extended without rewriting historical Phase 14/15 deployment and abuse-protection context
+- Phase 17 can now start from an observable and operator-readable faucet baseline
 
 ---
 
