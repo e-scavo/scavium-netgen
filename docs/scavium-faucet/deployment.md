@@ -12,8 +12,25 @@ Keep the deployment aligned with the current binary:
 - admin routes are active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set
 - readiness checks are real DB/queue probes; RPC/wallet probes activate in non-dry-run mode
 - the background worker processes the claim queue automatically (enabled by default)
+- CORS is disabled by default; set `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` to a comma-separated list of exact origins if browser clients need cross-origin access
+- daily distribution can be capped with `SCAVIUM_FAUCET_DAILY_BUDGET_WEI`; leave unset for unlimited
+- the binary writes structured JSON access logs to stdout; route stdout to `journald` or a log aggregator
 
-Store the SQLite database outside the release directory so it survives deployments.
+Store the SQLite database on a **persistent volume outside the release directory** so it survives deployments and rollbacks. Example path: `/var/lib/scavium-faucet/scavium-faucet.db`.
+
+### CORS and daily budget examples
+
+To enable CORS for a browser frontend and cap daily distribution, add to the environment file:
+
+```ini
+# Allow only the production frontend origin.
+SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS=https://faucet.example.com
+
+# Limit to 100 ether per UTC day (18-decimal token).
+SCAVIUM_FAUCET_DAILY_BUDGET_WEI=100000000000000000000
+```
+
+Both settings are optional. An empty `CORS_ALLOWED_ORIGINS` disables CORS entirely. An unset `DAILY_BUDGET_WEI` means unlimited.
 
 ## Suggested server layout
 
