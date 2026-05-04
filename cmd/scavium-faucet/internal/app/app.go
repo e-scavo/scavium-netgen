@@ -78,6 +78,7 @@ func New(cfg config.Config) (*App, error) {
 			ReadService:     readService,
 			AdminToken:      cfg.AdminToken,
 			TrustedProxy:    cfg.TrustedProxy,
+			CORSOrigins:     cfg.CORSAllowedOrigins,
 		}),
 		ctx:    ctx,
 		cancel: cancel,

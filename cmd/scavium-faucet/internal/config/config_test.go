@@ -64,6 +64,7 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvRateLimitAddrPerDay: "5",
 		EnvDailyBudgetWei:      "9999",
 		EnvTrustedProxy:        "127.0.0.1",
+		EnvCORSAllowedOrigins:  "https://faucet.example.test, https://wallet.example.test ",
 		EnvWorkerEnabled:       "false",
 		EnvWorkerPollSeconds:   "7",
 		EnvWatcherEnabled:      "true",
@@ -130,6 +131,11 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	if cfg.TrustedProxy != "127.0.0.1" {
 		t.Fatalf("trusted proxy = %q", cfg.TrustedProxy)
 	}
+	if len(cfg.CORSAllowedOrigins) != 2 ||
+		cfg.CORSAllowedOrigins[0] != "https://faucet.example.test" ||
+		cfg.CORSAllowedOrigins[1] != "https://wallet.example.test" {
+		t.Fatalf("cors allowed origins = %#v", cfg.CORSAllowedOrigins)
+	}
 	if cfg.PrivateKeyHex != "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" {
 		t.Fatal("private key hex not set")
 	}
@@ -182,11 +188,27 @@ func TestFromEnvRateLimitDefaults(t *testing.T) {
 	if cfg.TrustedProxy != "" {
 		t.Fatalf("default trusted proxy = %q, want empty", cfg.TrustedProxy)
 	}
+	if len(cfg.CORSAllowedOrigins) != 0 {
+		t.Fatalf("default CORS allowed origins = %#v, want empty", cfg.CORSAllowedOrigins)
+	}
 	if cfg.CaptchaProvider != "disabled" {
 		t.Fatalf("default captcha provider = %q, want disabled", cfg.CaptchaProvider)
 	}
 	if cfg.FaucetMode != "active" {
 		t.Fatalf("default faucet mode = %q, want active", cfg.FaucetMode)
+	}
+}
+
+func TestValidateRejectsWildcardCORSOrigin(t *testing.T) {
+	cfg := Defaults()
+	cfg.CORSAllowedOrigins = []string{"https://faucet.example.test", "*"}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("validate returned nil")
+	}
+	if !strings.Contains(err.Error(), "CORS allowed origins must not contain wildcard") {
+		t.Fatalf("error = %q, want CORS wildcard validation", err.Error())
 	}
 }
 
