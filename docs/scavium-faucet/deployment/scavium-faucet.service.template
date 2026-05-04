@@ -1,19 +1,21 @@
 [Unit]
-Description=SERVICE_NAME
+Description=SCAVIUM Faucet
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=DEPLOY_USER
-Group=DEPLOY_GROUP
-WorkingDirectory=APP_PATH/current
-EnvironmentFile=APP_ENV_FILE
-ExecStart=APP_PATH/current/scavium-faucet
+User=scavium-faucet
+Group=scavium-faucet
+WorkingDirectory=/opt/scavium-faucet
+EnvironmentFile=/etc/scavium-faucet/scavium-faucet.env
+ExecStart=/opt/scavium-faucet/bin/scavium-faucet
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=30s
 TimeoutStopSec=30s
+
+# Hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -21,11 +23,23 @@ ProtectHome=true
 ProtectControlGroups=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectHostname=true
+ProtectClock=true
+ProtectProc=invisible
 LockPersonality=true
-MemoryDenyWriteExecute=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
 SystemCallArchitectures=native
-ReadWritePaths=APP_PATH
+SystemCallFilter=@system-service
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Writable state for SQLite under ProtectSystem=strict.
+StateDirectory=scavium-faucet
+ReadWritePaths=/var/lib/scavium-faucet
+
 UMask=0027
 LimitNOFILE=65536
 
