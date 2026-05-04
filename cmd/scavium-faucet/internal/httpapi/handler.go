@@ -19,6 +19,7 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/internal/frontend"
 	"scavium-netgen/cmd/scavium-faucet/internal/iputil"
+	"scavium-netgen/cmd/scavium-faucet/internal/observability"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/version"
 )
@@ -62,6 +63,8 @@ type Dependencies struct {
 	// CORSOrigins lists exact origins allowed for public API CORS.
 	// Empty means CORS is disabled and no CORS headers are emitted.
 	CORSOrigins []string
+	// Logger receives production-safe request logs when provided.
+	Logger *observability.Logger
 }
 
 // NewHandler builds the public and admin HTTP routes for the faucet service.
@@ -107,7 +110,11 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux.HandleFunc("/api/v1/admin/audit", handleAdminAuditLog(deps.AdminService))
 	mux.Handle("/api/v1/admin/", admin.TokenAuthMiddleware(deps.AdminToken, adminMux))
 
-	return CORSHandler(RequestIDMiddleware(mux), deps.CORSOrigins)
+	var handler http.Handler = mux
+	if deps.Logger != nil {
+		handler = RequestLoggingMiddleware(handler, deps.Logger, deps.TrustedProxy)
+	}
+	return CORSHandler(RequestIDMiddleware(handler), deps.CORSOrigins)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

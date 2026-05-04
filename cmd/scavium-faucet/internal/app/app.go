@@ -18,6 +18,7 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/internal/httpapi"
+	"scavium-netgen/cmd/scavium-faucet/internal/observability"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
 	"scavium-netgen/cmd/scavium-faucet/internal/store/sqlite"
 	"scavium-netgen/cmd/scavium-faucet/internal/worker"
@@ -44,6 +45,11 @@ type senderBundle struct {
 
 // New constructs the faucet application with its configured HTTP handler tree.
 func New(cfg config.Config) (*App, error) {
+	return NewWithLogger(cfg, nil)
+}
+
+// NewWithLogger constructs the faucet application and wires request logging when logger is provided.
+func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	store, err := openStore(cfg.DatabasePath)
@@ -79,6 +85,7 @@ func New(cfg config.Config) (*App, error) {
 			AdminToken:      cfg.AdminToken,
 			TrustedProxy:    cfg.TrustedProxy,
 			CORSOrigins:     cfg.CORSAllowedOrigins,
+			Logger:          logger,
 		}),
 		ctx:    ctx,
 		cancel: cancel,
