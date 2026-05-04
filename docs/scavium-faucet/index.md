@@ -8,7 +8,9 @@ This directory documents the **implemented project surface**, not the full roadm
 
 `scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
 
-Phase 14 deployment work is complete for the testnet public faucet target.
+Phase 14 deployment work is COMPLETED for the testnet public faucet target.
+
+The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, and loopback-isolated backend exposure.
 
 ## Documentation
 

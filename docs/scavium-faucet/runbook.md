@@ -24,6 +24,19 @@ Validated production outcomes:
 - request logging active in journald
 - RPC connectivity and transaction sending verified
 
+Operational confirmations (Phase 14 final validation):
+
+- TLS renewal validated (`certbot renew --dry-run` successful)
+- `certbot.timer` active
+- deploy hook present at `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh`
+- host firewall active (UFW default deny incoming; allow `22/tcp`, `80/tcp`, `443/tcp`)
+
+Manual renewal verification command:
+
+```bash
+sudo certbot renew --dry-run
+```
+
 ## Build and run
 
 ```bash
