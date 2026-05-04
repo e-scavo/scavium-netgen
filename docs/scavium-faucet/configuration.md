@@ -25,6 +25,7 @@ Configuration is loaded from environment variables at startup via `internal/conf
 | `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_IP_THRESHOLD` | `20` | Negative signal threshold for a source IP within the enforcement window; `0` disables this scope |
 | `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ADDRESS_THRESHOLD` | `12` | Negative signal threshold for a wallet address within the enforcement window; `0` disables this scope |
 | `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_FINGERPRINT_THRESHOLD` | `15` | Negative signal threshold for a browser fingerprint within the enforcement window; `0` disables this scope |
+| `SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS` | `30` | Number of days to retain rows in `abuse_signals`; expired rows are pruned at startup; `0` disables pruning |
 | `SCAVIUM_FAUCET_TRUSTED_PROXY` | empty | When set to the reverse proxy's IP, the handler extracts the real client IP from `X-Forwarded-For` / `X-Real-IP` via `internal/iputil`; used for rate limiting and logging |
 | `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` | empty | Comma-separated exact origins allowed for public API CORS; empty disables CORS headers; wildcard `*` is not allowed |
 | `SCAVIUM_FAUCET_PRIVATE_KEY` | empty | Hex-encoded signer key; required and validated at startup when `DRY_RUN=false`; used by `chain.EthSender` to sign transactions |
@@ -55,6 +56,7 @@ Configuration is loaded from environment variables at startup via `internal/conf
 - worker poll seconds must be positive
 - watcher poll seconds must be positive
 - captcha provider must be one of `disabled`, `dev`, `hcaptcha`, `recaptcha`, or `turnstile`
+- abuse signal retention days must be zero or positive
 - `hcaptcha`, `recaptcha`, and `turnstile` require `SCAVIUM_FAUCET_CAPTCHA_SITE_KEY` and `SCAVIUM_FAUCET_CAPTCHA_SECRET`
 
 Private key and admin token are not validated by `Config.Validate()`. A missing private key causes a startup error when `DRY_RUN=false`.

@@ -32,6 +32,7 @@ const (
 	EnvAbuseEnforcementIPThreshold          = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_IP_THRESHOLD"
 	EnvAbuseEnforcementAddressThreshold     = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ADDRESS_THRESHOLD"
 	EnvAbuseEnforcementFingerprintThreshold = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_FINGERPRINT_THRESHOLD"
+	EnvAbuseSignalRetentionDays             = "SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS"
 	EnvTrustedProxy                         = "SCAVIUM_FAUCET_TRUSTED_PROXY"
 	EnvCORSAllowedOrigins                   = "SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS"
 	EnvWorkerEnabled                        = "SCAVIUM_FAUCET_WORKER_ENABLED"
@@ -81,6 +82,7 @@ type Config struct {
 	AbuseEnforcementIPThreshold          int
 	AbuseEnforcementAddressThreshold     int
 	AbuseEnforcementFingerprintThreshold int
+	AbuseSignalRetentionDays             int
 	TrustedProxy                         string
 	CORSAllowedOrigins                   []string
 	WorkerEnabled                        bool
@@ -224,6 +226,13 @@ func FromEnv(lookup func(string) string) (Config, error) {
 		}
 		cfg.AbuseEnforcementFingerprintThreshold = v
 	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseSignalRetentionDays)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseSignalRetentionDays, err)
+		}
+		cfg.AbuseSignalRetentionDays = v
+	}
 
 	cfg.TrustedProxy = strings.TrimSpace(lookup(EnvTrustedProxy))
 	cfg.CORSAllowedOrigins = splitCommaList(lookup(EnvCORSAllowedOrigins))
@@ -299,6 +308,7 @@ func Defaults() Config {
 		AbuseEnforcementIPThreshold:          20,
 		AbuseEnforcementAddressThreshold:     12,
 		AbuseEnforcementFingerprintThreshold: 15,
+		AbuseSignalRetentionDays:             30,
 		TrustedProxy:                         "",
 		CORSAllowedOrigins:                   nil,
 		WorkerEnabled:                        true,
@@ -351,6 +361,9 @@ func (c Config) Validate() error {
 	}
 	if c.AbuseEnforcementFingerprintThreshold < 0 {
 		errs = append(errs, errors.New("abuse enforcement fingerprint threshold must be zero or positive"))
+	}
+	if c.AbuseSignalRetentionDays < 0 {
+		errs = append(errs, errors.New("abuse signal retention days must be zero or positive"))
 	}
 	if strings.TrimSpace(c.DatabasePath) == "" {
 		errs = append(errs, errors.New("database path is required"))

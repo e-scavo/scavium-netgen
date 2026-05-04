@@ -126,3 +126,12 @@ The design keeps enforcement inside the existing claim intake pipeline:
 4. Cooldown, rate limits, budget checks, claim persistence, queueing, and worker processing remain unchanged.
 
 This preserves the public API surface while allowing production operators to activate a measured anti-abuse brake before moving to explicit blocklists and adaptive throttling.
+
+
+## Phase 15.4 — Abuse Operations & Retention
+
+The abuse signal ledger is now treated as an operational dataset with a bounded retention policy. `internal/config` owns the retention knob, `internal/abuse` owns the retention helper, and `internal/store/sqlite` owns the database-level delete and aggregate summary queries.
+
+Startup wiring remains conservative: after migrations complete and before sender/worker/watchers are started, `app.NewWithLogger` prunes expired abuse signals using the configured retention window. A pruning error fails startup because it indicates the same persistence layer used by enforcement and claim intake is unhealthy.
+
+No public API route was added. The new summary contract is internal-only and exists to make Phase 16 metrics and later admin surfaces depend on a stable domain boundary instead of ad-hoc SQL.

@@ -30,6 +30,9 @@ func TestFromEnvUsesDevelopmentDefaults(t *testing.T) {
 	if cfg.DatabasePath != "cmd/scavium-faucet/data/scavium-faucet.db" {
 		t.Fatalf("database path = %q", cfg.DatabasePath)
 	}
+	if cfg.AbuseSignalRetentionDays != 30 {
+		t.Fatalf("abuse signal retention days = %d", cfg.AbuseSignalRetentionDays)
+	}
 	if !cfg.WorkerEnabled {
 		t.Fatal("worker enabled default = false, want true")
 	}
@@ -68,6 +71,7 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvAbuseEnforcementIPThreshold:          "9",
 		EnvAbuseEnforcementAddressThreshold:     "8",
 		EnvAbuseEnforcementFingerprintThreshold: "7",
+		EnvAbuseSignalRetentionDays:             "14",
 		EnvTrustedProxy:                         "127.0.0.1",
 		EnvCORSAllowedOrigins:                   "https://faucet.example.test, https://wallet.example.test ",
 		EnvWorkerEnabled:                        "false",
@@ -142,6 +146,9 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	}
 	if cfg.AbuseEnforcementIPThreshold != 9 || cfg.AbuseEnforcementAddressThreshold != 8 || cfg.AbuseEnforcementFingerprintThreshold != 7 {
 		t.Fatalf("abuse enforcement thresholds = ip:%d address:%d fingerprint:%d", cfg.AbuseEnforcementIPThreshold, cfg.AbuseEnforcementAddressThreshold, cfg.AbuseEnforcementFingerprintThreshold)
+	}
+	if cfg.AbuseSignalRetentionDays != 14 {
+		t.Fatalf("abuse signal retention days = %d", cfg.AbuseSignalRetentionDays)
 	}
 	if cfg.TrustedProxy != "127.0.0.1" {
 		t.Fatalf("trusted proxy = %q", cfg.TrustedProxy)

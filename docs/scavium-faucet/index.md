@@ -59,3 +59,10 @@ See [configuration.md](configuration.md) for the environment reference and [runb
 Phase 15.3 builds directly on the Phase 15.2 abuse signal ledger. The faucet now evaluates recent negative signals during claim intake and can reject a request when the configured IP, address, or fingerprint threshold is reached within the enforcement window.
 
 The implementation remains production-safe and contract-preserving: no public endpoint changes were introduced, no schema migration was required, and rejected requests reuse the existing `claim_rejected` envelope. Each enforcement rejection is also recorded back into `abuse_signals`, keeping the audit trail cumulative for later admin controls, blocklists, and adaptive rate limiting.
+
+
+## Phase 15.4 — Abuse Operations & Retention
+
+Phase 15.4 completes the operational side of Abuse Protection. The faucet now prunes old `abuse_signals` at startup according to `SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS`, defaulting to 30 days and allowing `0` as an explicit opt-out.
+
+This keeps the abuse ledger useful for progressive enforcement and investigation without allowing unbounded SQLite growth. Internal aggregate summaries by signal kind were also added for future observability/admin work, but no new public endpoint was exposed and existing API contracts remain unchanged.
