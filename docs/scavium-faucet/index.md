@@ -4,6 +4,12 @@
 
 This directory documents the **implemented project surface**, not the full roadmap. The broader feature backlog remains in [`docs/scavium_faucet_public_features.md`](../scavium_faucet_public_features.md), which stays untouched and should be treated as the source roadmap document.
 
+## Current state
+
+`scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
+
+Phase 14 deployment work is complete for the testnet public faucet target.
+
 ## Documentation
 
 | Document | Description |
