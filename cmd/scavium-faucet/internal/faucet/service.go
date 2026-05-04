@@ -34,6 +34,8 @@ type ConfigResponse struct {
 	DryRun              bool   `json:"dry_run"`
 	RateLimitIPPerHour  int    `json:"rate_limit_ip_per_hour"`
 	RateLimitAddrPerDay int    `json:"rate_limit_addr_per_day"`
+	CaptchaProvider     string `json:"captcha_provider"`
+	CaptchaSiteKey      string `json:"captcha_site_key,omitempty"`
 }
 
 // AddressStatusResponse describes whether an address can request funds now.
@@ -150,6 +152,8 @@ func (s *InMemoryReadService) Config(context.Context) (ConfigResponse, error) {
 		DryRun:              s.cfg.DryRun,
 		RateLimitIPPerHour:  s.cfg.RateLimitIPPerHour,
 		RateLimitAddrPerDay: s.cfg.RateLimitAddrPerDay,
+		CaptchaProvider:     s.cfg.CaptchaProvider,
+		CaptchaSiteKey:      s.cfg.CaptchaSiteKey,
 	}, nil
 }
 

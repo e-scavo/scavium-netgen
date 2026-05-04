@@ -187,13 +187,14 @@ func newCaptchaVerifier(cfg config.Config) (domain.CaptchaVerifier, error) {
 	case "dev":
 		return captcha.DevAlwaysPass{}, nil
 	case "hcaptcha", "recaptcha", "turnstile":
-		if strings.TrimSpace(cfg.CaptchaVerifyURL) == "" {
-			return nil, fmt.Errorf("captcha provider %q requires verify URL", cfg.CaptchaProvider)
+		verifyURL := strings.TrimSpace(cfg.CaptchaVerifyURL)
+		if verifyURL == "" {
+			verifyURL = defaultCaptchaVerifyURL(strings.TrimSpace(strings.ToLower(cfg.CaptchaProvider)))
 		}
 		if strings.TrimSpace(cfg.CaptchaSecret) == "" {
 			return nil, fmt.Errorf("captcha provider %q requires secret", cfg.CaptchaProvider)
 		}
-		return captcha.NewHTTPVerifier(cfg.CaptchaVerifyURL, cfg.CaptchaSecret), nil
+		return captcha.NewHTTPVerifier(verifyURL, cfg.CaptchaSecret), nil
 	default:
 		return nil, fmt.Errorf("unsupported captcha provider %q", cfg.CaptchaProvider)
 	}
@@ -241,4 +242,17 @@ func runtimeChecks(cfg config.Config, store *sqlite.Store, chainClient *chain.Cl
 		}
 	}
 	return checks
+}
+
+func defaultCaptchaVerifyURL(provider string) string {
+	switch provider {
+	case "hcaptcha":
+		return "https://hcaptcha.com/siteverify"
+	case "recaptcha":
+		return "https://www.google.com/recaptcha/api/siteverify"
+	case "turnstile":
+		return "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+	default:
+		return ""
+	}
 }

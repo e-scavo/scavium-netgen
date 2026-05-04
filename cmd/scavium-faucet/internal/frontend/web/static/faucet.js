@@ -4,6 +4,10 @@
     pollTimer: null,
     currentClaimID: "",
     statusStopSet: { confirmed: true, failed: true, rejected: true },
+    captchaProvider: "disabled",
+    captchaSiteKey: "",
+    captchaToken: "",
+    captchaWidgetID: null,
   };
 
   function el(id) {
@@ -32,6 +36,111 @@
     }
     node.className = "status visible " + (kind || "info");
     node.textContent = text;
+  }
+
+
+  function resetCaptchaToken() {
+    state.captchaToken = "";
+    var tokenInput = el("captcha-token");
+    if (tokenInput) {
+      tokenInput.value = "";
+    }
+  }
+
+  function loadScriptOnce(id, src) {
+    return new Promise(function (resolve, reject) {
+      if (document.getElementById(id)) {
+        resolve();
+        return;
+      }
+      var script = document.createElement("script");
+      script.id = id;
+      script.src = src;
+      script.async = true;
+      script.defer = true;
+      script.onload = function () { resolve(); };
+      script.onerror = function () { reject(new Error("captcha script load failed")); };
+      document.head.appendChild(script);
+    });
+  }
+
+  function setCaptchaToken(token) {
+    state.captchaToken = token || "";
+    var tokenInput = el("captcha-token");
+    if (tokenInput) {
+      tokenInput.value = state.captchaToken;
+    }
+  }
+
+  async function setupCaptcha(provider, siteKey) {
+    state.captchaProvider = String(provider || "disabled").toLowerCase();
+    state.captchaSiteKey = siteKey || "";
+    resetCaptchaToken();
+
+    var row = el("captcha-row");
+    var widget = el("captcha-widget");
+    var manual = el("captcha-manual");
+    setHidden(row, !(state.captchaProvider && state.captchaProvider !== "disabled"));
+    setHidden(manual, true);
+    if (!widget) {
+      return;
+    }
+    widget.innerHTML = "";
+
+    if (!state.captchaProvider || state.captchaProvider === "disabled") {
+      return;
+    }
+    if (state.captchaProvider === "dev") {
+      setHidden(manual, false);
+      setCaptchaToken("dev-bypass");
+      return;
+    }
+    if (!state.captchaSiteKey) {
+      setHidden(manual, false);
+      setStatus(el("msg"), "Captcha is enabled but no public site key was provided.", "warn");
+      return;
+    }
+
+    try {
+      if (state.captchaProvider === "turnstile") {
+        await loadScriptOnce("turnstile-api", "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit");
+        if (window.turnstile && typeof window.turnstile.render === "function") {
+          state.captchaWidgetID = window.turnstile.render(widget, {
+            sitekey: state.captchaSiteKey,
+            callback: setCaptchaToken,
+            "expired-callback": resetCaptchaToken,
+            "error-callback": resetCaptchaToken,
+          });
+          return;
+        }
+      }
+      if (state.captchaProvider === "hcaptcha") {
+        await loadScriptOnce("hcaptcha-api", "https://js.hcaptcha.com/1/api.js?render=explicit");
+        if (window.hcaptcha && typeof window.hcaptcha.render === "function") {
+          state.captchaWidgetID = window.hcaptcha.render(widget, {
+            sitekey: state.captchaSiteKey,
+            callback: setCaptchaToken,
+            "expired-callback": resetCaptchaToken,
+            "error-callback": resetCaptchaToken,
+          });
+          return;
+        }
+      }
+      setHidden(manual, false);
+    } catch (_) {
+      setHidden(manual, false);
+      setStatus(el("msg"), "Captcha widget could not be loaded. Retry or use a supported browser.", "warn");
+    }
+  }
+
+  function refreshCaptcha() {
+    resetCaptchaToken();
+    if (state.captchaProvider === "turnstile" && window.turnstile && state.captchaWidgetID != null) {
+      window.turnstile.reset(state.captchaWidgetID);
+    }
+    if (state.captchaProvider === "hcaptcha" && window.hcaptcha && state.captchaWidgetID != null) {
+      window.hcaptcha.reset(state.captchaWidgetID);
+    }
   }
 
   function isValidAddress(v) {
@@ -108,8 +217,7 @@
       setHidden(configCard, true);
     }
 
-    var provider = String(data.captcha_provider || "").toLowerCase();
-    setHidden(el("captcha-row"), !(provider && provider !== "disabled"));
+    await setupCaptcha(data.captcha_provider || "disabled", data.captcha_site_key || "");
   }
 
   async function loadPublicStatus() {
@@ -244,7 +352,11 @@
     }
 
     var body = { address: addr };
-    var captchaToken = el("captcha-token").value.trim();
+    var captchaToken = state.captchaToken || el("captcha-token").value.trim();
+    if (state.captchaProvider && state.captchaProvider !== "disabled" && !captchaToken) {
+      setStatus(el("msg"), "Please complete the captcha challenge.", "error");
+      return;
+    }
     if (captchaToken) {
       body.captcha_token = captchaToken;
     }
@@ -266,6 +378,7 @@
       submitBtn.disabled = false;
 
       if (!response.ok) {
+        refreshCaptcha();
         renderClaimError(data);
         return;
       }
@@ -279,6 +392,7 @@
       if (claimID) {
         startPolling(claimID);
       }
+      refreshCaptcha();
     } catch (_) {
       submitBtn.disabled = false;
       setStatus(el("msg"), "Network error while submitting claim.", "error");

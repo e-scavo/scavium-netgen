@@ -24,8 +24,9 @@ Configuration is loaded from environment variables at startup via `internal/conf
 | `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` | empty | Comma-separated exact origins allowed for public API CORS; empty disables CORS headers; wildcard `*` is not allowed |
 | `SCAVIUM_FAUCET_PRIVATE_KEY` | empty | Hex-encoded signer key; required and validated at startup when `DRY_RUN=false`; used by `chain.EthSender` to sign transactions |
 | `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` | `disabled` | Selects the captcha backend: `disabled` (no check), `dev` (always pass), `hcaptcha`, `recaptcha`, or `turnstile`; active in claim creation when not `disabled` |
+| `SCAVIUM_FAUCET_CAPTCHA_SITE_KEY` | empty | Public browser-side site key exposed by `/api/v1/config`; required for `hcaptcha`, `recaptcha`, or `turnstile` so the frontend can render the provider widget |
 | `SCAVIUM_FAUCET_CAPTCHA_SECRET` | empty | Server-side secret for the chosen captcha provider; required when provider is `hcaptcha`, `recaptcha`, or `turnstile` |
-| `SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL` | empty | Verification URL for the chosen captcha provider; required when provider is `hcaptcha`, `recaptcha`, or `turnstile` |
+| `SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL` | provider default | Optional verification URL override. When empty, the runtime uses the provider default (`hcaptcha`, `recaptcha`, or Cloudflare Turnstile) |
 | `SCAVIUM_FAUCET_MODE` | `active` | Operational mode reported by `/api/v1/status`; `active`, `paused`, or `maintenance` |
 | `SCAVIUM_FAUCET_ADMIN_TOKEN` | empty | Bearer token for `/api/v1/admin/*` endpoints; admin API is active when non-empty and uses constant-time comparison; never logged |
 | `SCAVIUM_FAUCET_WORKER_ENABLED` | `true` | Enables the background worker that processes the SQLite claim queue; default is enabled |
@@ -48,6 +49,8 @@ Configuration is loaded from environment variables at startup via `internal/conf
 - cooldown seconds must be zero or positive
 - worker poll seconds must be positive
 - watcher poll seconds must be positive
+- captcha provider must be one of `disabled`, `dev`, `hcaptcha`, `recaptcha`, or `turnstile`
+- `hcaptcha`, `recaptcha`, and `turnstile` require `SCAVIUM_FAUCET_CAPTCHA_SITE_KEY` and `SCAVIUM_FAUCET_CAPTCHA_SECRET`
 
 Private key and admin token are not validated by `Config.Validate()`. A missing private key causes a startup error when `DRY_RUN=false`.
 
@@ -84,16 +87,18 @@ SCAVIUM_FAUCET_MODE=active
 SCAVIUM_FAUCET_ADMIN_TOKEN=replace-me
 
 # Optional captcha (disabled by default)
-# SCAVIUM_FAUCET_CAPTCHA_PROVIDER=hcaptcha
+# SCAVIUM_FAUCET_CAPTCHA_PROVIDER=turnstile
+# SCAVIUM_FAUCET_CAPTCHA_SITE_KEY=replace-with-public-site-key
 # SCAVIUM_FAUCET_CAPTCHA_SECRET=replace-with-captcha-secret
-# SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL=https://hcaptcha.com/siteverify
+# Optional override; omitted uses the provider default verify endpoint.
+# SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL=https://challenges.cloudflare.com/turnstile/v0/siteverify
 ```
 
 ## Practical notes
 
 - Keep secrets in an external environment file or service manager, not in the repository.
 - Set `SCAVIUM_FAUCET_BIND_ADDR` to loopback and terminate TLS in a reverse proxy.
-- Treat `SCAVIUM_FAUCET_ADMIN_TOKEN`, `SCAVIUM_FAUCET_PRIVATE_KEY`, and `SCAVIUM_FAUCET_CAPTCHA_SECRET` as secrets; none are logged by the binary.
+- Treat `SCAVIUM_FAUCET_ADMIN_TOKEN`, `SCAVIUM_FAUCET_PRIVATE_KEY`, and `SCAVIUM_FAUCET_CAPTCHA_SECRET` as secrets; none are logged by the binary. `SCAVIUM_FAUCET_CAPTCHA_SITE_KEY` is intentionally public and is surfaced to the frontend.
 - Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to the loopback or reverse proxy address so that IP-based rate limiting uses the real client IP rather than `127.0.0.1`.
 - Set `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` only to exact public origins that should call the API from browsers. Leave it empty to disable CORS headers; `*` is rejected.
 - `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced against queued, sent, and confirmed claims and resets at UTC midnight.

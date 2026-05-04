@@ -72,6 +72,7 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvMinConfirmations:    "3",
 		EnvPrivateKey:          "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
 		EnvCaptchaProvider:     "hcaptcha",
+		EnvCaptchaSiteKey:      "10000000-ffff-ffff-ffff-000000000001",
 		EnvCaptchaSecret:       "0x-test-secret",
 		EnvCaptchaVerifyURL:    "https://hcaptcha.example.test/siteverify",
 		EnvFaucetMode:          "paused",
@@ -156,6 +157,9 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	}
 	if cfg.CaptchaProvider != "hcaptcha" {
 		t.Fatalf("captcha provider = %q, want hcaptcha", cfg.CaptchaProvider)
+	}
+	if cfg.CaptchaSiteKey != "10000000-ffff-ffff-ffff-000000000001" {
+		t.Fatalf("captcha site key = %q", cfg.CaptchaSiteKey)
 	}
 	if cfg.CaptchaSecret != "0x-test-secret" {
 		t.Fatal("captcha secret not set")
@@ -283,5 +287,23 @@ func TestValidateRejectsEmptyDatabasePath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "database path is required") {
 		t.Fatalf("error = %q, want database path validation", err.Error())
+	}
+}
+
+func TestValidateRejectsCaptchaProviderWithoutSiteKeyOrSecret(t *testing.T) {
+	cfg := Defaults()
+	cfg.CaptchaProvider = "turnstile"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("validate returned nil")
+	}
+	for _, want := range []string{
+		`captcha provider "turnstile" requires site key`,
+		`captcha provider "turnstile" requires secret`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err.Error(), want)
+		}
 	}
 }

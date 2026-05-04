@@ -126,7 +126,7 @@ Request body:
 }
 ```
 
-All fields except `address` are optional. `captcha_token` is only validated when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`. `fingerprint` is used for fingerprint-scoped rate limiting when provided.
+All fields except `address` are optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting when provided.
 
 Optional request header:
 
@@ -157,7 +157,7 @@ Current behavior:
 - the address cooldown is checked against the SQLite store
 - persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided)
 - the global daily budget is enforced as a faucet-wide limit
-- captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; a failed verification returns `422 captcha_failed`
+- captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; missing or failed verification returns `422 captcha_failed`
 - risk evaluation runs when a risk engine is configured
 - the accepted claim is persisted to SQLite with initial status `received`, then enqueued as `queued`
 - repeated requests with the same `Idempotency-Key` return the same persisted claim without creating a duplicate

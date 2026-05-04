@@ -459,6 +459,12 @@ func TestPublicConfig(t *testing.T) {
 	if body.RateLimitAddrPerDay <= 0 {
 		t.Fatalf("rate_limit_addr_per_day = %d, want > 0", body.RateLimitAddrPerDay)
 	}
+	if body.CaptchaProvider != "turnstile" {
+		t.Fatalf("captcha provider = %q, want turnstile", body.CaptchaProvider)
+	}
+	if body.CaptchaSiteKey != "1x00000000000000000000AA" {
+		t.Fatalf("captcha site key = %q", body.CaptchaSiteKey)
+	}
 }
 
 func TestWalletConfigAlias(t *testing.T) {
@@ -925,6 +931,8 @@ func testReadService() faucet.ReadService {
 	cfg.CooldownSeconds = 60
 	cfg.ExplorerTxURL = "https://explorer.example.test/tx/{txHash}"
 	cfg.DryRun = false
+	cfg.CaptchaProvider = "turnstile"
+	cfg.CaptchaSiteKey = "1x00000000000000000000AA"
 
 	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 	return faucet.NewInMemoryReadServiceWithClock(cfg, func() time.Time { return now })

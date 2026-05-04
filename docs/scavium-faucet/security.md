@@ -43,7 +43,7 @@ Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to your reverse-proxy address so that IP extr
 
 ### Captcha verification
 
-When `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is set to `hcaptcha`, `recaptcha`, or `turnstile`, claim creation verifies the `captcha_token` field against the configured provider endpoint. A failed or missing token causes the claim to be rejected. Provider `dev` always passes (for testing only). Default is `disabled`.
+When `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is set to `hcaptcha`, `recaptcha`, or `turnstile`, the frontend renders the configured public provider widget from `SCAVIUM_FAUCET_CAPTCHA_SITE_KEY` and claim creation verifies the submitted `captcha_token` against the provider endpoint. A failed or missing token causes the claim to be rejected. Provider `dev` always passes (for testing only). Default is `disabled`. `SCAVIUM_FAUCET_CAPTCHA_SECRET` remains server-side only; `SCAVIUM_FAUCET_CAPTCHA_SITE_KEY` is public by design.
 
 ### Admin token and persistent claim storage
 

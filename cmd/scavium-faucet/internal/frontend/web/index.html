@@ -390,8 +390,12 @@
           <input type="text" id="address" placeholder="0x..." autocomplete="off" spellcheck="false" />
         </div>
         <div id="captcha-row" class="field hidden">
-          <label for="captcha-token">Captcha Token</label>
-          <input type="text" id="captcha-token" placeholder="Paste token here" autocomplete="off" />
+          <label>Human Verification</label>
+          <div id="captcha-widget" aria-live="polite"></div>
+          <div id="captcha-manual" class="hidden">
+            <label for="captcha-token">Captcha Token</label>
+            <input type="text" id="captcha-token" placeholder="Paste token here" autocomplete="off" />
+          </div>
         </div>
         <div class="actions">
           <button id="btn-send" type="submit">Send Funds</button>
