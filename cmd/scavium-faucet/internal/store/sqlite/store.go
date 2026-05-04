@@ -24,6 +24,8 @@ var _ domain.DailyBudgetStore = (*Store)(nil)
 var _ domain.RateLimiter = (*Store)(nil)
 var _ domain.AbuseSignalRecorder = (*Store)(nil)
 var _ domain.AbuseSignalCounter = (*Store)(nil)
+var _ domain.AbuseSignalPruner = (*Store)(nil)
+var _ domain.AbuseSignalReporter = (*Store)(nil)
 var _ domain.QueueStore = (*Store)(nil)
 
 // ErrNotFound reports that the requested record does not exist.
@@ -261,6 +263,59 @@ func (s *Store) ListAbuseSignals(ctx context.Context, limit int) ([]domain.Abuse
 		out = append(out, signal)
 	}
 	return out, rows.Err()
+}
+
+// PruneAbuseSignals removes abuse signals older than olderThan.  Retention is
+// intentionally keyed by created_at so operational cleanup never touches claim
+// or transaction records.
+func (s *Store) PruneAbuseSignals(ctx context.Context, olderThan time.Time) (int64, error) {
+	if olderThan.IsZero() {
+		return 0, errors.New("abuse signal prune cutoff is required")
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM abuse_signals WHERE created_at < ?`, formatTime(olderThan.UTC()))
+	if err != nil {
+		return 0, fmt.Errorf("prune abuse signals: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("prune abuse signals rows affected: %w", err)
+	}
+	return rows, nil
+}
+
+// ListAbuseSignalSummaries returns internal aggregate counts grouped by signal
+// kind.  It is designed for operator diagnostics and is not exposed publicly.
+func (s *Store) ListAbuseSignalSummaries(ctx context.Context, since time.Time, limit int) ([]domain.AbuseSignalSummary, error) {
+	if since.IsZero() {
+		return nil, errors.New("abuse signal summary since timestamp is required")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT kind, COUNT(*) AS count
+		FROM abuse_signals
+		WHERE created_at >= ?
+		GROUP BY kind
+		ORDER BY count DESC, kind ASC
+		LIMIT ?
+	`, formatTime(since.UTC()), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list abuse signal summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []domain.AbuseSignalSummary
+	for rows.Next() {
+		var summary domain.AbuseSignalSummary
+		var kind string
+		if err := rows.Scan(&kind, &summary.Count); err != nil {
+			return nil, err
+		}
+		summary.Kind = domain.AbuseSignalKind(kind)
+		summaries = append(summaries, summary)
+	}
+	return summaries, rows.Err()
 }
 
 func (s *Store) CreateClaim(ctx context.Context, claim domain.Claim) (domain.Claim, error) {

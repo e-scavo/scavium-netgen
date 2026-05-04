@@ -196,7 +196,7 @@ Captcha verification failed. Check that `SCAVIUM_FAUCET_CAPTCHA_PROVIDER`, `SCAV
 
 ### Claim returns `403 claim_rejected`
 
-The request was blocked by the risk engine or an operator blocklist. The response `details.reason` contains the rejection reason. If this is unexpected for a legitimate address, review any blocklist entries via the admin API (`GET /api/v1/admin/blocklist`) and remove incorrect entries with `DELETE /api/v1/admin/blocklist`.
+The request was blocked by the risk engine. In the current Phase 15 path this usually means progressive abuse enforcement found too many recent negative signals for the source IP, wallet address, or browser fingerprint. The response `details.reason` contains the rejection reason. Review `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_*` thresholds and the recent `abuse_signals` ledger before loosening controls.
 
 ### Claims disappear after restart
 
@@ -205,3 +205,21 @@ This should not happen with the current binary. Claims are persisted in SQLite. 
 ### `/api/v1/admin/*` returns `503`
 
 `503` means `SCAVIUM_FAUCET_ADMIN_TOKEN` is empty or not set. Set the token in the environment file and restart the service.
+
+
+## Abuse signal retention
+
+`SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS` controls how long abuse observations are kept in SQLite. The default is 30 days. Expired rows are pruned during startup after migrations run and before background processing starts.
+
+Operational guidance:
+
+- Keep the default enabled for public testnet operation.
+- Set the value to `0` only during a bounded investigation where retaining all abuse signals is intentional.
+- Restart the service after changing the value so startup pruning runs with the new window.
+- Pruning affects only `abuse_signals`; claim history and transaction records are preserved.
+
+Example manual inspection from the VPS:
+
+```bash
+sqlite3 /var/lib/scavium-faucet/scavium-faucet.db   "SELECT kind, COUNT(*) FROM abuse_signals WHERE created_at >= datetime('now','-24 hours') GROUP BY kind ORDER BY COUNT(*) DESC;"
+```

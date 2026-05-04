@@ -941,3 +941,66 @@ func TestCountRecentAbuseSignalsScopesByIP(t *testing.T) {
 		t.Fatalf("count = %d, want 2", count)
 	}
 }
+
+func TestPruneAbuseSignalsRemovesOnlyExpiredRows(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	for _, signal := range []domain.AbuseSignal{
+		{Kind: domain.AbuseSignalCaptchaFailed, RemoteIP: "203.0.113.10", CreatedAt: now.Add(-40 * 24 * time.Hour)},
+		{Kind: domain.AbuseSignalRateLimited, RemoteIP: "203.0.113.10", CreatedAt: now.Add(-31 * 24 * time.Hour)},
+		{Kind: domain.AbuseSignalClaimAccepted, RemoteIP: "203.0.113.10", CreatedAt: now.Add(-3 * 24 * time.Hour)},
+	} {
+		if err := store.RecordAbuseSignal(context.Background(), signal); err != nil {
+			t.Fatalf("record signal: %v", err)
+		}
+	}
+
+	removed, err := store.PruneAbuseSignals(context.Background(), now.Add(-30*24*time.Hour))
+	if err != nil {
+		t.Fatalf("prune abuse signals: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("removed = %d, want 2", removed)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	if len(signals) != 1 || signals[0].Kind != domain.AbuseSignalClaimAccepted {
+		t.Fatalf("remaining signals = %+v", signals)
+	}
+}
+
+func TestListAbuseSignalSummariesGroupsRecentKinds(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	for _, signal := range []domain.AbuseSignal{
+		{Kind: domain.AbuseSignalCaptchaFailed, CreatedAt: now.Add(-10 * time.Minute)},
+		{Kind: domain.AbuseSignalCaptchaFailed, CreatedAt: now.Add(-9 * time.Minute)},
+		{Kind: domain.AbuseSignalRateLimited, CreatedAt: now.Add(-8 * time.Minute)},
+		{Kind: domain.AbuseSignalClaimAccepted, CreatedAt: now.Add(-2 * time.Hour)},
+	} {
+		if err := store.RecordAbuseSignal(context.Background(), signal); err != nil {
+			t.Fatalf("record signal: %v", err)
+		}
+	}
+
+	summaries, err := store.ListAbuseSignalSummaries(context.Background(), now.Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("list summaries: %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("summaries len = %d, want 2: %+v", len(summaries), summaries)
+	}
+	if summaries[0].Kind != domain.AbuseSignalCaptchaFailed || summaries[0].Count != 2 {
+		t.Fatalf("first summary = %+v", summaries[0])
+	}
+	if summaries[1].Kind != domain.AbuseSignalRateLimited || summaries[1].Count != 1 {
+		t.Fatalf("second summary = %+v", summaries[1])
+	}
+}

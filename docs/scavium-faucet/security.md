@@ -149,3 +149,12 @@ Use a dedicated faucet hot wallet with limited balance. Do not reuse treasury, v
 ## Recommended operator stance
 
 The binary provides persistent claim storage, real readiness probes, persistent rate limiting, captcha verification, durable abuse signal capture, risk engine support, daily budget enforcement, configurable exact-origin CORS, trusted-proxy IP extraction, structured per-request logging, and an active admin API. It is suitable for a testnet faucet deployment behind a reverse proxy with TLS. With captcha enabled it is appropriate for a public faucet deployment.
+
+
+## Phase 15.4 — Abuse operations and retention
+
+Phase 15.4 keeps abuse protection operationally safe by bounding the durability window of `abuse_signals`. The SQLite store now implements explicit pruning through `domain.AbuseSignalPruner`, and application startup invokes the pruning helper with `SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS`.
+
+The default retention is 30 days. Setting the value to `0` disables pruning for incident investigation or temporary forensic capture, while negative values are rejected during config validation. Pruning touches only `abuse_signals`; claims, transactions, queue state, rate-limit counters, and idempotency records are not affected.
+
+The same store also exposes internal aggregate summaries by signal kind through `domain.AbuseSignalReporter`. These summaries are intentionally not wired to public HTTP endpoints in Phase 15.4; they prepare the data contract needed for Phase 16 observability and later admin review without exposing raw abuse metadata.

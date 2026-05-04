@@ -58,6 +58,11 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 		cancel()
 		return nil, fmt.Errorf("open sqlite store: %w", err)
 	}
+	if _, err := abuse.PruneSignalsByRetention(ctx, store, cfg.AbuseSignalRetentionDays, time.Now().UTC()); err != nil {
+		_ = store.Close()
+		cancel()
+		return nil, fmt.Errorf("prune abuse signals: %w", err)
+	}
 
 	senderBundle, err := newSender(ctx, cfg)
 	if err != nil {

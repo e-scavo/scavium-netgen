@@ -96,6 +96,12 @@ type AbuseSignal struct {
 	CreatedAt   time.Time
 }
 
+// AbuseSignalSummary is an internal operational rollup of abuse signals.
+type AbuseSignalSummary struct {
+	Kind  AbuseSignalKind
+	Count int
+}
+
 // FaucetConfig is the read model exposed by faucet status/config endpoints.
 type FaucetConfig struct {
 	NetworkName     string

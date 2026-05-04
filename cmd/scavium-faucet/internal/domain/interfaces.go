@@ -36,6 +36,16 @@ type AbuseSignalCounter interface {
 	CountRecentAbuseSignals(ctx context.Context, filter AbuseSignalFilter) (int, error)
 }
 
+// AbuseSignalPruner removes old abuse signals according to the configured retention window.
+type AbuseSignalPruner interface {
+	PruneAbuseSignals(ctx context.Context, olderThan time.Time) (int64, error)
+}
+
+// AbuseSignalReporter exposes operational summaries for internal diagnostics.
+type AbuseSignalReporter interface {
+	ListAbuseSignalSummaries(ctx context.Context, since time.Time, limit int) ([]AbuseSignalSummary, error)
+}
+
 // AbuseSignalFilter scopes recent abuse signal lookups.
 type AbuseSignalFilter struct {
 	Kinds       []AbuseSignalKind

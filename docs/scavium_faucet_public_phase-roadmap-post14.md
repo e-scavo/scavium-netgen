@@ -36,11 +36,11 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 - Runtime-configurable enforcement window and thresholds
 - No public API contract changes; reuses existing `claim_rejected` error envelope
 
-### 15.4 — Blocklist & Adaptive Rate Limiting
-- IP/address/fingerprint blocklist controls
-- CIDR rules
-- Dynamic throttling
-- Escalation logic
+### 15.4 — Abuse Operations & Retention
+- Configurable abuse signal retention window
+- Startup pruning of expired abuse signals
+- Internal aggregate summaries by signal kind for future operator surfaces
+- Operational tuning documentation before Phase 16 metrics/admin exposure
 
 ---
 
