@@ -540,3 +540,11 @@ Phase 17 closure note:
 - `POST /api/v1/claim` remains backward-compatible: `token_id` is optional and omitted values continue to use the configured default token.
 - Token validation, token-scoped enforcement, token-aware metrics, and frontend token selection do not change the public error envelope or response body contract.
 - Runtime token administration, database-backed token catalogs, and admin mutation endpoints are not part of Phase 17.
+
+Phase 17.5 post-audit closure note:
+
+- The frontend status banner consumes the `status` field returned by `/api/v1/status`; no API response shape change is introduced.
+- Cooldown presentation uses `retry_after_seconds` from the existing error `details` object when available.
+- Runtime metrics now keep accepted and rejected requests that omit `token_id` in the same `default` token bucket, preserving legacy-client observability consistency.
+- Rejection logging and token-scoped metrics defensively sanitize user-supplied token ids before recording them.
+- Public claim, token catalog, status, and metrics endpoint contracts remain unchanged.

@@ -263,6 +263,23 @@ Outcome:
 - Phase 18 can start from a stable token-aware backend, API, operations, and frontend baseline.
 
 
+
+#### 17.5.close — Post-Audit Fix Closure
+**Status:** CLOSED.
+
+Closed scope:
+- Closed the Phase 17 post-audit correction pass after the full token-support audit
+- Confirmed the frontend status banner now reads the backend `status` field instead of the non-existent `mode` field
+- Confirmed cooldown UI copy uses the existing `retry_after_seconds` error detail
+- Confirmed accepted and rejected legacy-client claims that omit `token_id` now land in the same `default` token metrics bucket
+- Confirmed user-supplied token ids are defensively sanitized before rejection logs and token-scoped metrics paths
+
+Validation:
+- `go test ./...` passes after the post-audit fixes
+
+Outcome:
+- Phase 18 can start from an audited and corrected token-aware backend, API, operations, and frontend baseline.
+
 ---
 
 ## Phase 18 — Admin & Control Plane

@@ -193,3 +193,8 @@ Phase 17.4 closes the frontend-facing token selection behavior without adding fr
 ## Phase 17 closure note
 
 Phase 17 closes token support around startup-loaded configuration. `SCAVIUM_FAUCET_TOKENS_JSON` and `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` define the native/ERC20 faucet catalog, default fallback behavior, claim-time token validation, token-scoped enforcement, token-aware metrics, and the browser-visible selector metadata. Changing token definitions still requires updating environment configuration and restarting the service; runtime mutation and database-backed catalogs remain outside this phase.
+
+
+## Phase 17.5 post-audit closure note
+
+Phase 17.5 does not add or change configuration variables. The post-audit fixes align frontend status handling, cooldown display, legacy-client token metrics, and defensive token-id logging with the existing Phase 17 configuration model. `SCAVIUM_FAUCET_TOKENS_JSON` and `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` remain the only token-support configuration sources in this phase.
