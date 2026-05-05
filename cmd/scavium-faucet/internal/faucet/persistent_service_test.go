@@ -582,6 +582,11 @@ func TestPersistentReadServiceCooldownIsTokenScoped(t *testing.T) {
 	}
 
 	laterService := newPersistentTestService(t, store, cfg, persistentTestNow().Add(time.Minute))
+	nextLaterID := 1
+	laterService.SetClaimIDGenerator(func() (string, error) {
+		nextLaterID++
+		return "claim_test_" + string(rune('a'+nextLaterID-1)), nil
+	})
 	if _, err := laterService.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), TokenID: "scat"}); err != nil {
 		t.Fatalf("create different-token claim within native cooldown: %v", err)
 	}
