@@ -345,11 +345,17 @@ func (s *Store) CreateClaimWithIdempotency(ctx context.Context, claim domain.Cla
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO requests (
-			id, address, amount_wei, status, reason, idempotency_key, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+			id, address, token_id, token_symbol, token_type, token_address, token_decimals,
+			amount_wei, status, reason, idempotency_key, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
 	`,
 		claim.ID,
 		claim.Address.Hex(),
+		claim.TokenID,
+		claim.TokenSymbol,
+		string(claim.TokenType),
+		tokenAddressHex(claim.TokenAddress),
+		claim.TokenDecimals,
 		claim.AmountWei.String(),
 		string(claim.Status),
 		claim.Reason,
@@ -373,6 +379,16 @@ func (s *Store) CreateClaimWithIdempotency(ctx context.Context, claim domain.Cla
 // CreateClaimWithIdempotencyAndDailyBudget checks the UTC-day budget and inserts
 // the claim in one SQLite write transaction.
 func (s *Store) CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, claim domain.Claim, idempotencyKey string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error) {
+	return s.createClaimWithBudget(ctx, claim, idempotencyKey, "", dayStart, dayEnd, budgetWei, statuses)
+}
+
+// CreateClaimWithIdempotencyAndDailyBudgetForToken checks a UTC-day budget scoped
+// to the given token_id and inserts the claim in one SQLite write transaction.
+func (s *Store) CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error) {
+	return s.createClaimWithBudget(ctx, claim, idempotencyKey, tokenID, dayStart, dayEnd, budgetWei, statuses)
+}
+
+func (s *Store) createClaimWithBudget(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return domain.Claim{}, nil, false, err
@@ -391,7 +407,7 @@ func (s *Store) CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, cl
 
 	if idempotencyKey != "" {
 		row := conn.QueryRowContext(ctx, `
-			SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+			SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 			FROM requests
 			WHERE idempotency_key = NULLIF(?, '')
 		`, idempotencyKey)
@@ -408,7 +424,7 @@ func (s *Store) CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, cl
 		}
 	}
 
-	used, err := claimAmountWei(ctx, conn, dayStart, dayEnd, statuses)
+	used, err := claimAmountWeiForToken(ctx, conn, tokenID, dayStart, dayEnd, statuses)
 	if err != nil {
 		return domain.Claim{}, nil, false, err
 	}
@@ -438,11 +454,17 @@ func (s *Store) CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, cl
 
 	_, err = conn.ExecContext(ctx, `
 		INSERT INTO requests (
-			id, address, amount_wei, status, reason, idempotency_key, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+			id, address, token_id, token_symbol, token_type, token_address, token_decimals,
+			amount_wei, status, reason, idempotency_key, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
 	`,
 		claim.ID,
 		claim.Address.Hex(),
+		claim.TokenID,
+		claim.TokenSymbol,
+		string(claim.TokenType),
+		tokenAddressHex(claim.TokenAddress),
+		claim.TokenDecimals,
 		claim.AmountWei.String(),
 		string(claim.Status),
 		claim.Reason,
@@ -464,7 +486,7 @@ func (s *Store) CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, cl
 // GetClaimByIdempotencyKey returns the claim previously created for idempotencyKey.
 func (s *Store) GetClaimByIdempotencyKey(ctx context.Context, idempotencyKey string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE idempotency_key = NULLIF(?, '')
 	`, idempotencyKey)
@@ -478,7 +500,7 @@ func (s *Store) GetClaimByIdempotencyKey(ctx context.Context, idempotencyKey str
 
 func (s *Store) GetClaim(ctx context.Context, id string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE id = ?
 	`, id)
@@ -518,7 +540,7 @@ func (s *Store) ListClaimsByAddress(ctx context.Context, address common.Address,
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE address = ?
 		ORDER BY created_at DESC
@@ -545,7 +567,7 @@ func (s *Store) ListClaimsByAddress(ctx context.Context, address common.Address,
 
 func (s *Store) LastClaimByAddress(ctx context.Context, address common.Address) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE address = ?
 		ORDER BY created_at DESC
@@ -569,13 +591,22 @@ type claimAmountQuerier interface {
 }
 
 func claimAmountWei(ctx context.Context, q claimAmountQuerier, dayStart, dayEnd time.Time, statuses []domain.ClaimStatus) (*big.Int, error) {
+	return claimAmountWeiForToken(ctx, q, "", dayStart, dayEnd, statuses)
+}
+
+func claimAmountWeiForToken(ctx context.Context, q claimAmountQuerier, tokenID string, dayStart, dayEnd time.Time, statuses []domain.ClaimStatus) (*big.Int, error) {
 	if len(statuses) == 0 {
 		return big.NewInt(0), nil
 	}
 
 	placeholders := make([]string, len(statuses))
-	args := make([]any, 0, len(statuses)+2)
+	args := make([]any, 0, len(statuses)+3)
 	args = append(args, formatBudgetBound(dayStart), formatBudgetBound(dayEnd))
+	whereToken := ""
+	if strings.TrimSpace(tokenID) != "" {
+		whereToken = " AND token_id = ?"
+		args = append(args, strings.TrimSpace(tokenID))
+	}
 	for i, status := range statuses {
 		placeholders[i] = "?"
 		args = append(args, string(status))
@@ -584,7 +615,7 @@ func claimAmountWei(ctx context.Context, q claimAmountQuerier, dayStart, dayEnd 
 	rows, err := q.QueryContext(ctx, `
 		SELECT amount_wei
 		FROM requests
-		WHERE created_at >= ? AND created_at < ?
+		WHERE created_at >= ? AND created_at < ?`+whereToken+`
 			AND status IN (`+strings.Join(placeholders, ", ")+`)
 	`, args...)
 	if err != nil {
@@ -622,6 +653,11 @@ func scanClaim(scanner claimScanner) (domain.Claim, error) {
 	var (
 		id            string
 		address       string
+		tokenID       string
+		tokenSymbol   string
+		tokenType     string
+		tokenAddress  string
+		tokenDecimals int
 		amountWei     string
 		status        string
 		reason        string
@@ -631,7 +667,7 @@ func scanClaim(scanner claimScanner) (domain.Claim, error) {
 		updatedAt     string
 	)
 
-	if err := scanner.Scan(&id, &address, &amountWei, &status, &reason, &retryCount, &nextAttemptAt, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&id, &address, &tokenID, &tokenSymbol, &tokenType, &tokenAddress, &tokenDecimals, &amountWei, &status, &reason, &retryCount, &nextAttemptAt, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Claim{}, ErrNotFound
 		}
@@ -664,6 +700,11 @@ func scanClaim(scanner claimScanner) (domain.Claim, error) {
 	return domain.Claim{
 		ID:            id,
 		Address:       common.HexToAddress(address),
+		TokenID:       tokenID,
+		TokenSymbol:   tokenSymbol,
+		TokenType:     domain.TokenType(tokenType),
+		TokenAddress:  common.HexToAddress(tokenAddress),
+		TokenDecimals: tokenDecimals,
 		AmountWei:     amount,
 		Status:        domain.ClaimStatus(status),
 		Reason:        reason,
@@ -672,6 +713,13 @@ func scanClaim(scanner claimScanner) (domain.Claim, error) {
 		CreatedAt:     created,
 		UpdatedAt:     updated,
 	}, nil
+}
+
+func tokenAddressHex(address common.Address) string {
+	if address == (common.Address{}) {
+		return ""
+	}
+	return address.Hex()
 }
 
 func formatTime(t time.Time) string {
@@ -721,7 +769,7 @@ func (s *Store) DequeueBatch(ctx context.Context, n int) ([]domain.Claim, error)
 	defer tx.Rollback() //nolint:errcheck
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 		ORDER BY created_at ASC
@@ -797,10 +845,11 @@ func (s *Store) Ack(ctx context.Context, claimID string, tx domain.Transaction) 
 		}
 		if _, err := dbTx.ExecContext(ctx, `
 			INSERT INTO transactions
-				(request_id, tx_hash, from_address, to_address, value_wei, status,
-				 block_number, gas_used, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, claimID, tx.Hash.Hex(), tx.From.Hex(), tx.To.Hex(), valueWei,
+				(request_id, tx_hash, from_address, to_address, token_id, token_symbol, token_type,
+				 token_address, token_decimals, value_wei, status, block_number, gas_used, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, claimID, tx.Hash.Hex(), tx.From.Hex(), tx.To.Hex(), tx.TokenID, tx.TokenSymbol,
+			string(tx.TokenType), tokenAddressHex(tx.TokenAddress), tx.TokenDecimals, valueWei,
 			string(tx.Status), tx.BlockNumber, tx.GasUsed,
 			formatTime(tx.CreatedAt), formatTime(tx.UpdatedAt),
 		); err != nil {
@@ -1030,7 +1079,7 @@ func (s *Store) ListStuckSending(ctx context.Context, stuckAfter time.Duration, 
 	}
 	cutoff := formatTime(time.Now().UTC().Add(-stuckAfter))
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, address, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE status = ? AND updated_at <= ?
 		ORDER BY updated_at ASC

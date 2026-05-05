@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -9,6 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Environment variable names consumed by the faucet configuration loader.
@@ -21,6 +26,8 @@ const (
 	EnvSymbol                               = "SCAVIUM_FAUCET_SYMBOL"
 	EnvExplorerTxURL                        = "SCAVIUM_FAUCET_EXPLORER_TX_URL"
 	EnvAmountWei                            = "SCAVIUM_FAUCET_AMOUNT_WEI"
+	EnvTokensJSON                           = "SCAVIUM_FAUCET_TOKENS_JSON"
+	EnvDefaultTokenID                       = "SCAVIUM_FAUCET_DEFAULT_TOKEN_ID"
 	EnvCooldownSeconds                      = "SCAVIUM_FAUCET_COOLDOWN_SECONDS"
 	EnvDryRun                               = "SCAVIUM_FAUCET_DRY_RUN"
 	EnvDatabasePath                         = "SCAVIUM_FAUCET_DATABASE_PATH"
@@ -61,6 +68,27 @@ const (
 	EnvAdminToken = "SCAVIUM_FAUCET_ADMIN_TOKEN"
 )
 
+// TokenConfig describes one claimable faucet asset.
+type TokenConfig struct {
+	ID             string
+	Symbol         string
+	Type           domain.TokenType
+	Address        common.Address
+	Decimals       int
+	AmountWei      *big.Int
+	DailyBudgetWei *big.Int
+}
+
+type tokenConfigJSON struct {
+	ID             string `json:"id"`
+	Symbol         string `json:"symbol"`
+	Type           string `json:"type"`
+	Address        string `json:"address"`
+	Decimals       int    `json:"decimals"`
+	AmountWei      string `json:"amount_wei"`
+	DailyBudgetWei string `json:"daily_budget_wei"`
+}
+
 // Config is the validated runtime configuration required by the faucet service.
 type Config struct {
 	BindAddr                             string
@@ -69,6 +97,8 @@ type Config struct {
 	ChainID                              int64
 	NetworkName                          string
 	Symbol                               string
+	Tokens                               []TokenConfig
+	DefaultTokenID                       string
 	ExplorerTxURL                        string
 	AmountWei                            *big.Int
 	CooldownSeconds                      int
@@ -147,6 +177,17 @@ func FromEnv(lookup func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: invalid integer", EnvAmountWei)
 		}
 		cfg.AmountWei = amount
+	}
+
+	if raw := strings.TrimSpace(lookup(EnvDefaultTokenID)); raw != "" {
+		cfg.DefaultTokenID = raw
+	}
+	if raw := strings.TrimSpace(lookup(EnvTokensJSON)); raw != "" {
+		tokens, err := parseTokensJSON(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvTokensJSON, err)
+		}
+		cfg.Tokens = tokens
 	}
 
 	if raw := strings.TrimSpace(lookup(EnvCooldownSeconds)); raw != "" {
@@ -295,6 +336,7 @@ func Defaults() Config {
 		ChainID:                              31337,
 		NetworkName:                          "scavium-dev",
 		Symbol:                               "SCAV",
+		DefaultTokenID:                       "native",
 		ExplorerTxURL:                        "",
 		AmountWei:                            big.NewInt(1_000_000_000_000_000_000),
 		CooldownSeconds:                      int((24 * time.Hour).Seconds()),
@@ -347,6 +389,10 @@ func (c Config) Validate() error {
 	if c.AmountWei == nil || c.AmountWei.Sign() <= 0 {
 		errs = append(errs, errors.New("amount wei must be positive"))
 	}
+
+	if err := c.validateTokens(); err != nil {
+		errs = append(errs, err)
+	}
 	if c.CooldownSeconds < 0 {
 		errs = append(errs, errors.New("cooldown seconds must be zero or positive"))
 	}
@@ -396,6 +442,199 @@ func (c Config) Validate() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// NormalizedTokens returns the configured token list, falling back to the legacy
+// single native token fields when SCAVIUM_FAUCET_TOKENS_JSON is not set.
+func (c Config) NormalizedTokens() []TokenConfig {
+	if len(c.Tokens) > 0 {
+		out := make([]TokenConfig, 0, len(c.Tokens))
+		for _, token := range c.Tokens {
+			out = append(out, normalizeToken(token, c))
+		}
+		return out
+	}
+	return []TokenConfig{normalizeToken(TokenConfig{
+		ID:        "native",
+		Symbol:    c.Symbol,
+		Type:      domain.TokenTypeNative,
+		Decimals:  18,
+		AmountWei: c.AmountWei,
+	}, c)}
+}
+
+// DefaultToken returns the token used by backward-compatible claim requests that
+// do not specify token_id.
+func (c Config) DefaultToken() TokenConfig {
+	tokens := c.NormalizedTokens()
+	wanted := strings.TrimSpace(c.DefaultTokenID)
+	if wanted == "" {
+		wanted = "native"
+	}
+	for _, token := range tokens {
+		if token.ID == wanted {
+			return token
+		}
+	}
+	if len(tokens) == 0 {
+		return normalizeToken(TokenConfig{}, c)
+	}
+	return tokens[0]
+}
+
+// TokenByID resolves a configured token by id. Empty id resolves to DefaultToken.
+func (c Config) TokenByID(id string) (TokenConfig, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return c.DefaultToken(), true
+	}
+	for _, token := range c.NormalizedTokens() {
+		if token.ID == id {
+			return token, true
+		}
+	}
+	return TokenConfig{}, false
+}
+
+func (c Config) validateTokens() error {
+	tokens := c.NormalizedTokens()
+	if len(tokens) == 0 {
+		return errors.New("at least one faucet token is required")
+	}
+	seen := map[string]struct{}{}
+	var errs []error
+	for _, token := range tokens {
+		if strings.TrimSpace(token.ID) == "" {
+			errs = append(errs, errors.New("token id is required"))
+		}
+		if _, exists := seen[token.ID]; exists {
+			errs = append(errs, fmt.Errorf("duplicate token id %q", token.ID))
+		}
+		seen[token.ID] = struct{}{}
+		if strings.TrimSpace(token.Symbol) == "" {
+			errs = append(errs, fmt.Errorf("token %q symbol is required", token.ID))
+		}
+		if !domain.IsValidTokenType(token.Type) {
+			errs = append(errs, fmt.Errorf("token %q has unsupported type %q", token.ID, token.Type))
+		}
+		if token.Type == domain.TokenTypeERC20 && token.Address == (common.Address{}) {
+			errs = append(errs, fmt.Errorf("token %q ERC20 address is required", token.ID))
+		}
+		if token.Decimals < 0 {
+			errs = append(errs, fmt.Errorf("token %q decimals must be zero or positive", token.ID))
+		}
+		if token.AmountWei == nil || token.AmountWei.Sign() <= 0 {
+			errs = append(errs, fmt.Errorf("token %q amount wei must be positive", token.ID))
+		}
+		if token.DailyBudgetWei != nil && token.DailyBudgetWei.Sign() < 0 {
+			errs = append(errs, fmt.Errorf("token %q daily budget wei must be zero or positive", token.ID))
+		}
+	}
+	if _, ok := c.TokenByID(c.DefaultTokenID); !ok {
+		errs = append(errs, fmt.Errorf("default token %q is not configured", c.DefaultTokenID))
+	}
+	return errors.Join(errs...)
+}
+
+func normalizeToken(token TokenConfig, cfg Config) TokenConfig {
+	if strings.TrimSpace(token.ID) == "" {
+		token.ID = "native"
+	}
+	token.ID = strings.TrimSpace(token.ID)
+	if strings.TrimSpace(token.Symbol) == "" {
+		token.Symbol = cfg.Symbol
+	}
+	token.Symbol = strings.TrimSpace(token.Symbol)
+	if token.Type == "" {
+		token.Type = domain.TokenTypeNative
+	}
+	token.Type = domain.TokenType(strings.ToLower(strings.TrimSpace(string(token.Type))))
+	if token.Decimals == 0 {
+		token.Decimals = 18
+	}
+	if token.AmountWei == nil {
+		token.AmountWei = copyBigInt(cfg.AmountWei)
+	} else {
+		token.AmountWei = copyBigInt(token.AmountWei)
+	}
+	if token.DailyBudgetWei == nil {
+		token.DailyBudgetWei = copyBigIntOrNil(cfg.DailyBudgetWei)
+	} else {
+		token.DailyBudgetWei = copyBigInt(token.DailyBudgetWei)
+	}
+	return token
+}
+
+func parseTokensJSON(raw string) ([]TokenConfig, error) {
+	var encoded []tokenConfigJSON
+	if err := json.Unmarshal([]byte(raw), &encoded); err != nil {
+		return nil, err
+	}
+	tokens := make([]TokenConfig, 0, len(encoded))
+	for _, item := range encoded {
+		amount, err := parseRequiredBigInt(item.AmountWei, "amount_wei")
+		if err != nil {
+			return nil, err
+		}
+		budget, err := parseOptionalBigInt(item.DailyBudgetWei, "daily_budget_wei")
+		if err != nil {
+			return nil, err
+		}
+		address := common.Address{}
+		if strings.TrimSpace(item.Address) != "" {
+			if !common.IsHexAddress(strings.TrimSpace(item.Address)) {
+				return nil, fmt.Errorf("invalid token address %q", item.Address)
+			}
+			address = common.HexToAddress(strings.TrimSpace(item.Address))
+		}
+		tokens = append(tokens, TokenConfig{
+			ID:             strings.TrimSpace(item.ID),
+			Symbol:         strings.TrimSpace(item.Symbol),
+			Type:           domain.TokenType(strings.ToLower(strings.TrimSpace(item.Type))),
+			Address:        address,
+			Decimals:       item.Decimals,
+			AmountWei:      amount,
+			DailyBudgetWei: budget,
+		})
+	}
+	return tokens, nil
+}
+
+func parseRequiredBigInt(raw, field string) (*big.Int, error) {
+	value, err := parseOptionalBigInt(raw, field)
+	if err != nil {
+		return nil, err
+	}
+	if value == nil {
+		return nil, fmt.Errorf("%s is required", field)
+	}
+	return value, nil
+}
+
+func parseOptionalBigInt(raw, field string) (*big.Int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, ok := new(big.Int).SetString(raw, 10)
+	if !ok {
+		return nil, fmt.Errorf("%s: invalid integer", field)
+	}
+	return value, nil
+}
+
+func copyBigInt(v *big.Int) *big.Int {
+	if v == nil {
+		return big.NewInt(0)
+	}
+	return new(big.Int).Set(v)
+}
+
+func copyBigIntOrNil(v *big.Int) *big.Int {
+	if v == nil {
+		return nil
+	}
+	return new(big.Int).Set(v)
 }
 
 func getenv(key string) string {

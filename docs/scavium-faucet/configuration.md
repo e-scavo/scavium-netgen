@@ -13,7 +13,9 @@ Configuration is loaded from environment variables at startup via `internal/conf
 | `SCAVIUM_FAUCET_NETWORK_NAME` | `scavium-dev` | Exposed by `/api/v1/status` and `/api/v1/config` |
 | `SCAVIUM_FAUCET_SYMBOL` | `SCAV` | Exposed by `/api/v1/status` and `/api/v1/config` |
 | `SCAVIUM_FAUCET_EXPLORER_TX_URL` | empty | Exposed by `/api/v1/config` |
-| `SCAVIUM_FAUCET_AMOUNT_WEI` | `1000000000000000000` | Copied into each created claim; exposed by `/api/v1/config` |
+| `SCAVIUM_FAUCET_AMOUNT_WEI` | `1000000000000000000` | Legacy/default native token amount; still copied into claims when no token override is configured |
+| `SCAVIUM_FAUCET_TOKENS_JSON` | empty | Optional JSON array of claimable tokens. When empty, the faucet exposes one backward-compatible native token from `SYMBOL` + `AMOUNT_WEI` |
+| `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` | `native` | Token used when a claim omits `token_id`; preserves the existing claim contract |
 | `SCAVIUM_FAUCET_COOLDOWN_SECONDS` | `86400` | Per-address cooldown enforced by `PersistentReadService`; exposed by `/api/v1/config` and address-status responses |
 | `SCAVIUM_FAUCET_DRY_RUN` | `true` | When `true`, uses `DryRunSender` and skips RPC/wallet startup checks; exposed by `/api/v1/status` and `/api/v1/config` |
 | `SCAVIUM_FAUCET_DATABASE_PATH` | `cmd/scavium-faucet/data/scavium-faucet.db` | Mandatory path to the SQLite database file used for persistence; created with parent directories if missing; migrations run automatically on open |
@@ -52,6 +54,7 @@ Configuration is loaded from environment variables at startup via `internal/conf
 - network name must be non-empty
 - symbol must be non-empty
 - amount wei must be positive
+- token configuration must include unique ids, supported types (`native` or `erc20`), positive amounts, and ERC20 contract addresses for `erc20` tokens
 - cooldown seconds must be zero or positive
 - worker poll seconds must be positive
 - watcher poll seconds must be positive
@@ -74,6 +77,9 @@ SCAVIUM_FAUCET_EXPLORER_TX_URL=https://explorer.example.test/tx/{txHash}
 
 SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db
 SCAVIUM_FAUCET_AMOUNT_WEI=1000000000000000000
+# Optional multi-token configuration; omit to keep single native-token behavior.
+# SCAVIUM_FAUCET_DEFAULT_TOKEN_ID=native
+# SCAVIUM_FAUCET_TOKENS_JSON=[{"id":"native","symbol":"SCAV","type":"native","decimals":18,"amount_wei":"1000000000000000000"},{"id":"scat","symbol":"SCAT","type":"erc20","address":"0x0000000000000000000000000000000000000000","decimals":18,"amount_wei":"1000000000000000000"}]
 SCAVIUM_FAUCET_COOLDOWN_SECONDS=86400
 SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR=10
 SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY=3

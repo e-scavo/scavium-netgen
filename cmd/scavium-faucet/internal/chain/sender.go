@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"time"
@@ -17,6 +18,9 @@ var _ domain.Sender = (*DryRunSender)(nil)
 
 // gasLimitETHTransfer is the fixed gas cost of a plain ETH value transfer on EVM.
 const gasLimitETHTransfer = uint64(21_000)
+
+// gasLimitERC20Transfer is a conservative legacy gas limit for ERC20 transfer(address,uint256).
+const gasLimitERC20Transfer = uint64(100_000)
 
 // GasPolicy holds configurable gas-price constraints for EthSender.
 type GasPolicy struct {
@@ -59,13 +63,37 @@ func (s *EthSender) Send(ctx context.Context, claim domain.Claim) (domain.Transa
 		gasPrice = new(big.Int).Set(s.gasPolicy.MinGasPrice)
 	}
 
-	// Balance guard: faucet must hold at least amountWei + gas cost.
+	tokenType := claim.TokenType
+	if tokenType == "" {
+		tokenType = domain.TokenTypeNative
+	}
+
+	gasLimit := gasLimitETHTransfer
+	txTo := claim.Address
+	txValue := claim.AmountWei
+	var txData []byte
+	if tokenType == domain.TokenTypeERC20 {
+		if claim.TokenAddress == (common.Address{}) {
+			return domain.Transaction{}, fmt.Errorf("ERC20 token address is required")
+		}
+		gasLimit = gasLimitERC20Transfer
+		txTo = claim.TokenAddress
+		txValue = big.NewInt(0)
+		txData = erc20TransferData(claim.Address, claim.AmountWei)
+	}
+
+	// Balance guard: faucet must hold enough native coin for gas and, for native
+	// transfers, the claim value itself. ERC20 token-balance enforcement is left
+	// to the node/contract in this ERC20-ready foundation step.
 	balance, err := s.client.BalanceAt(ctx, s.signer.Address(), nil)
 	if err != nil {
 		return domain.Transaction{}, fmt.Errorf("balance check: %w", err)
 	}
-	gasCost := new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gasLimitETHTransfer))
-	required := new(big.Int).Add(claim.AmountWei, gasCost)
+	gasCost := new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gasLimit))
+	required := new(big.Int).Set(gasCost)
+	if tokenType == domain.TokenTypeNative {
+		required.Add(required, claim.AmountWei)
+	}
 	if balance.Cmp(required) < 0 {
 		return domain.Transaction{}, fmt.Errorf(
 			"insufficient faucet balance: have %s wei, need %s wei",
@@ -78,13 +106,13 @@ func (s *EthSender) Send(ctx context.Context, claim domain.Claim) (domain.Transa
 		return domain.Transaction{}, fmt.Errorf("get nonce: %w", err)
 	}
 
-	to := claim.Address
 	rawTx := types.NewTx(&types.LegacyTx{
 		Nonce:    nonce,
-		To:       &to,
-		Value:    claim.AmountWei,
-		Gas:      gasLimitETHTransfer,
+		To:       &txTo,
+		Value:    txValue,
+		Gas:      gasLimit,
 		GasPrice: gasPrice,
+		Data:     txData,
 	})
 
 	signed, err := s.signer.Sign(rawTx, s.chainID)
@@ -99,14 +127,35 @@ func (s *EthSender) Send(ctx context.Context, claim domain.Claim) (domain.Transa
 
 	now := time.Now().UTC()
 	return domain.Transaction{
-		Hash:      signed.Hash(),
-		From:      s.signer.Address(),
-		To:        claim.Address,
-		ValueWei:  claim.AmountWei,
-		Status:    domain.ClaimStatusSent,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Hash:          signed.Hash(),
+		From:          s.signer.Address(),
+		To:            claim.Address,
+		TokenID:       claim.TokenID,
+		TokenSymbol:   claim.TokenSymbol,
+		TokenType:     tokenType,
+		TokenAddress:  claim.TokenAddress,
+		TokenDecimals: claim.TokenDecimals,
+		ValueWei:      claim.AmountWei,
+		Status:        domain.ClaimStatusSent,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}, nil
+}
+
+func erc20TransferData(to common.Address, amount *big.Int) []byte {
+	if amount == nil {
+		amount = big.NewInt(0)
+	}
+	selector, _ := hex.DecodeString("a9059cbb")
+	data := make([]byte, 4+32+32)
+	copy(data[:4], selector)
+	copy(data[4+12:4+32], to.Bytes())
+	amountBytes := amount.Bytes()
+	if len(amountBytes) > 32 {
+		amountBytes = amountBytes[len(amountBytes)-32:]
+	}
+	copy(data[len(data)-len(amountBytes):], amountBytes)
+	return data
 }
 
 // DryRunSender implements domain.Sender without touching the blockchain.
@@ -125,12 +174,17 @@ func NewDryRunSender(from common.Address) *DryRunSender {
 func (s *DryRunSender) Send(_ context.Context, claim domain.Claim) (domain.Transaction, error) {
 	now := time.Now().UTC()
 	return domain.Transaction{
-		Hash:      common.Hash{}, // zero hash — no real tx
-		From:      s.from,
-		To:        claim.Address,
-		ValueWei:  claim.AmountWei,
-		Status:    domain.ClaimStatusSent,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Hash:          common.Hash{}, // zero hash — no real tx
+		From:          s.from,
+		To:            claim.Address,
+		TokenID:       claim.TokenID,
+		TokenSymbol:   claim.TokenSymbol,
+		TokenType:     claim.TokenType,
+		TokenAddress:  claim.TokenAddress,
+		TokenDecimals: claim.TokenDecimals,
+		ValueWei:      claim.AmountWei,
+		Status:        domain.ClaimStatusSent,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}, nil
 }

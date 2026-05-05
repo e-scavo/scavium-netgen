@@ -86,8 +86,14 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 ## Phase 17 — Token Faucet Extension
 
 ### 17.1 — Multi-token Support
-- Config-driven tokens
-- ERC20 send support
+**Status:** IMPLEMENTED in the Phase 17.1 foundation pass. The claim contract remains backward-compatible: clients may omit `token_id` and receive the configured default native token exactly as before.
+
+- Config-driven token catalog via `SCAVIUM_FAUCET_TOKENS_JSON`
+- Backward-compatible native-token fallback from `SCAVIUM_FAUCET_SYMBOL` and `SCAVIUM_FAUCET_AMOUNT_WEI`
+- Optional `token_id` claim input
+- Token metadata persisted with each claim and transaction
+- ERC20 transfer path prepared in `chain.EthSender` using `transfer(address,uint256)` calldata
+- SQLite migration `004_token_claim_metadata.sql` adds token fields without altering existing claim statuses or error codes
 
 ### 17.2 — Token Registration (testnet)
 - API endpoint

@@ -132,12 +132,13 @@ Request body:
 ```json
 {
   "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+  "token_id": "native",
   "captcha_token": "<provider-token>",
   "fingerprint": "<client-fingerprint>"
 }
 ```
 
-All fields except `address` are optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting when provided.
+`token_id` is optional; when omitted, the configured default token is used. All fields except `address` remain optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting when provided.
 
 Optional request header:
 
@@ -152,6 +153,10 @@ Accepted response:
   "id": "claim_test",
   "address": "0x52908400098527886E0F7030069857D2E4169EE7",
   "amount_wei": "42",
+  "token_id": "native",
+  "token_symbol": "SCAV",
+  "token_type": "native",
+  "token_decimals": 18,
   "status": "queued",
   "idempotency_key": "same-key-for-retries",
   "created_at": "2026-05-03T12:00:00Z",
@@ -161,13 +166,13 @@ Accepted response:
 
 Current behavior:
 
-- `address`, `captcha_token`, and `fingerprint` are decoded from the body
+- `address`, optional `token_id`, `captcha_token`, and `fingerprint` are decoded from the body
 - the body is capped at `1 MiB`
 - `RemoteIP` is extracted from the request (trusting `X-Forwarded-For` / `X-Real-IP` when `SCAVIUM_FAUCET_TRUSTED_PROXY` is set)
 - `UserAgent` is forwarded from the request header
 - the address cooldown is checked against the SQLite store
 - persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided)
-- the global daily budget is enforced as a faucet-wide limit
+- the daily budget is enforced for the selected token when token-scoped configuration is available; legacy deployments keep the existing faucet-wide budget behavior
 - captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; missing or failed verification returns `422 captcha_failed`
 - risk evaluation runs when a risk engine is configured
 - the accepted claim is persisted to SQLite with initial status `received`, then enqueued as `queued`
@@ -207,6 +212,10 @@ Alias routes for claim lookup.
   "id": "claim_test",
   "address": "0x52908400098527886E0F7030069857D2E4169EE7",
   "amount_wei": "42",
+  "token_id": "native",
+  "token_symbol": "SCAV",
+  "token_type": "native",
+  "token_decimals": 18,
   "status": "queued",
   "created_at": "2026-05-03T12:00:00Z",
   "updated_at": "2026-05-03T12:00:00Z"

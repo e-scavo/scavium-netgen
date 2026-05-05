@@ -25,17 +25,18 @@ type StatusResponse struct {
 
 // ConfigResponse is returned by public faucet config endpoints.
 type ConfigResponse struct {
-	NetworkName         string `json:"network_name"`
-	ChainID             int64  `json:"chain_id"`
-	Symbol              string `json:"symbol"`
-	AmountWei           string `json:"amount_wei"`
-	CooldownSeconds     int    `json:"cooldown_seconds"`
-	ExplorerTxURL       string `json:"explorer_tx_url"`
-	DryRun              bool   `json:"dry_run"`
-	RateLimitIPPerHour  int    `json:"rate_limit_ip_per_hour"`
-	RateLimitAddrPerDay int    `json:"rate_limit_addr_per_day"`
-	CaptchaProvider     string `json:"captcha_provider"`
-	CaptchaSiteKey      string `json:"captcha_site_key,omitempty"`
+	NetworkName         string          `json:"network_name"`
+	ChainID             int64           `json:"chain_id"`
+	Symbol              string          `json:"symbol"`
+	AmountWei           string          `json:"amount_wei"`
+	Tokens              []TokenResponse `json:"tokens,omitempty"`
+	CooldownSeconds     int             `json:"cooldown_seconds"`
+	ExplorerTxURL       string          `json:"explorer_tx_url"`
+	DryRun              bool            `json:"dry_run"`
+	RateLimitIPPerHour  int             `json:"rate_limit_ip_per_hour"`
+	RateLimitAddrPerDay int             `json:"rate_limit_addr_per_day"`
+	CaptchaProvider     string          `json:"captcha_provider"`
+	CaptchaSiteKey      string          `json:"captcha_site_key,omitempty"`
 }
 
 // AddressStatusResponse describes whether an address can request funds now.
@@ -53,6 +54,7 @@ type AddressStatusResponse struct {
 // ClaimRequest is the internal read-side input for claim creation.
 type ClaimRequest struct {
 	Address        common.Address
+	TokenID        string
 	IdempotencyKey string
 	RemoteIP       string
 	UserAgent      string
@@ -60,11 +62,27 @@ type ClaimRequest struct {
 	Fingerprint    string
 }
 
+// TokenResponse is returned by public config and claim endpoints for token-aware clients.
+type TokenResponse struct {
+	ID             string `json:"id"`
+	Symbol         string `json:"symbol"`
+	Type           string `json:"type"`
+	Address        string `json:"address,omitempty"`
+	Decimals       int    `json:"decimals"`
+	AmountWei      string `json:"amount_wei"`
+	DailyBudgetWei string `json:"daily_budget_wei,omitempty"`
+}
+
 // ClaimResponse is returned by claim creation and lookup endpoints.
 type ClaimResponse struct {
 	ID             string             `json:"id"`
 	Address        string             `json:"address"`
 	TxHash         string             `json:"tx_hash,omitempty"`
+	TokenID        string             `json:"token_id,omitempty"`
+	TokenSymbol    string             `json:"token_symbol,omitempty"`
+	TokenType      string             `json:"token_type,omitempty"`
+	TokenAddress   string             `json:"token_address,omitempty"`
+	TokenDecimals  int                `json:"token_decimals,omitempty"`
 	AmountWei      string             `json:"amount_wei"`
 	Status         domain.ClaimStatus `json:"status"`
 	Reason         string             `json:"reason,omitempty"`
@@ -147,6 +165,7 @@ func (s *InMemoryReadService) Config(context.Context) (ConfigResponse, error) {
 		ChainID:             s.cfg.ChainID,
 		Symbol:              s.cfg.Symbol,
 		AmountWei:           amountWei,
+		Tokens:              tokenResponses(s.cfg.NormalizedTokens()),
 		CooldownSeconds:     s.cfg.CooldownSeconds,
 		ExplorerTxURL:       s.cfg.ExplorerTxURL,
 		DryRun:              s.cfg.DryRun,
@@ -187,13 +206,22 @@ func (s *InMemoryReadService) CreateClaim(_ context.Context, request ClaimReques
 	}
 
 	now := s.now()
+	token, ok := s.cfg.TokenByID(request.TokenID)
+	if !ok {
+		return ClaimResponse{}, claimError(ErrClaimRejected, "unsupported token")
+	}
 	claim := domain.Claim{
-		ID:        id,
-		Address:   request.Address,
-		AmountWei: s.cfg.AmountWei,
-		Status:    domain.ClaimStatusQueued,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:            id,
+		Address:       request.Address,
+		TokenID:       token.ID,
+		TokenSymbol:   token.Symbol,
+		TokenType:     token.Type,
+		TokenAddress:  token.Address,
+		TokenDecimals: token.Decimals,
+		AmountWei:     token.AmountWei,
+		Status:        domain.ClaimStatusQueued,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	s.claimsByID[id] = claim
@@ -231,6 +259,11 @@ func claimResponse(claim domain.Claim, idempotencyKey string) ClaimResponse {
 		ID:             claim.ID,
 		Address:        claim.Address.Hex(),
 		TxHash:         txHash,
+		TokenID:        claim.TokenID,
+		TokenSymbol:    claim.TokenSymbol,
+		TokenType:      string(claim.TokenType),
+		TokenAddress:   tokenAddressHex(claim.TokenAddress),
+		TokenDecimals:  claim.TokenDecimals,
 		AmountWei:      amountWei,
 		Status:         claim.Status,
 		Reason:         claim.Reason,
@@ -238,6 +271,37 @@ func claimResponse(claim domain.Claim, idempotencyKey string) ClaimResponse {
 		CreatedAt:      claim.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:      claim.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+func tokenResponses(tokens []config.TokenConfig) []TokenResponse {
+	out := make([]TokenResponse, 0, len(tokens))
+	for _, token := range tokens {
+		amountWei := ""
+		if token.AmountWei != nil {
+			amountWei = token.AmountWei.String()
+		}
+		dailyBudgetWei := ""
+		if token.DailyBudgetWei != nil {
+			dailyBudgetWei = token.DailyBudgetWei.String()
+		}
+		out = append(out, TokenResponse{
+			ID:             token.ID,
+			Symbol:         token.Symbol,
+			Type:           string(token.Type),
+			Address:        tokenAddressHex(token.Address),
+			Decimals:       token.Decimals,
+			AmountWei:      amountWei,
+			DailyBudgetWei: dailyBudgetWei,
+		})
+	}
+	return out
+}
+
+func tokenAddressHex(address common.Address) string {
+	if address == (common.Address{}) {
+		return ""
+	}
+	return address.Hex()
 }
 
 func randomID(prefix string) (string, error) {
