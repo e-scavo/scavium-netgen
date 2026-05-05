@@ -213,6 +213,25 @@ Implemented:
 - Claim result rendering includes token id/symbol/type and base-unit amount when returned by the API
 - Catalog-load failures preserve backward compatibility by hiding the selector and omitting `token_id`
 
+#### 17.4.2 — Token Selector UX Hardening
+**Status:** IMPLEMENTED.
+
+Implemented:
+- Token catalog loading and fallback states are visible in the embedded frontend
+- Selected-token detail cards show claim-safe amount/type/decimals metadata
+- Catalog failure preserves default-token claim behavior by omitting `token_id`
+- No backend contract or dependency change
+
+#### 17.4.3 — Token Claim Result UX Alignment
+**Status:** IMPLEMENTED.
+
+Implemented:
+- Claim result panel renders a token-aware summary for accepted and polled claims
+- Returned `amount_wei` is formatted using token decimals when metadata is available
+- Raw base-unit amount and existing claim details remain visible
+- Explorer action copy is clarified without changing explorer URL configuration
+- Native/default responses remain backward-compatible
+
 Deferred:
 - Advanced token balance display
 - Token icons and richer branding metadata
