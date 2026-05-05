@@ -250,6 +250,18 @@ Closed scope:
 
 Phase 18 can now introduce admin control features on top of a stable token-aware backend and frontend surface.
 
+#### 17.close — Token Support Closure
+**Status:** CLOSED.
+
+Closed scope:
+- Closed Phase 17 as the complete token-support layer for the current public testnet faucet scope
+- Consolidated multi-token backend execution, configuration-driven registration, public catalog discovery, token-aware claim validation, token-scoped enforcement, token-aware metrics, and embedded frontend token selection/result presentation
+- Preserved the existing public claim contract: `token_id` remains optional and omitted values continue to use the configured default token
+- Kept runtime token mutation, database-backed catalogs, durable per-token analytics, token icons, and richer admin-control capabilities outside Phase 17
+
+Outcome:
+- Phase 18 can start from a stable token-aware backend, API, operations, and frontend baseline.
+
 
 ---
 

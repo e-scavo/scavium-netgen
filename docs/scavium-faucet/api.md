@@ -532,3 +532,11 @@ Phase 17.4 closure note:
 - Catalog discovery failures are handled on the client by omitting `token_id`, not by changing the claim API contract.
 - Claim-result rendering may display token-aware summaries, but the API response shape and existing error envelope remain unchanged.
 
+
+Phase 17 closure note:
+
+- Multi-token support is now part of the stable faucet API baseline for the current public testnet scope.
+- `GET /api/v1/tokens` and `GET /api/v1/faucet/tokens` are the public, claim-safe discovery endpoints for configured assets.
+- `POST /api/v1/claim` remains backward-compatible: `token_id` is optional and omitted values continue to use the configured default token.
+- Token validation, token-scoped enforcement, token-aware metrics, and frontend token selection do not change the public error envelope or response body contract.
+- Runtime token administration, database-backed token catalogs, and admin mutation endpoints are not part of Phase 17.
