@@ -114,6 +114,11 @@ type QueueResponse struct {
 	UpdatedAt string              `json:"updated_at"`
 }
 
+// QueueControlRequest is the body for POST /api/v1/admin/queue/{retry,cancel}.
+type QueueControlRequest struct {
+	ID string `json:"id"`
+}
+
 // BlocklistAddRequest is the body for POST /api/v1/admin/blocklist.
 type BlocklistAddRequest struct {
 	KeyType string `json:"key_type"`

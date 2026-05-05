@@ -1624,6 +1624,75 @@ func TestAdminRetryClaim(t *testing.T) {
 	}
 }
 
+func TestAdminQueueRetryClaim(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	svc.AddClaim(domain.Claim{
+		ID:        "queue_retry",
+		Address:   common.HexToAddress("0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"),
+		Status:    domain.ClaimStatusFailed,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/queue/retry", admin.QueueControlRequest{ID: "queue_retry"}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	claim, found, err := svc.GetClaim(context.Background(), "queue_retry")
+	if err != nil || !found {
+		t.Fatalf("claim not found after retry: found=%v err=%v", found, err)
+	}
+	if claim.Status != domain.ClaimStatusQueued {
+		t.Fatalf("status = %q, want queued", claim.Status)
+	}
+}
+
+func TestAdminQueueCancelClaim(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	svc.AddClaim(domain.Claim{
+		ID:        "queue_cancel",
+		Address:   common.HexToAddress("0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"),
+		Status:    domain.ClaimStatusQueued,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/queue/cancel", admin.QueueControlRequest{ID: "queue_cancel"}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	claim, found, err := svc.GetClaim(context.Background(), "queue_cancel")
+	if err != nil || !found {
+		t.Fatalf("claim not found after cancel: found=%v err=%v", found, err)
+	}
+	if claim.Status != domain.ClaimStatusRejected {
+		t.Fatalf("status = %q, want rejected", claim.Status)
+	}
+}
+
+func TestAdminQueueControlRequiresID(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/queue/retry", admin.QueueControlRequest{}))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestAdminQueueControlAllowsOnlyPOST(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/queue/retry", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != http.MethodPost {
+		t.Fatalf("allow = %q, want POST", got)
+	}
+}
+
 // --- Phase 17.5 post-audit fix tests ---
 
 // TestMetricsAcceptedClaimWithoutTokenIDUsesDefaultBucket (MED-02):

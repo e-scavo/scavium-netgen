@@ -126,6 +126,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux.HandleFunc("/api/v1/admin/dashboard", handleAdminDashboard(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/runtime", handleAdminRuntime(deps.AdminService, deps.ReadinessChecks, deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/queue", handleAdminQueue(deps.AdminService))
+	adminMux.HandleFunc("/api/v1/admin/queue/", handleAdminQueueDispatch(deps.AdminService, "/api/v1/admin/queue/"))
 	adminMux.HandleFunc("/api/v1/admin/metrics", handleAdminMetrics(deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/claims", handleAdminListClaims(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, "/api/v1/admin/claim/"))
@@ -670,6 +671,55 @@ func handleAdminDashboard(svc admin.AdminService) http.HandlerFunc {
 			return
 		}
 		WriteJSON(w, http.StatusOK, dash)
+	}
+}
+
+// handleAdminQueueDispatch exposes queue-oriented control actions without
+// changing the existing claim-specific admin endpoints.
+//   - POST /api/v1/admin/queue/retry  {"id":"<claim_id>"}
+//   - POST /api/v1/admin/queue/cancel {"id":"<claim_id>"}
+func handleAdminQueueDispatch(svc admin.AdminService, prefix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		action := strings.Trim(strings.TrimPrefix(r.URL.Path, prefix), "/")
+		switch action {
+		case "retry", "cancel":
+		default:
+			handleNotFound(w, r)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		var body admin.QueueControlRequest
+		if err := decodeNoTrailingTokens(json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)), &body); err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+			return
+		}
+		body.ID = strings.TrimSpace(body.ID)
+		if body.ID == "" {
+			WriteError(w, r, http.StatusBadRequest, "missing_id", "id is required", nil)
+			return
+		}
+
+		actor := actorFromRequest(r)
+		switch action {
+		case "retry":
+			if err := svc.RetryClaim(r.Context(), body.ID, actor); err != nil {
+				handleAdminServiceError(w, r, err)
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "retried", "id": body.ID})
+		case "cancel":
+			if err := svc.CancelClaim(r.Context(), body.ID, actor); err != nil {
+				handleAdminServiceError(w, r, err)
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelled", "id": body.ID})
+		}
 	}
 }
 
