@@ -84,3 +84,23 @@ func assertTokenMetrics(t *testing.T, tokens []RuntimeTokenMetrics, want Runtime
 	}
 	t.Fatalf("missing token metrics for %q in %#v", want.TokenID, tokens)
 }
+
+func TestRuntimeMetricsSnapshotIncludesProcessMetrics(t *testing.T) {
+	startedAt := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
+	metrics := NewRuntimeMetricsWithClock(version.Info{}, func() time.Time { return startedAt })
+
+	snapshot := metrics.Snapshot(startedAt)
+
+	if snapshot.Process.Goroutines <= 0 {
+		t.Fatalf("process.goroutines = %d, want > 0", snapshot.Process.Goroutines)
+	}
+	if snapshot.Process.CPUs <= 0 {
+		t.Fatalf("process.cpus = %d, want > 0", snapshot.Process.CPUs)
+	}
+	if snapshot.Process.SysBytes == 0 {
+		t.Fatalf("process.sys_bytes = %d, want > 0", snapshot.Process.SysBytes)
+	}
+	if snapshot.Process.Mallocs < snapshot.Process.Frees {
+		t.Fatalf("process malloc/free counters invalid: mallocs=%d frees=%d", snapshot.Process.Mallocs, snapshot.Process.Frees)
+	}
+}

@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ type RuntimeMetricsSnapshot struct {
 	StartedAt     string                  `json:"started_at"`
 	UptimeSeconds int64                   `json:"uptime_seconds"`
 	Build         RuntimeMetricsBuild     `json:"build"`
+	Process       RuntimeProcessMetrics   `json:"process"`
 	Claims        RuntimeClaimMetrics     `json:"claims"`
 	Captcha       RuntimeCaptchaMetrics   `json:"captcha"`
 	RateLimits    RuntimeRateLimitMetrics `json:"rate_limits"`
@@ -48,6 +50,22 @@ type RuntimeMetricsBuild struct {
 	Version   string `json:"version"`
 	Commit    string `json:"commit"`
 	BuildDate string `json:"build_date"`
+}
+
+// RuntimeProcessMetrics exposes process-level runtime state for admin diagnostics.
+type RuntimeProcessMetrics struct {
+	Goroutines       int    `json:"goroutines"`
+	CPUs             int    `json:"cpus"`
+	AllocBytes       uint64 `json:"alloc_bytes"`
+	SysBytes         uint64 `json:"sys_bytes"`
+	HeapAllocBytes   uint64 `json:"heap_alloc_bytes"`
+	HeapInUseBytes   uint64 `json:"heap_in_use_bytes"`
+	HeapObjects      uint64 `json:"heap_objects"`
+	TotalAllocBytes  uint64 `json:"total_alloc_bytes"`
+	Mallocs          uint64 `json:"mallocs"`
+	Frees            uint64 `json:"frees"`
+	GCCycles         uint32 `json:"gc_cycles"`
+	LastGCEpochNanos uint64 `json:"last_gc_epoch_nanos"`
 }
 
 // RuntimeClaimMetrics exposes claim-flow counters.
@@ -184,6 +202,7 @@ func (m *RuntimeMetrics) Snapshot(now time.Time) RuntimeMetricsSnapshot {
 			Commit:    m.version.Commit,
 			BuildDate: m.version.BuildDate,
 		},
+		Process: processMetrics(),
 		Claims: RuntimeClaimMetrics{
 			Accepted:          m.claimsAccepted.Load(),
 			Rejected:          m.claimsRejected.Load(),
@@ -202,6 +221,25 @@ func (m *RuntimeMetrics) Snapshot(now time.Time) RuntimeMetricsSnapshot {
 			DailyExceeded: m.dailyBudgetExceeded.Load(),
 		},
 		Tokens: m.tokenSnapshots(),
+	}
+}
+
+func processMetrics() RuntimeProcessMetrics {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	return RuntimeProcessMetrics{
+		Goroutines:       runtime.NumGoroutine(),
+		CPUs:             runtime.NumCPU(),
+		AllocBytes:       mem.Alloc,
+		SysBytes:         mem.Sys,
+		HeapAllocBytes:   mem.HeapAlloc,
+		HeapInUseBytes:   mem.HeapInuse,
+		HeapObjects:      mem.HeapObjects,
+		TotalAllocBytes:  mem.TotalAlloc,
+		Mallocs:          mem.Mallocs,
+		Frees:            mem.Frees,
+		GCCycles:         mem.NumGC,
+		LastGCEpochNanos: mem.LastGC,
 	}
 }
 
