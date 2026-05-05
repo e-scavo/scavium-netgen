@@ -125,6 +125,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("/api/v1/admin/dashboard", handleAdminDashboard(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/runtime", handleAdminRuntime(deps.AdminService, deps.ReadinessChecks, deps.Metrics))
+	adminMux.HandleFunc("/api/v1/admin/queue", handleAdminQueue(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/metrics", handleAdminMetrics(deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/claims", handleAdminListClaims(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, "/api/v1/admin/claim/"))
@@ -611,6 +612,28 @@ func handleAdminRuntime(svc admin.AdminService, checks []ready.Check, metrics *o
 			Readiness: ready.Evaluate(r.Context(), checks),
 			Metrics:   metrics.Snapshot(now),
 		})
+	}
+}
+
+func handleAdminQueue(svc admin.AdminService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+		limit := 50
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		queue, err := svc.Queue(r.Context(), limit)
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "queue_unavailable", "queue unavailable", nil)
+			return
+		}
+		WriteJSON(w, http.StatusOK, queue)
 	}
 }
 

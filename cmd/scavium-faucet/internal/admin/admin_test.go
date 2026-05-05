@@ -326,6 +326,68 @@ func TestInMemoryAdminServiceListClaimsOffset(t *testing.T) {
 	}
 }
 
+func TestInMemoryAdminServiceQueue(t *testing.T) {
+	now := time.Date(2026, 5, 5, 10, 0, 0, 0, time.UTC)
+	svc := NewInMemoryAdminService().withClock(func() time.Time { return now })
+	ready := testClaim("ready", domain.ClaimStatusQueued)
+	ready.CreatedAt = now.Add(-3 * time.Minute)
+	ready.UpdatedAt = now.Add(-3 * time.Minute)
+	delayedAt := now.Add(10 * time.Minute)
+	delayed := testClaim("delayed", domain.ClaimStatusQueued)
+	delayed.NextAttemptAt = &delayedAt
+	delayed.CreatedAt = now.Add(-2 * time.Minute)
+	delayed.UpdatedAt = now.Add(-2 * time.Minute)
+	sending := testClaim("sending", domain.ClaimStatusSending)
+	sending.CreatedAt = now.Add(-1 * time.Minute)
+	sending.UpdatedAt = now.Add(-1 * time.Minute)
+	sent := testClaim("sent", domain.ClaimStatusSent)
+	failed := testClaim("failed", domain.ClaimStatusFailed)
+	confirmed := testClaim("confirmed", domain.ClaimStatusConfirmed)
+
+	svc.AddClaim(ready)
+	svc.AddClaim(delayed)
+	svc.AddClaim(sending)
+	svc.AddClaim(sent)
+	svc.AddClaim(failed)
+	svc.AddClaim(confirmed)
+
+	queue, err := svc.Queue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("Queue: %v", err)
+	}
+	if queue.Ready != 1 || queue.Delayed != 1 || queue.InFlight != 1 || queue.PendingTx != 1 || queue.Terminal != 2 {
+		t.Fatalf("summary = %#v", queue)
+	}
+	if queue.Counts["queued"] != 2 || queue.Counts["sending"] != 1 || queue.Counts["sent"] != 1 || queue.Counts["failed"] != 1 || queue.Counts["confirmed"] != 1 {
+		t.Fatalf("counts = %#v", queue.Counts)
+	}
+	if len(queue.Items) != 5 {
+		t.Fatalf("items len = %d, want 5", len(queue.Items))
+	}
+	for _, item := range queue.Items {
+		if item.ID == "confirmed" {
+			t.Fatal("confirmed claim should not be included in queue items")
+		}
+	}
+}
+
+func TestInMemoryAdminServiceQueueLimit(t *testing.T) {
+	svc := NewInMemoryAdminService()
+	svc.AddClaim(testClaim("c1", domain.ClaimStatusQueued))
+	svc.AddClaim(testClaim("c2", domain.ClaimStatusQueued))
+
+	queue, err := svc.Queue(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("Queue: %v", err)
+	}
+	if len(queue.Items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(queue.Items))
+	}
+	if queue.Counts["queued"] != 2 {
+		t.Fatalf("queued count = %d, want 2", queue.Counts["queued"])
+	}
+}
+
 func TestInMemoryAdminServiceRecentAuditLog(t *testing.T) {
 	svc := NewInMemoryAdminService()
 	_ = svc.SetMode(context.Background(), "paused", "a")

@@ -1795,6 +1795,109 @@ func TestClaimRejectedLogsDoNotContainRawMaliciousTokenID(t *testing.T) {
 	}
 }
 
+func TestAdminQueueReportsQueueVisibility(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	now := time.Now().UTC()
+	next := now.Add(5 * time.Minute)
+	svc.AddClaim(domain.Claim{
+		ID:          "claim_ready",
+		Address:     common.HexToAddress("0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"),
+		TokenID:     "native",
+		TokenSymbol: "SCAV",
+		Status:      domain.ClaimStatusQueued,
+		CreatedAt:   now.Add(-2 * time.Minute),
+		UpdatedAt:   now.Add(-2 * time.Minute),
+	})
+	svc.AddClaim(domain.Claim{
+		ID:            "claim_delayed",
+		Address:       common.HexToAddress("0x52908400098527886E0F7030069857D2E4169EE7"),
+		TokenID:       "erc20-demo",
+		TokenSymbol:   "DEMO",
+		Status:        domain.ClaimStatusQueued,
+		RetryCount:    1,
+		NextAttemptAt: &next,
+		CreatedAt:     now.Add(-1 * time.Minute),
+		UpdatedAt:     now.Add(-1 * time.Minute),
+	})
+	svc.AddClaim(domain.Claim{
+		ID:        "claim_sending",
+		Address:   common.HexToAddress("0xde709f2102306220921060314715629080e2fb77"),
+		Status:    domain.ClaimStatusSending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/queue", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body admin.QueueResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Ready != 1 || body.Delayed != 1 || body.InFlight != 1 {
+		t.Fatalf("queue summary = %#v", body)
+	}
+	if body.Counts["queued"] != 2 || body.Counts["sending"] != 1 {
+		t.Fatalf("counts = %#v", body.Counts)
+	}
+	if len(body.Items) != 3 {
+		t.Fatalf("items len = %d, want 3", len(body.Items))
+	}
+	foundDelayed := false
+	for _, item := range body.Items {
+		if item.ID == "claim_delayed" {
+			foundDelayed = true
+			if item.NextAttemptAt == "" || item.RetryCount != 1 || item.TokenID != "erc20-demo" {
+				t.Fatalf("delayed item = %#v", item)
+			}
+		}
+	}
+	if !foundDelayed {
+		t.Fatal("delayed claim not found in queue items")
+	}
+}
+
+func TestAdminQueueLimit(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	now := time.Now().UTC()
+	svc.AddClaim(domain.Claim{ID: "claim_one", Status: domain.ClaimStatusQueued, CreatedAt: now, UpdatedAt: now})
+	svc.AddClaim(domain.Claim{ID: "claim_two", Status: domain.ClaimStatusQueued, CreatedAt: now, UpdatedAt: now})
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/queue?limit=1", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body admin.QueueResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(body.Items))
+	}
+	if body.Counts["queued"] != 2 {
+		t.Fatalf("queued count = %d, want 2", body.Counts["queued"])
+	}
+}
+
+func TestAdminQueueAllowsOnlyGET(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/queue", nil))
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != http.MethodGet {
+		t.Fatalf("allow = %q, want GET", got)
+	}
+}
+
 func TestAdminRuntimeReportsDashboardReadinessAndMetrics(t *testing.T) {
 	metrics := observability.NewRuntimeMetricsWithClock(version.Info{
 		Version: "v18.2-test",

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -89,6 +90,30 @@ type DashboardResponse struct {
 	UpdatedAt     string         `json:"updated_at"`
 }
 
+// QueueItemResponse is a compact, admin-safe queue row.
+type QueueItemResponse struct {
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	TokenID       string `json:"token_id,omitempty"`
+	TokenSymbol   string `json:"token_symbol,omitempty"`
+	RetryCount    int    `json:"retry_count"`
+	NextAttemptAt string `json:"next_attempt_at,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+// QueueResponse summarises operational queue visibility for the admin plane.
+type QueueResponse struct {
+	Counts    map[string]int      `json:"counts"`
+	Ready     int                 `json:"ready"`
+	Delayed   int                 `json:"delayed"`
+	InFlight  int                 `json:"in_flight"`
+	PendingTx int                 `json:"pending_tx"`
+	Terminal  int                 `json:"terminal"`
+	Items     []QueueItemResponse `json:"items"`
+	UpdatedAt string              `json:"updated_at"`
+}
+
 // BlocklistAddRequest is the body for POST /api/v1/admin/blocklist.
 type BlocklistAddRequest struct {
 	KeyType string `json:"key_type"`
@@ -117,6 +142,7 @@ var (
 // later step.
 type AdminService interface {
 	Dashboard(ctx context.Context) (DashboardResponse, error)
+	Queue(ctx context.Context, limit int) (QueueResponse, error)
 	ListClaims(ctx context.Context, limit, offset int) ([]domain.Claim, error)
 	GetClaim(ctx context.Context, id string) (domain.Claim, bool, error)
 	// SetMode changes the operational mode ("active", "paused", "maintenance").
@@ -181,6 +207,74 @@ func (s *InMemoryAdminService) Dashboard(_ context.Context) (DashboardResponse, 
 		BlocklistSize: len(s.blocklist.Entries()),
 		UpdatedAt:     s.now().UTC().Format(time.RFC3339),
 	}, nil
+}
+
+func (s *InMemoryAdminService) Queue(_ context.Context, limit int) (QueueResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 {
+		limit = 50
+	}
+	now := s.now().UTC()
+	claims := make([]domain.Claim, 0, len(s.claims))
+	for _, c := range s.claims {
+		claims = append(claims, c)
+	}
+	sort.SliceStable(claims, func(i, j int) bool {
+		if claims[i].UpdatedAt.Equal(claims[j].UpdatedAt) {
+			return claims[i].ID < claims[j].ID
+		}
+		return claims[i].UpdatedAt.After(claims[j].UpdatedAt)
+	})
+
+	resp := QueueResponse{
+		Counts:    make(map[string]int),
+		UpdatedAt: now.Format(time.RFC3339),
+	}
+	for _, c := range claims {
+		resp.Counts[string(c.Status)]++
+		switch c.Status {
+		case domain.ClaimStatusQueued:
+			if c.NextAttemptAt != nil && c.NextAttemptAt.After(now) {
+				resp.Delayed++
+			} else {
+				resp.Ready++
+			}
+		case domain.ClaimStatusSending:
+			resp.InFlight++
+		case domain.ClaimStatusSent:
+			resp.PendingTx++
+		case domain.ClaimStatusConfirmed, domain.ClaimStatusFailed, domain.ClaimStatusRejected:
+			resp.Terminal++
+		}
+	}
+
+	for _, c := range claims {
+		if len(resp.Items) >= limit {
+			break
+		}
+		if c.Status != domain.ClaimStatusQueued && c.Status != domain.ClaimStatusSending && c.Status != domain.ClaimStatusSent && c.Status != domain.ClaimStatusFailed {
+			continue
+		}
+		resp.Items = append(resp.Items, queueItemResponse(c))
+	}
+	return resp, nil
+}
+
+func queueItemResponse(c domain.Claim) QueueItemResponse {
+	item := QueueItemResponse{
+		ID:          c.ID,
+		Status:      string(c.Status),
+		TokenID:     c.TokenID,
+		TokenSymbol: c.TokenSymbol,
+		RetryCount:  c.RetryCount,
+		CreatedAt:   c.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   c.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+	if c.NextAttemptAt != nil {
+		item.NextAttemptAt = c.NextAttemptAt.UTC().Format(time.RFC3339)
+	}
+	return item
 }
 
 func (s *InMemoryAdminService) ListClaims(_ context.Context, limit, offset int) ([]domain.Claim, error) {
