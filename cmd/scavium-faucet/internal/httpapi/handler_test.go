@@ -2145,3 +2145,90 @@ func TestAdminQueueLimitIsCapped(t *testing.T) {
 		t.Fatalf("queued count = %d, want 501", body.Counts["queued"])
 	}
 }
+
+func TestAdminBlocklistRejectsInvalidKeyType(t *testing.T) {
+	handler := NewHandler(testAdminDeps())
+
+	addRec := httptest.NewRecorder()
+	handler.ServeHTTP(addRec, adminRequest(http.MethodPost, "/api/v1/admin/blocklist", map[string]string{
+		"key_type": "banana",
+		"value":    "1.2.3.4",
+	}))
+	if addRec.Code != http.StatusBadRequest {
+		t.Fatalf("add status = %d, want 400", addRec.Code)
+	}
+	var addBody ErrorEnvelope
+	if err := json.NewDecoder(addRec.Body).Decode(&addBody); err != nil {
+		t.Fatalf("decode add: %v", err)
+	}
+	if addBody.Code != "invalid_key_type" {
+		t.Fatalf("add code = %q, want invalid_key_type", addBody.Code)
+	}
+
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, adminRequest(http.MethodDelete, "/api/v1/admin/blocklist?key_type=banana&value=1.2.3.4", nil))
+	if deleteRec.Code != http.StatusBadRequest {
+		t.Fatalf("delete status = %d, want 400", deleteRec.Code)
+	}
+	var deleteBody ErrorEnvelope
+	if err := json.NewDecoder(deleteRec.Body).Decode(&deleteBody); err != nil {
+		t.Fatalf("decode delete: %v", err)
+	}
+	if deleteBody.Code != "invalid_key_type" {
+		t.Fatalf("delete code = %q, want invalid_key_type", deleteBody.Code)
+	}
+}
+
+func TestAdminClaimsLimitIsCapped(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	now := time.Now().UTC()
+	for i := 0; i < 501; i++ {
+		svc.AddClaim(domain.Claim{
+			ID:        fmt.Sprintf("claim_%03d", i),
+			Status:    domain.ClaimStatusQueued,
+			CreatedAt: now.Add(time.Duration(i) * time.Second),
+			UpdatedAt: now.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/claims?limit=999999", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Claims []domain.Claim `json:"claims"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Claims) != 500 {
+		t.Fatalf("claims len = %d, want 500", len(body.Claims))
+	}
+}
+
+func TestAdminAuditLimitIsCapped(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	for i := 0; i < 501; i++ {
+		if err := svc.SetMode(context.Background(), "paused", "test"); err != nil {
+			t.Fatalf("set mode: %v", err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/audit?limit=999999", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Entries []admin.AuditEntry `json:"entries"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Entries) != 500 {
+		t.Fatalf("entries len = %d, want 500", len(body.Entries))
+	}
+}

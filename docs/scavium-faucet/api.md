@@ -302,21 +302,19 @@ Returns build metadata from `internal/version`.
 
 ## Admin endpoints
 
-Admin routes are active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set. `app.New` passes the token into `httpapi.Dependencies.AdminToken`; when the token is empty the routes return `503`. Admin routes are excluded from CORS even when public API CORS is configured.
+Admin routes are active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set. `app.New` passes the token into `httpapi.Dependencies.AdminToken`; when the token is empty the routes return `503`.
 
-Every admin request must include:
+When the handler is constructed with an admin token, every admin request must include:
 
 ```text
 Authorization: Bearer <SCAVIUM_FAUCET_ADMIN_TOKEN>
 ```
 
-Wrong or missing token returns `401`. Empty configured token returns `503`. The admin token is compared with constant-time comparison and is never written to structured logs.
+Wrong or missing token returns `401`. Empty configured token returns `503`.
 
 ### `GET /api/v1/admin/metrics`
 
-Returns process-local runtime counters, build/runtime metadata, token-scoped claim counters, and Phase 18.1 process metrics. Counters reset when the faucet process restarts and are intended for immediate operational diagnostics, not durable accounting. The special `default` token id represents requests that omitted `token_id` at the HTTP boundary and therefore used the configured default-token path.
-
-Representative shape:
+Returns lightweight in-process runtime counters and build/runtime metadata. The endpoint is protected by the same bearer-token middleware as the rest of `/api/v1/admin/*`. Counters reset when the faucet process restarts and are intended for immediate operational diagnostics, not durable accounting. Post Phase 17.3.3, the response also includes token-scoped counters under `tokens`; the special `default` token id represents requests that omitted `token_id` at the HTTP boundary and therefore used the configured default-token path.
 
 ```json
 {
@@ -335,9 +333,15 @@ Representative shape:
     "claim_unavailable": 0,
     "invalid_token": 1
   },
-  "captcha": { "failed": 1 },
-  "rate_limits": { "limited": 1 },
-  "budgets": { "daily_exceeded": 1 },
+  "captcha": {
+    "failed": 1
+  },
+  "rate_limits": {
+    "limited": 1
+  },
+  "budgets": {
+    "daily_exceeded": 1
+  },
   "tokens": [
     {
       "token_id": "default",
@@ -346,54 +350,29 @@ Representative shape:
       "rate_limited": 0,
       "daily_exceeded": 0,
       "invalid_token": 0
+    },
+    {
+      "token_id": "scav",
+      "accepted": 4,
+      "rejected": 2,
+      "rate_limited": 1,
+      "daily_exceeded": 1,
+      "invalid_token": 0
     }
-  ],
-  "process": {
-    "goroutines": 12,
-    "cpu_count": 2,
-    "memory_alloc_bytes": 123456,
-    "memory_sys_bytes": 789012,
-    "heap_alloc_bytes": 123456,
-    "heap_objects": 100,
-    "mallocs": 200,
-    "frees": 100,
-    "gc_cycles": 1
-  }
+  ]
 }
 ```
 
 Operational notes:
 
-- `claims.*`, `captcha.*`, `rate_limits.*`, `budgets.*`, and `process.*` are process-local diagnostics.
+- `claims.*`, `captcha.*`, `rate_limits.*`, and `budgets.*` remain aggregate process-local counters.
 - `tokens[*]` is diagnostic only and is not a durable accounting ledger.
-- Token ids are configuration/public-catalog identifiers only; wallet addresses, raw fingerprints, request bodies, captcha tokens, admin tokens, and idempotency keys are not exposed.
-
-### `GET /api/v1/admin/runtime`
-
-Returns a composite operator view containing dashboard, readiness, metrics, and a server timestamp. This endpoint is a convenience aggregation over already-protected admin/runtime data; it does not mutate state.
-
-Representative shape:
-
-```json
-{
-  "dashboard": {
-    "mode": "active",
-    "claim_counts": {},
-    "blocklist_size": 0,
-    "updated_at": "2026-05-03T12:00:00Z"
-  },
-  "readiness": {
-    "status": "ready",
-    "checks": []
-  },
-  "metrics": {},
-  "time": "2026-05-03T12:00:00Z"
-}
-```
+- Token ids are configuration/public-catalog identifiers only; wallet addresses, raw fingerprints, request bodies, captcha tokens, and idempotency keys are not exposed.
+- Invalid token attempts are counted both in aggregate `claims.invalid_token` and in the token-scoped bucket matching the supplied `token_id`.
 
 ### `GET /api/v1/admin/dashboard`
 
-Returns the admin summary used by the runtime endpoint:
+Returns the admin summary. The faucet `mode` is runtime-effective for claim intake after the Phase 18.7 post-audit fix. Queue/claim and blocklist counts reflect the current in-memory admin service scope.
 
 ```json
 {
@@ -406,77 +385,76 @@ Returns the admin summary used by the runtime endpoint:
 
 ### `GET /api/v1/admin/queue?limit=50`
 
-Returns bounded queue visibility for operators. The `limit` parameter defaults to the handler default and is capped at `500` to avoid accidental large admin responses.
-
-Representative shape:
+Returns an operator-safe queue snapshot from the current admin service. `limit` controls only the returned `items` slice and is capped at `500`; counters still summarize the visible in-memory admin queue state.
 
 ```json
 {
-  "summary": {
-    "counts": {
-      "queued": 3,
-      "sending": 1,
-      "failed": 2
-    },
-    "ready": 3,
-    "delayed": 0,
-    "in_flight": 1,
-    "pending_tx": 0,
-    "terminal": 2,
-    "total": 6,
-    "updated_at": "2026-05-03T12:00:00Z"
+  "counts": {
+    "queued": 2,
+    "sending": 1,
+    "failed": 1
   },
+  "ready": 2,
+  "delayed": 0,
+  "in_flight": 1,
+  "pending_tx": 0,
+  "terminal": 1,
   "items": [
     {
-      "id": "claim-id",
+      "id": "claim_123",
       "status": "queued",
       "token_id": "default",
-      "tx_hash": "",
-      "attempts": 0,
-      "next_attempt_at": "2026-05-03T12:00:00Z",
+      "token_symbol": "SCAV",
+      "retry_count": 0,
+      "created_at": "2026-05-03T12:00:00Z",
       "updated_at": "2026-05-03T12:00:00Z"
     }
-  ]
+  ],
+  "updated_at": "2026-05-03T12:00:00Z"
 }
 ```
 
-Wallet addresses are intentionally omitted from queue items.
+Queue item responses intentionally omit wallet addresses, idempotency keys, request bodies, captcha tokens, and transaction internals. The broader SQLite-backed admin service remains deferred; in the current Phase 18 closure, production claim rows are not pre-populated into this in-memory admin queue view.
 
 ### `POST /api/v1/admin/queue/retry`
 
 Request body:
 
 ```json
-{ "id": "claim-id" }
+{ "id": "claim_123" }
 ```
-
-Retries an eligible queued/failed claim through the admin service.
 
 Success response:
 
 ```json
-{ "status": "retried" }
+{ "status": "retried", "id": "claim_123" }
 ```
+
+Conflict response:
+
+- `409` / `not_retryable`
 
 ### `POST /api/v1/admin/queue/cancel`
 
 Request body:
 
 ```json
-{ "id": "claim-id" }
+{ "id": "claim_123" }
 ```
-
-Cancels an eligible queued claim through the admin service.
 
 Success response:
 
 ```json
-{ "status": "cancelled" }
+{ "status": "cancelled", "id": "claim_123" }
 ```
+
+Conflict response:
+
+- `409` / `not_cancellable`
 
 ### `GET /api/v1/admin/claims?limit=50&offset=0`
 
-Lists admin-visible claims for operator review.
+Lists in-memory claims. `limit` is capped at `500`. The current Phase 18 closure does not hydrate this view from the SQLite claim store in production.
 
 ```json
 {
@@ -490,7 +468,7 @@ Returns one claim or `404`.
 
 ### `POST /api/v1/admin/claim/{id}/retry`
 
-Moves a `failed` or `rejected` claim back to `queued` when the claim is eligible.
+Moves a `failed` or `rejected` claim back to `queued`.
 
 Success response:
 
@@ -518,17 +496,13 @@ Conflict response:
 
 ### `POST /api/v1/admin/faucet/mode`
 
+Accepted modes are `active`, `paused`, and `maintenance`. Invalid modes return `400 invalid_mode`. The selected mode is propagated to the live faucet runtime.
+
 Request body:
 
 ```json
 { "mode": "paused" }
 ```
-
-Accepted values are:
-
-- `active`
-- `paused`
-- `maintenance`
 
 Success response:
 
@@ -536,11 +510,7 @@ Success response:
 { "mode": "paused" }
 ```
 
-Invalid mode response:
-
-- `400` / `invalid_mode`
-
-As of Phase 18.7, accepted mode changes are propagated into the live faucet runtime, so public claim handling observes the selected mode. The action is also captured in the in-process audit log and in structured admin-action logs.
+The admin service records an audit entry and, after Phase 18.7, propagates the accepted mode to the live claim path.
 
 ### `GET /api/v1/admin/blocklist`
 
@@ -551,6 +521,8 @@ As of Phase 18.7, accepted mode changes are propagated into the live faucet runt
 ```
 
 ### `POST /api/v1/admin/blocklist`
+
+`key_type` must be one of `ip`, `address`, or `fingerprint`; invalid values return `400 invalid_key_type`.
 
 Request body:
 
@@ -568,9 +540,9 @@ Success response:
 { "status": "blocked" }
 ```
 
-Structured logs for this action do not include the raw blocklist value or reason text.
-
 ### `DELETE /api/v1/admin/blocklist?key_type=ip&value=1.2.3.4`
+
+`key_type` must be one of `ip`, `address`, or `fingerprint`; invalid values return `400 invalid_key_type`.
 
 Success response:
 
@@ -580,14 +552,14 @@ Success response:
 
 ### `GET /api/v1/admin/audit?limit=100`
 
-Returns recent in-process audit entries. The audit trail is useful for immediate operator review and is not a durable compliance ledger. Structured admin-action logs are also emitted for sensitive admin operations.
+Returns recent in-memory audit entries. `limit` is capped at `500`.
 
 ```json
 {
   "entries": [
     {
       "action": "set_mode",
-      "actor": "203.0.113.10",
+      "actor": "127.0.0.1",
       "target": "faucet",
       "detail": "paused",
       "created_at": "2026-05-03T12:00:00Z"

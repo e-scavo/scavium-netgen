@@ -91,7 +91,7 @@ Operators can disable the full enforcement layer with `SCAVIUM_FAUCET_ABUSE_ENFO
 
 ### Admin API isolation
 
-Admin endpoints (`/api/v1/admin/*`) are protected by bearer-token authentication and are explicitly excluded from CORS. Browser-based clients cannot reach admin endpoints cross-origin even when CORS is configured for public routes. Phase 18 admin actions use structured audit logging, avoid admin-token logging, omit raw blocklist values from structured action logs, and use trusted-proxy-aware real IP extraction for actor attribution.
+Admin endpoints (`/api/v1/admin/*`) are protected by bearer-token authentication and are explicitly excluded from CORS. Browser-based clients cannot reach admin endpoints cross-origin even when CORS is configured for public routes.
 
 ## Remaining gaps
 
@@ -165,17 +165,17 @@ Phase 15 is closed with a layered abuse-protection posture active for the public
 
 This closure does not introduce hard bans, new public endpoints, direct backend exposure, or additional third-party dependencies. It establishes the security baseline that Phase 16 observability will measure: captcha outcomes, risk decisions, rate-limit pressure, cooldown activity, budget exhaustion, accepted claims, and enforcement rejections.
 
-## Phase 18 — Admin control security posture
+## Phase 18 admin-control security closure
 
-Phase 18 expands the admin plane without widening the public attack surface. All admin routes remain under `/api/v1/admin/*`, require `Authorization: Bearer <SCAVIUM_FAUCET_ADMIN_TOKEN>`, return `503` when no admin token is configured, and remain excluded from CORS.
+The Phase 18 admin API remains a private operator surface. All `/api/v1/admin/*` routes require the configured bearer token, are excluded from public CORS handling, and preserve the public claim API contracts.
 
-The closed security posture is intentionally conservative:
+Security-relevant closure decisions:
 
-- admin token comparison is constant-time and the token is not logged
-- sensitive admin actions emit structured audit logs without request bodies or secrets
-- blocklist add/remove structured logs record action metadata but not raw blocklist values or reason text
-- mode changes are constrained to `active`, `paused`, and `maintenance`
-- audit actor attribution uses trusted-proxy-aware real IP extraction instead of the loopback nginx address
-- queue visibility is bounded by a hard `limit` cap and omits wallet addresses from queue item responses
+- Admin bearer tokens are not emitted in structured logs or audit entries.
+- Admin actor attribution uses trusted-proxy-aware real IP extraction when `SCAVIUM_FAUCET_TRUSTED_PROXY` is configured.
+- Mode changes are validated to `active`, `paused`, or `maintenance` before mutation and are propagated to the live faucet runtime only after validation succeeds.
+- Queue, claim, and audit list endpoints enforce a `500` item cap even when larger `limit` query values are supplied.
+- Blocklist `key_type` values are restricted to `ip`, `address`, or `fingerprint`; invalid values return `400 invalid_key_type`.
+- Queue item responses and structured audit logs avoid wallet addresses, idempotency keys, request bodies, captcha tokens, raw fingerprints, private keys, and admin tokens.
 
-The in-process audit endpoint is an operator convenience, not a durable compliance store. If future phases persist audit entries, retention and PII handling must be re-reviewed before deployment.
+The current in-memory admin blocklist is an operator-control surface, not a replacement for persisted abuse enforcement. Persisted abuse signals, progressive enforcement, rate limits, cooldown, and daily-budget checks remain the production claim-protection layers until a SQLite-backed admin blocklist/enforcement integration is explicitly implemented.

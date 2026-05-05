@@ -406,49 +406,30 @@ Phase 17.5 is the post-audit fix baseline for the completed token-support layer.
 
 This closure does not introduce new operational endpoints, runtime token mutation, database-backed token catalogs, or durable analytics. It only records the post-audit corrections that keep the Phase 17 token-aware baseline production-safe before Phase 18.
 
-## Phase 18 admin operations
+## Admin control closure checks (Phase 18.8 closed)
 
-Admin operations require `SCAVIUM_FAUCET_ADMIN_TOKEN` and should be executed from a trusted operator shell or through a restricted internal network path. Admin routes are not CORS-enabled.
+Phase 18.8 is the final closure pass for the Phase 18 admin-control surface. It keeps the public faucet contracts unchanged and records the production scope of the admin plane before Phase 19 hardening.
 
-Recommended smoke checks after deploy:
-
-```bash
-curl -fsS -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
-  http://127.0.0.1:18080/api/v1/admin/metrics | jq .
-
-curl -fsS -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
-  http://127.0.0.1:18080/api/v1/admin/runtime | jq .
-
-curl -fsS -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
-  'http://127.0.0.1:18080/api/v1/admin/queue?limit=50' | jq .
-```
-
-Operational mode changes are runtime-effective after Phase 18.7:
+After deploying a Phase 18.8 build, validate the admin surface with the configured bearer token:
 
 ```bash
-curl -fsS -X POST \
-  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  --data '{"mode":"paused"}' \
-  http://127.0.0.1:18080/api/v1/admin/faucet/mode | jq .
+curl -sS http://127.0.0.1:18080/api/v1/admin/runtime \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+
+curl -sS http://127.0.0.1:18080/api/v1/admin/queue?limit=50 \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+
+curl -sS http://127.0.0.1:18080/api/v1/admin/audit?limit=100 \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
 ```
 
-Use only the supported modes: `active`, `paused`, and `maintenance`. Invalid values return `400 invalid_mode` and are not applied.
+Operational scope notes:
 
-Queue controls are intentionally narrow and claim-id based:
+- `POST /api/v1/admin/faucet/mode` is runtime-effective. Accepted values are `active`, `paused`, and `maintenance`; invalid modes return `400 invalid_mode`.
+- `GET /api/v1/admin/queue`, `GET /api/v1/admin/claims`, queue retry/cancel, and claim retry/cancel use the current in-memory admin claim view. The broader SQLite-backed admin service remains intentionally deferred, so production SQLite claim rows are not pre-populated into those views in this phase.
+- Queue or claim control commands may return `404 not_found` for real persisted claims until the SQLite-backed admin service is implemented. This is expected Phase 18 scope, not a worker failure.
+- Admin blocklist values are visible through the admin blocklist/audit surface for operator traceability, but the Phase 18 in-memory blocklist is not a replacement for persisted abuse enforcement.
+- `key_type` for blocklist add/remove is restricted to `ip`, `address`, or `fingerprint`.
+- Admin list limits for queue, claims, and audit are capped at `500` even if a larger `limit` query value is supplied.
 
-```bash
-curl -fsS -X POST \
-  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  --data '{"id":"<claim-id>"}' \
-  http://127.0.0.1:18080/api/v1/admin/queue/retry | jq .
-
-curl -fsS -X POST \
-  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  --data '{"id":"<claim-id>"}' \
-  http://127.0.0.1:18080/api/v1/admin/queue/cancel | jq .
-```
-
-If admin actor attribution appears as `127.0.0.1`, verify `SCAVIUM_FAUCET_TRUSTED_PROXY` matches the nginx source address so the backend can safely read `X-Forwarded-For` / `X-Real-IP`.
+This closure does not introduce dynamic budget editing, CSV exports, allowlist/campaign management, SQLite-backed admin claim control, durable audit persistence, or runtime token mutation. Those remain explicitly deferred from the Phase 18 production-safe admin-control baseline.

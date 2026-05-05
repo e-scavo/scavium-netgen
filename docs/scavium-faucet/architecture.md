@@ -11,7 +11,6 @@
 - `runtimeChecks()` — real DB and queue probes; RPC and wallet probes when not in dry-run mode
 - `observability.NewRuntimeMetrics(version.Current())` — process-local counters and build/runtime metadata for health and admin metrics
 - `AdminToken: cfg.AdminToken` passed into `httpapi.Dependencies`, enabling the admin API when the token is set
-- Phase 18 admin service wired with a live faucet mode controller so accepted mode changes affect public claim handling
 - `TrustedProxy` wired for trusted-proxy IP extraction, fingerprint, and user-agent forwarding
 - background worker (enabled by default) processing the SQLite-backed claim queue
 - background watcher polling on-chain confirmations (auto-enabled in non-dry-run mode)
@@ -87,7 +86,7 @@ The live binary persists state in SQLite (WAL journal mode, 5 s busy timeout):
 - queue metadata (`next_attempt_at`, retry count) used by the background worker
 - abuse signals with kind, address, remote IP, fingerprint, user-agent, claim ID, reason, score, and timestamp
 
-Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`, `004_token_claim_metadata.sql`) run automatically on startup inside `sqlite.Open()`. Restarting the process does not lose queued or in-flight claims, recorded abuse observations, or token metadata stored with claims.
+Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`) run automatically on startup inside `sqlite.Open()`. Restarting the process does not lose queued or in-flight claims or recorded abuse observations.
 
 ## Package roles
 
@@ -99,7 +98,7 @@ Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`, `004_to
 | `internal/frontend` | Embedded UI served at `/` |
 | `internal/faucet` | SQLite-backed persistent read/claim service (`PersistentReadService`) |
 | `internal/ready` | Real DB/queue probes, optional RPC/wallet probes, and aggregate result shaping |
-| `internal/admin` | Admin service, audit ring, mode validation, limited queue/claim controls, blocklist model, and bearer-token middleware; enabled when `AdminToken` is set |
+| `internal/admin` | In-memory admin service and bearer-token middleware; enabled when `AdminToken` is set |
 | `internal/domain` | Shared claim, abuse signal, status, and validation contracts |
 | `internal/observability` | Structured JSON logger and lightweight process-local runtime metrics |
 | `internal/version` | Build metadata payload for `/api/v1/version` |
@@ -174,15 +173,15 @@ The claim handler logs safe structured events for accepted and rejected claims. 
 
 `/health` remains a liveness endpoint and now includes uptime plus build metadata. `/ready` keeps the existing real probes and enriches each check with elapsed duration and a response-level summary. Dry-run deployments still probe DB and queue only; non-dry-run deployments also probe RPC and wallet readiness.
 
-## Phase 18 — Admin Control Architecture
+## Phase 18 — Admin Control Architecture Closure
 
-Phase 18 keeps the admin control plane inside the existing loopback-bound faucet process. No separate admin daemon, database migration, external queue service, or public contract change is introduced. The admin HTTP routes are registered under `/api/v1/admin/*`, protected by bearer-token authentication, and excluded from CORS.
+Phase 18 adds an admin-control plane inside the existing faucet binary. It does not introduce a second service, a new database schema, or a public control endpoint. All `/api/v1/admin/*` routes remain behind the existing bearer-token middleware and are excluded from CORS.
 
-The implemented admin surface has two layers:
+The Phase 18 admin service has two different runtime scopes:
 
-1. **Visibility:** process metrics, runtime aggregation, dashboard summary, queue summary, claim lookup, blocklist listing, and recent audit entries.
-2. **Bounded control:** faucet mode changes, claim retry/cancel, queue retry/cancel, and blocklist add/remove.
+- **Runtime-effective mode control:** `POST /api/v1/admin/faucet/mode` validates `active`, `paused`, and `maintenance`, records an audit entry, and propagates the accepted mode into the live `PersistentReadService` through the `ModeController` boundary added in Phase 18.7.
+- **In-memory admin surfaces:** queue snapshots, claim retry/cancel, claim lookup, blocklist management, and the audit ring buffer operate on the current in-memory admin service. The broader SQLite-backed admin service remains intentionally deferred, so production SQLite claim rows are not hydrated into the admin claim/queue views in this phase.
 
-The Phase 18.7 post-audit fix closes the critical runtime wiring gap for faucet mode control. `POST /api/v1/admin/faucet/mode` now validates the mode and propagates accepted values into the live `PersistentReadService`, so public claim submission observes `active`, `paused`, and `maintenance` without a restart. The broader SQLite-backed admin service remains intentionally deferred: full durable admin catalogs, durable audit persistence, dynamic budget editing, campaign controls, and role-based admin accounts are not part of the closed Phase 18 runtime.
+This split is deliberate for the Phase 18 closure. It gives operators a safe runtime mode brake, runtime visibility, structured audit logs, and bounded admin responses without introducing new schema risk before Phase 19 hardening. Follow-up work can replace or extend the in-memory admin service with a SQLite-backed implementation while preserving the admin HTTP contracts introduced in Phase 18.
 
-Admin audit logging is split between an in-process audit ring for immediate operator review and structured JSON logs for sensitive admin actions. Structured logs avoid secrets and raw blocklist values, while actor attribution uses the same trusted-proxy-aware IP extraction model used by the public claim path.
+Phase 18.8 closes the final audit notes by aligning the documented queue response with the real `QueueResponse` structure, validating blocklist `key_type` values (`ip`, `address`, `fingerprint`), and applying a shared `500` item cap to admin queue, claims, and audit list endpoints.

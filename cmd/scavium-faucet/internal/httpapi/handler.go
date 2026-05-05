@@ -27,6 +27,7 @@ import (
 const requestIDHeader = "X-Request-ID"
 const correlationIDHeader = "X-Correlation-ID"
 const idempotencyKeyHeader = "Idempotency-Key"
+const maxAdminListLimit = 500
 
 type requestIDContextKey struct{}
 type correlationIDContextKey struct{}
@@ -616,6 +617,32 @@ func handleAdminRuntime(svc admin.AdminService, checks []ready.Check, metrics *o
 	}
 }
 
+func adminListLimitFromQuery(r *http.Request, fallback int) int {
+	limit := fallback
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > maxAdminListLimit {
+		return maxAdminListLimit
+	}
+	return limit
+}
+
+func parseAdminBlocklistKeyType(value string) (abuse.KeyType, bool) {
+	switch abuse.KeyType(strings.TrimSpace(value)) {
+	case abuse.KeyTypeIP:
+		return abuse.KeyTypeIP, true
+	case abuse.KeyTypeAddress:
+		return abuse.KeyTypeAddress, true
+	case abuse.KeyTypeFingerprint:
+		return abuse.KeyTypeFingerprint, true
+	default:
+		return "", false
+	}
+}
+
 func handleAdminQueue(svc admin.AdminService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -623,15 +650,7 @@ func handleAdminQueue(svc admin.AdminService) http.HandlerFunc {
 			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
-		limit := 50
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				limit = n
-				if limit > 500 {
-					limit = 500
-				}
-			}
-		}
+		limit := adminListLimitFromQuery(r, 50)
 		queue, err := svc.Queue(r.Context(), limit)
 		if err != nil {
 			WriteError(w, r, http.StatusInternalServerError, "queue_unavailable", "queue unavailable", nil)
@@ -749,13 +768,8 @@ func handleAdminListClaims(svc admin.AdminService) http.HandlerFunc {
 			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
-		limit := 50
+		limit := adminListLimitFromQuery(r, 50)
 		offset := 0
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				limit = n
-			}
-		}
 		if v := r.URL.Query().Get("offset"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 				offset = n
@@ -884,12 +898,17 @@ func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger, 
 				WriteError(w, r, http.StatusBadRequest, "missing_fields", "key_type and value are required", nil)
 				return
 			}
+			kt, ok := parseAdminBlocklistKeyType(body.KeyType)
+			if !ok {
+				WriteError(w, r, http.StatusBadRequest, "invalid_key_type", "key_type must be ip, address, or fingerprint", nil)
+				return
+			}
 			actor := actorFromRequest(r, trustedProxy)
-			if err := svc.BlocklistAdd(r.Context(), abuse.KeyType(body.KeyType), body.Value, body.Reason, actor); err != nil {
+			if err := svc.BlocklistAdd(r.Context(), kt, body.Value, body.Reason, actor); err != nil {
 				WriteError(w, r, http.StatusInternalServerError, "blocklist_add_failed", "blocklist add failed", nil)
 				return
 			}
-			logAdminAudit(logger, r, "blocklist_add", actor, "blocklist", map[string]any{"result": "success", "key_type": body.KeyType, "has_reason": body.Reason != ""})
+			logAdminAudit(logger, r, "blocklist_add", actor, "blocklist", map[string]any{"result": "success", "key_type": string(kt), "has_reason": body.Reason != ""})
 			WriteJSON(w, http.StatusCreated, map[string]string{"status": "blocked"})
 
 		case http.MethodDelete:
@@ -900,12 +919,17 @@ func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger, 
 				WriteError(w, r, http.StatusBadRequest, "missing_fields", "key_type and value query params are required", nil)
 				return
 			}
+			keyType, ok := parseAdminBlocklistKeyType(kt)
+			if !ok {
+				WriteError(w, r, http.StatusBadRequest, "invalid_key_type", "key_type must be ip, address, or fingerprint", nil)
+				return
+			}
 			actor := actorFromRequest(r, trustedProxy)
-			if err := svc.BlocklistRemove(r.Context(), abuse.KeyType(kt), value, actor); err != nil {
+			if err := svc.BlocklistRemove(r.Context(), keyType, value, actor); err != nil {
 				WriteError(w, r, http.StatusInternalServerError, "blocklist_remove_failed", "blocklist remove failed", nil)
 				return
 			}
-			logAdminAudit(logger, r, "blocklist_remove", actor, "blocklist", map[string]any{"result": "success", "key_type": kt})
+			logAdminAudit(logger, r, "blocklist_remove", actor, "blocklist", map[string]any{"result": "success", "key_type": string(keyType)})
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "unblocked"})
 
 		default:
@@ -922,12 +946,7 @@ func handleAdminAuditLog(svc admin.AdminService) http.HandlerFunc {
 			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
-		limit := 100
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				limit = n
-			}
-		}
+		limit := adminListLimitFromQuery(r, 100)
 		entries, err := svc.RecentAuditLog(r.Context(), limit)
 		if err != nil {
 			WriteError(w, r, http.StatusInternalServerError, "audit_log_unavailable", "audit log unavailable", nil)

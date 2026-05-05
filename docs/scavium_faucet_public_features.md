@@ -1,28 +1,5 @@
 # Faucet Server Pública SCAVIUM — Features por prioridad
 
-## Estado implementado post Phase 18
-
-Este documento conserva el backlog enriquecido de features posibles para la faucet pública. La implementación real cerrada hasta Phase 18 cubre el núcleo público, seguridad por capas, observabilidad, soporte multi-token y un primer plano de control admin. No todos los elementos listados abajo están implementados: varios permanecen como backlog deliberado para fases posteriores.
-
-Implementado y validado al cierre de Phase 18.7:
-
-- API pública versionada, frontend embebido, nginx/TLS externo, systemd, SQLite persistente y worker async.
-- Captcha configurable, rate limits persistentes, cooldown, daily budget, trusted proxy, CORS restringido, request IDs/correlation IDs y structured logging.
-- Abuse signals durables, progressive enforcement y retención configurable.
-- Multi-token nativo/ERC20 por configuración, catálogo público, claim validation token-aware, frontend selector token-aware y observabilidad por token.
-- Admin-protected metrics, runtime visibility, queue visibility, queue retry/cancel, claim retry/cancel, blocklist management, faucet mode control y audit trail.
-- Phase 18.7 post-audit fixes: `SetMode` afecta el runtime real, actor attribution usa IP real detrás de proxy confiable y la queue admin limita payloads grandes.
-
-Pendiente o explícitamente diferido:
-
-- Dynamic budget/config editing sin redeploy.
-- Exports CSV/reporting durables.
-- Admin users/roles/sessions/2FA.
-- Allowlists/campaigns y budgets por campaña.
-- Database-backed admin catalog/audit persistence.
-- RPC failover, wallet hardening avanzado, funding automation y hardening final de Phase 19.
-
-
 ## 1. Core público indispensable
 
 | Feature | Descripción |
@@ -261,6 +238,22 @@ Pendiente o explícitamente diferido:
 | **Forzar reconciliación** | Job manual. |
 | **Ver estado RPC** | Latencia, último bloque, errores. |
 | **Ver estado wallet** | Saldo, nonce, pending tx. |
+
+### Phase 18 admin-control closure status
+
+Phase 18 closes a production-safe subset of the broader admin feature list without changing public faucet contracts. Implemented and validated scope:
+
+| Capability | Phase 18 status | Notes |
+|---|---|---|
+| Runtime-effective faucet mode | Implemented | `active`, `paused`, and `maintenance` are validated and propagated to the live claim path. |
+| Runtime and metrics visibility | Implemented | `/api/v1/admin/runtime`, `/api/v1/admin/metrics`, and `/api/v1/admin/dashboard` remain admin-token protected. |
+| Queue visibility | Implemented with current scope | Admin-safe queue snapshots expose counts and limited items; the broader SQLite-backed admin service remains deferred. |
+| Queue/claim retry and cancel | Implemented with current scope | Control endpoints exist and keep existing error semantics; production SQLite hydration is deferred. |
+| Admin audit trail | Implemented | Structured audit logs and in-memory audit history avoid bearer-token and secret exposure. |
+| Blocklist management | Implemented with current scope | `key_type` is validated as `ip`, `address`, or `fingerprint`; persisted abuse-enforcement integration remains deferred. |
+| Dynamic budget/config editing | Deferred | Explicitly out of Phase 18 closure. |
+| Allowlist/campaign management | Deferred | Explicitly out of Phase 18 closure. |
+| CSV export and durable admin audit persistence | Deferred | Explicitly out of Phase 18 closure. |
 
 ---
 

@@ -282,45 +282,58 @@ Outcome:
 
 ---
 
-## Phase 18 — Admin & Control Plane (CLOSED)
+## Phase 18 — Admin & Control Plane
+**Status:** CLOSED after post-audit fixes and documentation closure.
 
-Phase 18 closes the first production-safe admin surface over the public faucet. The implemented scope intentionally favors bounded visibility and conservative controls over broad runtime configuration mutation.
+Implemented closure scope:
 
 ### 18.1 — Admin Metrics Expansion
-- Admin metrics now include enriched process/runtime information.
-- Existing metrics shape remains backward-compatible; new fields are additive.
+- Expanded admin metrics with runtime/process visibility
+- Preserved existing admin metrics response compatibility by only adding fields
+- Kept counters process-local and diagnostic rather than durable accounting
 
 ### 18.2 — Admin Runtime Visibility
-- `GET /api/v1/admin/runtime` aggregates dashboard, readiness, metrics, and server time.
-- The endpoint is read-only, admin-protected, and does not change public contracts.
+- Added `GET /api/v1/admin/runtime` as a composite admin view
+- Aggregates dashboard, readiness, metrics, and response time in one operator-safe response
+- Does not change public claim/status contracts
 
 ### 18.3 — Admin Queue Visibility
-- `GET /api/v1/admin/queue` exposes bounded operational queue visibility.
-- Queue items avoid wallet-address exposure and include only operator-safe metadata.
+- Added `GET /api/v1/admin/queue` for operator queue snapshots
+- Exposes counts, ready/delayed/in-flight/pending/terminal summaries, and limited admin-safe items
+- Omits wallet addresses, idempotency keys, captcha tokens, request bodies, and transaction internals
 
 ### 18.4 — Admin Queue Control
-- Admin queue retry/cancel endpoints provide claim-id based operational control.
-- Public claim endpoints and worker flow remain contract-compatible.
+- Added `POST /api/v1/admin/queue/retry` and `POST /api/v1/admin/queue/cancel` request surfaces
+- Reused existing admin claim-control semantics and error mapping
+- Kept the public `/api/v1/claim` contract unchanged
 
 ### 18.5 — Admin Operational Audit Trail
-- Sensitive admin actions emit structured audit logs.
-- Admin tokens, request bodies, and raw blocklist values are not logged in structured action logs.
+- Added structured admin audit logs for sensitive admin actions
+- Avoids logging admin bearer tokens, raw blocklist values, request bodies, captcha tokens, and secrets
+- Covers mode changes, queue/claim retry/cancel, and blocklist add/remove
 
 ### 18.6 — Admin Control Closure Audit
-- Faucet mode changes are strictly validated.
-- Only `active`, `paused`, and `maintenance` are accepted; invalid values return `invalid_mode`.
+- Tightened mode validation to `active`, `paused`, and `maintenance`
+- Rejected invalid mode changes with `400 invalid_mode`
+- Added tests for validation and HTTP error behavior
 
-### 18.7 — Post-Audit Fixes
-- Admin mode changes now propagate to the live faucet runtime.
-- Admin audit actor attribution uses trusted-proxy-aware real IP extraction.
-- Admin queue listing has a hard upper limit.
+### 18.7 — Post-Audit Admin Fixes
+- Propagated accepted admin mode changes into the live faucet runtime
+- Switched admin audit actor attribution to trusted-proxy-aware real IP handling
+- Capped queue list limits to avoid unbounded admin responses
 
-### Deferred beyond Phase 18
-- Dynamic budget/config editing remains deferred.
-- CSV/export workflows remain deferred.
-- Durable SQLite-backed admin/audit storage remains deferred.
-- Role-based admin accounts, 2FA, allowlists, and campaign controls remain deferred.
+### 18.8 — Final Closure Notes/Fixes
+- Aligned admin API documentation with the real queue response shape
+- Documented the current in-memory scope for queue/claim control and blocklist surfaces
+- Validated blocklist `key_type` against `ip`, `address`, and `fingerprint`
+- Capped admin claims and audit list limits at `500`
 
+Deferred beyond Phase 18:
+- Dynamic budget/config editing
+- CSV/export workflows
+- Allowlist/campaign management
+- SQLite-backed admin claim control and durable admin audit persistence
+- Runtime token mutation and database-backed token catalogs
 
 ---
 
