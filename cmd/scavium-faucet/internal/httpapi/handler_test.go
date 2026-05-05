@@ -1794,3 +1794,49 @@ func TestClaimRejectedLogsDoNotContainRawMaliciousTokenID(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminRuntimeReportsDashboardReadinessAndMetrics(t *testing.T) {
+	metrics := observability.NewRuntimeMetricsWithClock(version.Info{
+		Version: "v18.2-test",
+		Commit:  "runtime123",
+	}, func() time.Time {
+		return time.Date(2026, 5, 5, 10, 0, 0, 0, time.UTC)
+	})
+	metrics.IncClaimAcceptedForToken("native")
+	deps := testAdminDeps()
+	deps.Metrics = metrics
+	deps.ReadinessChecks = []ready.Check{{Name: "db", Run: ready.StubOK}}
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/runtime", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body adminRuntimeResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Dashboard.Mode != "active" {
+		t.Fatalf("dashboard.mode = %q, want active", body.Dashboard.Mode)
+	}
+	if body.Readiness.Status != ready.StatusOK || body.Readiness.Summary.OK != 1 {
+		t.Fatalf("readiness = %#v", body.Readiness)
+	}
+	if body.Metrics.Build.Version != "v18.2-test" || body.Metrics.Build.Commit != "runtime123" {
+		t.Fatalf("metrics.build = %#v", body.Metrics.Build)
+	}
+	assertHTTPTokenMetrics(t, body.Metrics.Tokens, observability.RuntimeTokenMetrics{TokenID: "native", Accepted: 1})
+}
+
+func TestAdminRuntimeAllowsOnlyGET(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/runtime", nil))
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != http.MethodGet {
+		t.Fatalf("allow = %q, want GET", got)
+	}
+}

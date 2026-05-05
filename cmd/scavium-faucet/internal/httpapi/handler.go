@@ -52,6 +52,15 @@ type claimRequest struct {
 	Fingerprint  string `json:"fingerprint"`
 }
 
+// adminRuntimeResponse aggregates admin-plane runtime visibility without
+// changing existing public or admin endpoint contracts.
+type adminRuntimeResponse struct {
+	Time      string                               `json:"time"`
+	Dashboard admin.DashboardResponse              `json:"dashboard"`
+	Readiness ready.Result                         `json:"readiness"`
+	Metrics   observability.RuntimeMetricsSnapshot `json:"metrics"`
+}
+
 // Dependencies groups the services and settings required to build the HTTP API.
 type Dependencies struct {
 	ReadinessChecks []ready.Check
@@ -115,6 +124,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	// Admin routes — all protected by bearer-token auth.
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("/api/v1/admin/dashboard", handleAdminDashboard(deps.AdminService))
+	adminMux.HandleFunc("/api/v1/admin/runtime", handleAdminRuntime(deps.AdminService, deps.ReadinessChecks, deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/metrics", handleAdminMetrics(deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/claims", handleAdminListClaims(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, "/api/v1/admin/claim/"))
@@ -579,6 +589,30 @@ func decodeNoTrailingTokens(decoder *json.Decoder, v any) error {
 }
 
 // --- Admin handlers --------------------------------------------------------
+
+func handleAdminRuntime(svc admin.AdminService, checks []ready.Check, metrics *observability.RuntimeMetrics) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		dashboard, err := svc.Dashboard(r.Context())
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "runtime_unavailable", "runtime unavailable", nil)
+			return
+		}
+
+		now := time.Now().UTC()
+		WriteJSON(w, http.StatusOK, adminRuntimeResponse{
+			Time:      now.Format(time.RFC3339),
+			Dashboard: dashboard,
+			Readiness: ready.Evaluate(r.Context(), checks),
+			Metrics:   metrics.Snapshot(now),
+		})
+	}
+}
 
 func handleAdminMetrics(metrics *observability.RuntimeMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
