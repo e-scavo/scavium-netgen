@@ -284,3 +284,14 @@ Phase 17.3.1 validates token selection at claim time before captcha, risk, coold
 5. Review `/api/v1/admin/metrics` and confirm `claims.invalid_token` increments for rejected token selections.
 
 An invalid token rejection is expected to happen before the claim is persisted or enqueued. It does not indicate RPC, wallet, queue, or SQLite failure.
+
+## Token-aware enforcement operations (Phase 17.3.2)
+
+Cooldown and rate-limit checks now use the resolved token id as part of their enforcement scope during claim creation. This means a claim for one configured token no longer blocks an otherwise valid claim for another configured token solely because the same address, IP, or fingerprint was used.
+
+Operational notes:
+
+- Validate the token exists first with `GET /api/v1/tokens`.
+- Submit one claim with the default token and one claim with a non-default token from the same test wallet to verify independent cooldown behavior.
+- Submit repeated claims for the same token, source IP, and wallet to verify the existing cooldown/rate-limit protections still apply per token.
+- Existing rejection contracts are unchanged: cooldown still returns `cooldown_active`, rate limiting still returns `rate_limited`, and daily budget exhaustion still returns `daily_budget_exceeded`.

@@ -466,3 +466,7 @@ Returns recent in-memory audit entries.
   ]
 }
 ```
+
+## Token-aware claim enforcement
+
+`POST /api/v1/claim` continues to accept an optional `token_id`. After token validation, cooldown and rate-limit enforcement are applied to the resolved token scope. The public response and error contracts do not change: invalid tokens still use `claim_rejected` with reason `invalid_token`, cooldown uses `cooldown_active`, rate limiting uses `rate_limited`, and daily budget exhaustion uses `daily_budget_exceeded`.

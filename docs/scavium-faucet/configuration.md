@@ -158,3 +158,9 @@ The Phase 17.2 token registration contract is configuration-driven. `SCAVIUM_FAU
 ## Phase 17.3.1 validation note
 
 The configuration loader still validates token definitions at startup, and Phase 17.3.1 adds a second defensive validation boundary at claim time. Runtime claims only proceed when the selected token id resolves to executable metadata: valid token type, positive amount, non-negative decimals, and an ERC20 contract address when `type` is `erc20`. Invalid token selections are rejected with the existing claim error contract instead of reaching persistence, queue, or sender execution.
+
+## Token-aware enforcement scope
+
+As of Phase 17.3.2, claim-time cooldown and rate-limit checks are scoped by the resolved token id. The configured token catalog therefore defines not only transfer metadata, but also the unit of eligibility for cooldown and rate limiting. Keep token ids stable once public clients depend on them; changing a token id creates a new enforcement scope.
+
+Daily budgets remain configured per token through each token's `daily_budget_wei` value, with the legacy `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` still serving the native/default compatibility path when token-specific budget metadata is not present.

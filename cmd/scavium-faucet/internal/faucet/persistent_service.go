@@ -34,6 +34,10 @@ type tokenBudgetedClaimStore interface {
 	CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error)
 }
 
+type tokenScopedClaimStore interface {
+	LastClaimByAddressAndToken(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error)
+}
+
 // PersistentReadService implements ReadService using durable stores.
 type PersistentReadService struct {
 	cfg             config.Config
@@ -186,7 +190,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, err
 	}
 
-	remaining, _, err := s.cooldown(ctx, request.Address)
+	remaining, _, err := s.cooldown(ctx, request.Address, token.ID)
 	if err != nil {
 		return ClaimResponse{}, err
 	}
@@ -196,7 +200,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, claimRetryError(ErrCooldownActive, reason, remaining)
 	}
 
-	if err := s.enforceRateLimits(ctx, request); err != nil {
+	if err := s.enforceRateLimits(ctx, request, token.ID); err != nil {
 		reason := err.Error()
 		var claimErr *ClaimError
 		if errors.As(err, &claimErr) && claimErr.Reason != "" {
@@ -363,12 +367,12 @@ func dailyBudgetStatuses() []domain.ClaimStatus {
 	}
 }
 
-func (s *PersistentReadService) cooldown(ctx context.Context, address common.Address) (int, time.Time, error) {
+func (s *PersistentReadService) cooldown(ctx context.Context, address common.Address, tokenID ...string) (int, time.Time, error) {
 	if s.cfg.CooldownSeconds <= 0 {
 		return 0, time.Time{}, nil
 	}
 
-	last, err := s.claims.LastClaimByAddress(ctx, address)
+	last, err := s.lastClaimForCooldown(ctx, address, firstTokenID(tokenID...))
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return 0, time.Time{}, nil
@@ -382,6 +386,15 @@ func (s *PersistentReadService) cooldown(ctx context.Context, address common.Add
 		return 0, nextEligible, nil
 	}
 	return int(math.Ceil(remaining.Seconds())), nextEligible, nil
+}
+
+func (s *PersistentReadService) lastClaimForCooldown(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error) {
+	if tokenID != "" {
+		if store, ok := s.claims.(tokenScopedClaimStore); ok {
+			return store.LastClaimByAddressAndToken(ctx, address, tokenID)
+		}
+	}
+	return s.claims.LastClaimByAddress(ctx, address)
 }
 
 func (s *PersistentReadService) verifyCaptcha(ctx context.Context, request ClaimRequest) error {
@@ -430,21 +443,31 @@ func (s *PersistentReadService) evaluateRisk(ctx context.Context, request ClaimR
 	return claimError(ErrClaimRejected, reason)
 }
 
-func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request ClaimRequest) error {
+func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request ClaimRequest, tokenID string) error {
 	if s.rateLimiter == nil {
 		return nil
 	}
 
-	if err := s.allowRateLimit(ctx, "ip:"+strings.TrimSpace(request.RemoteIP), s.cfg.RateLimitIPPerHour, time.Hour, "IP rate limit exceeded"); err != nil {
+	scope := s.tokenRateLimitScope(tokenID)
+
+	if err := s.allowRateLimit(ctx, scope+"ip:"+strings.TrimSpace(request.RemoteIP), s.cfg.RateLimitIPPerHour, time.Hour, "IP rate limit exceeded"); err != nil {
 		return err
 	}
-	if err := s.allowRateLimit(ctx, "addr:"+strings.ToLower(request.Address.Hex()), s.cfg.RateLimitAddrPerDay, 24*time.Hour, "address rate limit exceeded"); err != nil {
+	if err := s.allowRateLimit(ctx, scope+"addr:"+strings.ToLower(request.Address.Hex()), s.cfg.RateLimitAddrPerDay, 24*time.Hour, "address rate limit exceeded"); err != nil {
 		return err
 	}
-	if err := s.allowRateLimit(ctx, "fp:"+strings.ToLower(strings.TrimSpace(request.Fingerprint)), s.cfg.RateLimitIPPerHour, time.Hour, "fingerprint rate limit exceeded"); err != nil {
+	if err := s.allowRateLimit(ctx, scope+"fp:"+strings.ToLower(strings.TrimSpace(request.Fingerprint)), s.cfg.RateLimitIPPerHour, time.Hour, "fingerprint rate limit exceeded"); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *PersistentReadService) tokenRateLimitScope(tokenID string) string {
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return ""
+	}
+	return "token:" + strings.ToLower(tokenID) + ":"
 }
 
 func (s *PersistentReadService) recordAbuseSignal(ctx context.Context, request ClaimRequest, kind domain.AbuseSignalKind, claimID, reason string, score int) {
@@ -480,6 +503,13 @@ func (s *PersistentReadService) allowRateLimit(ctx context.Context, key string, 
 		return claimRetryError(ErrRateLimited, decision.Reason, retryAfterSeconds)
 	}
 	return claimRetryError(ErrRateLimited, fallbackReason, retryAfterSeconds)
+}
+
+func firstTokenID(tokenIDs ...string) string {
+	if len(tokenIDs) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(tokenIDs[0])
 }
 
 func configuredStatus(mode string) domain.FaucetStatus {
