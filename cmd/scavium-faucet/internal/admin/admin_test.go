@@ -189,6 +189,23 @@ func TestInMemoryAdminServiceSetMode(t *testing.T) {
 	}
 }
 
+func TestInMemoryAdminServiceSetModeRejectsInvalidMode(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	if err := svc.SetMode(context.Background(), "drain-all-funds", "test-actor"); err != ErrInvalidMode {
+		t.Fatalf("error = %v, want ErrInvalidMode", err)
+	}
+
+	dash, _ := svc.Dashboard(context.Background())
+	if dash.Mode != "active" {
+		t.Fatalf("mode = %q, want active", dash.Mode)
+	}
+	entries, _ := svc.RecentAuditLog(context.Background(), 10)
+	if len(entries) != 0 {
+		t.Fatalf("audit entries = %d, want 0", len(entries))
+	}
+}
+
 func TestInMemoryAdminServiceGetClaim(t *testing.T) {
 	svc := NewInMemoryAdminService()
 	svc.AddClaim(testClaim("c1", domain.ClaimStatusQueued))

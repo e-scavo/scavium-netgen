@@ -1501,6 +1501,22 @@ func TestAdminSetModePaused(t *testing.T) {
 	}
 }
 
+func TestAdminSetModeRejectsInvalidMode(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/faucet/mode", map[string]string{"mode": "drain-all-funds"}))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "invalid_mode" {
+		t.Fatalf("code = %q, want invalid_mode", body.Code)
+	}
+}
+
 func TestAdminBlocklistAddListRemove(t *testing.T) {
 	deps := testAdminDeps()
 	handler := NewHandler(deps)

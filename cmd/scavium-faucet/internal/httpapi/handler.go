@@ -845,12 +845,17 @@ func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger) ht
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
 			return
 		}
+		body.Mode = strings.TrimSpace(body.Mode)
 		if body.Mode == "" {
 			WriteError(w, r, http.StatusBadRequest, "missing_mode", "mode is required", nil)
 			return
 		}
 		actor := actorFromRequest(r)
 		if err := svc.SetMode(r.Context(), body.Mode, actor); err != nil {
+			if errors.Is(err, admin.ErrInvalidMode) {
+				WriteError(w, r, http.StatusBadRequest, "invalid_mode", "mode must be active, paused, or maintenance", nil)
+				return
+			}
 			WriteError(w, r, http.StatusInternalServerError, "set_mode_failed", "set mode failed", nil)
 			return
 		}

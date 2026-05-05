@@ -137,6 +137,7 @@ var (
 	ErrNotFound       = errors.New("admin: not found")
 	ErrNotRetryable   = errors.New("admin: claim is not in a retryable state")
 	ErrNotCancellable = errors.New("admin: claim cannot be cancelled in its current state")
+	ErrInvalidMode    = errors.New("admin: invalid faucet mode")
 )
 
 // --- AdminService interface ---------------------------------------------
@@ -160,6 +161,16 @@ type AdminService interface {
 	BlocklistAdd(ctx context.Context, kt abuse.KeyType, value, reason, actor string) error
 	BlocklistRemove(ctx context.Context, kt abuse.KeyType, value, actor string) error
 	RecentAuditLog(ctx context.Context, limit int) ([]AuditEntry, error)
+}
+
+// ValidMode reports whether mode is a supported faucet operational mode.
+func ValidMode(mode string) bool {
+	switch mode {
+	case "active", "paused", "maintenance":
+		return true
+	default:
+		return false
+	}
 }
 
 // --- InMemoryAdminService -----------------------------------------------
@@ -307,6 +318,11 @@ func (s *InMemoryAdminService) GetClaim(_ context.Context, id string) (domain.Cl
 }
 
 func (s *InMemoryAdminService) SetMode(_ context.Context, mode, actor string) error {
+	mode = strings.TrimSpace(mode)
+	if !ValidMode(mode) {
+		return ErrInvalidMode
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mode = mode
