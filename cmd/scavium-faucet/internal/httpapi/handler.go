@@ -360,6 +360,7 @@ func logClaimAccepted(logger *observability.Logger, r *http.Request, request fau
 	}
 	fields := claimLogFields(r, request)
 	fields["claim_id"] = claim.ID
+	fields["token_id"] = claim.TokenID
 	fields["claim_status"] = string(claim.Status)
 	logger.Info("claim accepted", fields)
 }
@@ -370,9 +371,15 @@ func logClaimRejected(logger *observability.Logger, r *http.Request, request fau
 	}
 	fields := claimLogFields(r, request)
 	fields["error_code"] = claimErrorCode(err)
+	if strings.TrimSpace(request.TokenID) != "" {
+		fields["token_id"] = strings.TrimSpace(request.TokenID)
+	}
 	if details := claimErrorDetails(err); details != nil {
 		if reason, ok := details["reason"].(string); ok && reason != "" {
 			fields["reason"] = reason
+			if reason == "invalid_token" {
+				fields["event"] = "token_validation_failed"
+			}
 		}
 		if retryAfter, ok := details["retry_after_seconds"]; ok {
 			fields["retry_after_seconds"] = retryAfter
@@ -399,6 +406,9 @@ func claimErrorCode(err error) string {
 	case errors.Is(err, faucet.ErrCaptchaFailed):
 		return "captcha_failed"
 	case errors.Is(err, faucet.ErrClaimRejected):
+		if claimErr, ok := claimErrorAs(err); ok && claimErr.Reason == "invalid_token" {
+			return "invalid_token"
+		}
 		return "claim_rejected"
 	case errors.Is(err, faucet.ErrDailyBudgetExceeded):
 		return "daily_budget_exceeded"
@@ -407,6 +417,14 @@ func claimErrorCode(err error) string {
 	default:
 		return "claim_unavailable"
 	}
+}
+
+func claimErrorAs(err error) (*faucet.ClaimError, bool) {
+	var claimErr *faucet.ClaimError
+	if errors.As(err, &claimErr) {
+		return claimErr, true
+	}
+	return nil, false
 }
 
 func handleGetClaim(readService faucet.ReadService, prefix string) http.HandlerFunc {

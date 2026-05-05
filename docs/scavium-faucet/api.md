@@ -159,6 +159,12 @@ Phase 17.2 closure note:
 - ERC20 clients should first read this catalog and then submit the selected `id` as `token_id` to `POST /api/v1/claim`.
 - See [token-registration.md](token-registration.md) for the testnet registration checklist.
 
+Phase 17.3.1 validation note:
+
+- Claim-time token validation is strict. Unknown or non-executable `token_id` values are rejected before the claim enters the durable queue.
+- The public error code remains `claim_rejected`; the details reason is `invalid_token`.
+- Omitted `token_id` remains backward-compatible and resolves to the configured default token.
+
 Only `GET` is allowed. Unsupported methods return `405` with the existing `method_not_allowed` envelope.
 
 ### `GET /api/v1/address/{address}/status`

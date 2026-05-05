@@ -22,6 +22,7 @@ type RuntimeMetrics struct {
 	faucetUnavailable   atomic.Uint64
 	claimUnavailable    atomic.Uint64
 	claimRejectedByRisk atomic.Uint64
+	invalidToken        atomic.Uint64
 }
 
 // RuntimeMetricsSnapshot is the JSON-safe representation returned by the metrics endpoint.
@@ -49,6 +50,7 @@ type RuntimeClaimMetrics struct {
 	RejectedByRisk    uint64 `json:"rejected_by_risk"`
 	FaucetUnavailable uint64 `json:"faucet_unavailable"`
 	ClaimUnavailable  uint64 `json:"claim_unavailable"`
+	InvalidToken      uint64 `json:"invalid_token"`
 }
 
 // RuntimeCaptchaMetrics exposes captcha-related claim counters.
@@ -107,6 +109,8 @@ func (m *RuntimeMetrics) IncClaimRejected(code string) {
 		m.dailyBudgetExceeded.Add(1)
 	case "faucet_unavailable":
 		m.faucetUnavailable.Add(1)
+	case "invalid_token":
+		m.invalidToken.Add(1)
 	case "claim_rejected":
 		m.claimRejectedByRisk.Add(1)
 	default:
@@ -143,6 +147,7 @@ func (m *RuntimeMetrics) Snapshot(now time.Time) RuntimeMetricsSnapshot {
 			RejectedByRisk:    m.claimRejectedByRisk.Load(),
 			FaucetUnavailable: m.faucetUnavailable.Load(),
 			ClaimUnavailable:  m.claimUnavailable.Load(),
+			InvalidToken:      m.invalidToken.Load(),
 		},
 		Captcha: RuntimeCaptchaMetrics{
 			Failed: m.captchaFailed.Load(),

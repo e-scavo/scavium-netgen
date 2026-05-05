@@ -603,3 +603,42 @@ type fakeRiskEngine struct {
 func (e fakeRiskEngine) Evaluate(context.Context, domain.RiskInput) (domain.RiskDecision, error) {
 	return domain.RiskDecision{Allowed: e.allowed, Reason: e.reason}, nil
 }
+
+func TestPersistentReadServiceRejectsInvalidTokenBeforeCaptcha(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+	service.SetCaptchaVerifier(fakeCaptchaVerifier{passed: true, reason: "captcha should not be needed"})
+	service.SetAbuseSignalRecorder(store)
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:      persistentTestAddress(),
+		TokenID:      "missing-token",
+		RemoteIP:     "203.0.113.10",
+		CaptchaToken: "ok-token",
+	})
+	if err == nil {
+		t.Fatal("create claim returned nil error")
+	}
+	if !errors.Is(err, ErrClaimRejected) {
+		t.Fatalf("error = %v, want ErrClaimRejected", err)
+	}
+	var claimErr *ClaimError
+	if !errors.As(err, &claimErr) {
+		t.Fatalf("error = %T, want ClaimError", err)
+	}
+	if claimErr.Reason != "invalid_token" {
+		t.Fatalf("reason = %q, want invalid_token", claimErr.Reason)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list signals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Fatalf("signals = %d, want 1", len(signals))
+	}
+	if signals[0].Kind != domain.AbuseSignalInvalidToken {
+		t.Fatalf("signal kind = %q, want %q", signals[0].Kind, domain.AbuseSignalInvalidToken)
+	}
+}

@@ -153,3 +153,8 @@ See [token-registration.md](token-registration.md) for the full testnet operator
 
 The Phase 17.2 token registration contract is configuration-driven. `SCAVIUM_FAUCET_TOKENS_JSON` and `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` are loaded at startup, validated before serving traffic, and then exposed through the public token catalog endpoints. Changing token definitions requires a service restart in this phase. Runtime mutation, hot reload, admin-driven token creation, and database-backed token catalogs are intentionally deferred to later phases.
 
+
+
+## Phase 17.3.1 validation note
+
+The configuration loader still validates token definitions at startup, and Phase 17.3.1 adds a second defensive validation boundary at claim time. Runtime claims only proceed when the selected token id resolves to executable metadata: valid token type, positive amount, non-negative decimals, and an ERC20 contract address when `type` is `erc20`. Invalid token selections are rejected with the existing claim error contract instead of reaching persistence, queue, or sender execution.

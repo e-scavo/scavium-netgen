@@ -214,9 +214,9 @@ func (s *InMemoryReadService) CreateClaim(_ context.Context, request ClaimReques
 	}
 
 	now := s.now()
-	token, ok := s.cfg.TokenByID(request.TokenID)
-	if !ok {
-		return ClaimResponse{}, claimError(ErrClaimRejected, "unsupported token")
+	token, err := validateClaimToken(s.cfg, request.TokenID)
+	if err != nil {
+		return ClaimResponse{}, err
 	}
 	claim := domain.Claim{
 		ID:            id,
@@ -279,6 +279,23 @@ func claimResponse(claim domain.Claim, idempotencyKey string) ClaimResponse {
 		CreatedAt:      claim.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:      claim.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+func validateClaimToken(cfg config.Config, tokenID string) (config.TokenConfig, error) {
+	token, ok := cfg.TokenByID(tokenID)
+	if !ok {
+		return config.TokenConfig{}, claimError(ErrClaimRejected, "invalid_token")
+	}
+	if token.ID == "" || token.Symbol == "" || !domain.IsValidTokenType(token.Type) {
+		return config.TokenConfig{}, claimError(ErrClaimRejected, "invalid_token")
+	}
+	if token.Type == domain.TokenTypeERC20 && token.Address == (common.Address{}) {
+		return config.TokenConfig{}, claimError(ErrClaimRejected, "invalid_token")
+	}
+	if token.Decimals < 0 || token.AmountWei == nil || token.AmountWei.Sign() <= 0 {
+		return config.TokenConfig{}, claimError(ErrClaimRejected, "invalid_token")
+	}
+	return token, nil
 }
 
 func tokenResponses(tokens []config.TokenConfig) []TokenResponse {

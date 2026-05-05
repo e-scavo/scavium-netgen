@@ -22,6 +22,7 @@ func TestRuntimeMetricsSnapshot(t *testing.T) {
 	metrics.IncClaimRejected("daily_budget_exceeded")
 	metrics.IncClaimRejected("faucet_unavailable")
 	metrics.IncClaimRejected("claim_unavailable")
+	metrics.IncClaimRejected("invalid_token")
 
 	snapshot := metrics.Snapshot(startedAt.Add(90 * time.Second))
 	if snapshot.StartedAt != "2026-05-04T10:00:00Z" {
@@ -47,6 +48,9 @@ func TestRuntimeMetricsSnapshot(t *testing.T) {
 	}
 	if snapshot.Claims.ClaimUnavailable != 1 {
 		t.Fatalf("claims.claim_unavailable = %d", snapshot.Claims.ClaimUnavailable)
+	}
+	if snapshot.Claims.InvalidToken != 1 {
+		t.Fatalf("claims.invalid_token = %d", snapshot.Claims.InvalidToken)
 	}
 	if snapshot.Captcha.Failed != 1 {
 		t.Fatalf("captcha.failed = %d", snapshot.Captcha.Failed)

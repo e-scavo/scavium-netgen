@@ -137,9 +137,23 @@ Implemented:
 - Preserved claim compatibility: omitted `token_id` still resolves to the configured default token
 - Confirmed that Phase 17.3 can start from a stable registration/catalog baseline
 
-### 17.3 — Frontend Token Selection
-- Token selector UI
-- Dynamic routing
+### 17.3 — Claim Validation Hardening (token-aware)
+
+#### 17.3.1 — Token Validation Layer
+**Status:** IMPLEMENTED.
+
+Implemented:
+- Strict claim-time token validation before captcha, risk, cooldown, rate-limit, daily-budget, and queue processing
+- Unknown `token_id` values are rejected with the existing `claim_rejected` public contract and `invalid_token` reason
+- Defensive validation confirms resolved token metadata remains executable before creating/enqueuing a claim
+- Persistent abuse signal `invalid_token` records rejected token-selection attempts
+- Runtime metrics now expose `claims.invalid_token` without changing the existing admin metrics envelope
+- Existing backward compatibility is preserved: omitted `token_id` still resolves to the configured default token
+
+Deferred:
+- Frontend token selector UI
+- Runtime admin token mutation
+- Database-backed token catalogs
 
 ---
 
