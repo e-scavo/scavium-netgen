@@ -8,7 +8,7 @@ This directory documents the **implemented project surface**, not the full roadm
 
 `scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
 
-Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is also CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention now documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service.
+Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is also CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention now documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17.2 Token Registration is also CLOSED for the current testnet scope, with configuration-driven native/ERC20 registration, public catalog validation, and operator guidance now treated as the active token-support baseline.
 
 The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, and enriched health/readiness probes.
 
@@ -90,3 +90,10 @@ The closure remains contract-preserving: no public claim response shape changed,
 Phase 17.2.2 documents the production-safe operator path for registering SCAVIUM testnet faucet assets through configuration. The new guide keeps Phase 17.1 and 17.2.1 behavior intact: token ids remain config-driven, `POST /api/v1/claim` remains backward-compatible, and public catalog discovery continues through `GET /api/v1/tokens` and `GET /api/v1/faucet/tokens`.
 
 The guidance covers native-only operation, native + ERC20 testnet registration, faucet wallet balance checks, decimals and base-unit conversion, post-restart catalog validation, and explicit `token_id` claim testing. No runtime admin mutation, frontend selector, database-backed token catalog, or public contract change is introduced in this subphase.
+
+## Phase 17.2.close — Token Registration Closure
+
+Phase 17.2 is closed as a configuration-driven token registration layer for the public testnet faucet. The implemented scope now covers the Phase 17.1 multi-token foundation, the Phase 17.2.1 public token catalog endpoints, and the Phase 17.2.2 operator registration guide for native and ERC20 testnet assets.
+
+The closure is documentary only and preserves the production contract: existing clients may still call `POST /api/v1/claim` without `token_id`, the configured default token remains the fallback, token metadata remains claim-safe, and no runtime admin mutation or database-backed token catalog is introduced. Phase 17.3 can now harden token-aware claim validation on top of a stable registration and discovery baseline.
+

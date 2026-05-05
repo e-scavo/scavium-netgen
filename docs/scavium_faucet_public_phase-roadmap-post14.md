@@ -96,7 +96,7 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 - SQLite migration `004_token_claim_metadata.sql` adds token fields without altering existing claim statuses or error codes
 
 ### 17.2 — Token Registration (testnet)
-**Status:** ADVANCED through 17.2.2. The faucet exposes a public token catalog derived from validated runtime token configuration, and operators now have a documented testnet registration path for native and ERC20 assets without introducing runtime mutation or changing the claim contract.
+**Status:** CLOSED. The faucet exposes a public token catalog derived from validated runtime token configuration, and operators now have a documented testnet registration path for native and ERC20 assets without introducing runtime mutation or changing the claim contract.
 
 #### 17.2.1 — Public Token Catalog Endpoint
 **Status:** IMPLEMENTED.
@@ -123,9 +123,19 @@ Implemented:
 
 No runtime code, schema, endpoint, or claim contract change was introduced in 17.2.2.
 
-Remaining for 17.2:
-- Optional live testnet deployment notes once real deployed token ids/addresses are selected
-- Optional final 17.2 closure after operator validation on the VPS
+Closure notes for 17.2:
+- Token registration is configuration-driven and restart-applied.
+- Public catalog discovery is the canonical post-restart validation path.
+- Runtime admin token mutation, database-backed catalogs, frontend token selection, and hot reload remain outside 17.2 and move to later phases when explicitly scheduled.
+
+#### 17.2.close — Token Registration Closure
+**Status:** CLOSED.
+
+Implemented:
+- Documentary closure of the configuration-driven token registration model
+- Consolidated boundary that 17.2 does not add runtime token mutation, DB-backed token catalogs, or frontend selection
+- Preserved claim compatibility: omitted `token_id` still resolves to the configured default token
+- Confirmed that Phase 17.3 can start from a stable registration/catalog baseline
 
 ### 17.3 — Frontend Token Selection
 - Token selector UI

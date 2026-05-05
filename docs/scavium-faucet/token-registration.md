@@ -111,4 +111,6 @@ For local or staging validation with the dev captcha provider, use the configure
 
 ## Phase boundary
 
-Phase 17.2.2 closes token registration guidance for testnet operation. It does not add frontend selection, runtime admin token creation, dynamic token mutation, or database-backed token catalogs. Those remain explicitly outside this subphase so the public claim contract and deployment model remain stable.
+Phase 17.2 is closed for the current public testnet scope. Token registration is intentionally configuration-driven, loaded at startup, validated by runtime config parsing, and exposed through the public catalog endpoints for operator and frontend discovery.
+
+The closure does not add frontend selection, runtime admin token creation, dynamic token mutation, hot reload, or database-backed token catalogs. Those remain explicitly outside this phase so the public claim contract, deployment model, and SQLite claim history stay stable while later phases harden token-aware validation and operator controls.

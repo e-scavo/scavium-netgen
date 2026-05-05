@@ -181,6 +181,21 @@ The following command set was used during successful production rollout and vali
 - `curl -fsS http://127.0.0.1:18080/api/v1/admin/metrics -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"`
 - `curl -fsS https://faucet.testnet.scavium.network/health`
 
+
+## Token registration operations (Phase 17.2 closed)
+
+Token registration is operated through environment configuration and service restart. This is the stable Phase 17.2 model: the faucet does not mutate token definitions at runtime and does not store the token catalog in SQLite.
+
+Operator sequence:
+
+1. Add or update the desired native/ERC20 entries in `SCAVIUM_FAUCET_TOKENS_JSON`.
+2. Keep `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` pointed at a configured token so legacy claim clients continue to work.
+3. Restart the systemd service after changing token configuration.
+4. Validate the public catalog with `GET /api/v1/tokens` or `GET /api/v1/faucet/tokens`.
+5. Submit a bounded test claim with explicit `token_id` for each ERC20 token before announcing it to users.
+
+Do not publish private keys, captcha secrets, admin bearer tokens, or raw environment files while documenting registered tokens. Publicly safe token fields are the fields returned by the token catalog endpoints.
+
 ## Deployment notes
 
 1. Bind the service to loopback.

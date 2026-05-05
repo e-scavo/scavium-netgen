@@ -148,3 +148,8 @@ See [token-registration.md](token-registration.md) for the full testnet operator
 - `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced against queued, sent, and confirmed claims and resets at UTC midnight.
 - `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_*` is intentionally conservative: it reads only negative abuse signals from the configured lookback window and rejects new claims only when a configured threshold is reached. Set a threshold to `0` to disable that specific scope while keeping the rest of the enforcement layer active.
 - In dry-run mode (`DRY_RUN=true`), the `PRIVATE_KEY` is not required; `DryRunSender` is used and no on-chain transactions are submitted.
+
+## Phase 17.2 closure note
+
+The Phase 17.2 token registration contract is configuration-driven. `SCAVIUM_FAUCET_TOKENS_JSON` and `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` are loaded at startup, validated before serving traffic, and then exposed through the public token catalog endpoints. Changing token definitions requires a service restart in this phase. Runtime mutation, hot reload, admin-driven token creation, and database-backed token catalogs are intentionally deferred to later phases.
+
