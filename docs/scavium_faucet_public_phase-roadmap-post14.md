@@ -201,6 +201,24 @@ Deferred:
 - Durable per-token analytics
 - External metrics backends
 
+### 17.4 — Token-Aware Frontend Claim Selection
+
+#### 17.4.1 — Public Token Catalog Consumption
+**Status:** IMPLEMENTED.
+
+Implemented:
+- Public embedded frontend now calls `GET /api/v1/tokens` during startup
+- Token selector is rendered from claim-safe catalog metadata
+- Selected token id is submitted as optional `token_id` in `POST /api/v1/claim`
+- Claim result rendering includes token id/symbol/type and base-unit amount when returned by the API
+- Catalog-load failures preserve backward compatibility by hiding the selector and omitting `token_id`
+
+Deferred:
+- Advanced token balance display
+- Token icons and richer branding metadata
+- Runtime admin token mutation
+- Database-backed token catalogs
+
 ---
 
 ## Phase 18 — Admin & Control Plane

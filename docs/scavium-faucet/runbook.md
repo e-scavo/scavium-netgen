@@ -327,3 +327,21 @@ Phase 17.3 is the active operator baseline for token-aware claim intake. When va
 5. Review `/api/v1/admin/metrics` and confirm aggregate and token-scoped counters move as expected.
 
 This closure does not introduce runtime token mutation, frontend token selection, database-backed catalogs, durable per-token analytics, or external metrics. Those remain later-phase concerns.
+
+## Frontend Token Selection Operations (Phase 17.4.1)
+
+The public embedded faucet UI now discovers configured faucet assets through `GET /api/v1/tokens` and renders them as a browser-side selector. Operators should validate the catalog after any `SCAVIUM_FAUCET_TOKENS_JSON` change and service restart before testing claims from the UI.
+
+Recommended validation flow:
+
+```bash
+curl -sS https://faucet.testnet.scavium.network/api/v1/tokens
+```
+
+Then open the public faucet page and confirm that each configured token appears with its symbol, token id, type, and base-unit amount. If the catalog endpoint is unavailable from the browser, the UI intentionally falls back to the legacy/default claim behavior and does not send `token_id`.
+
+Troubleshooting notes:
+
+- If the selector is hidden, validate `/api/v1/tokens` first.
+- If a token is missing, review `SCAVIUM_FAUCET_TOKENS_JSON` and restart the service.
+- If a selected token claim returns `claim_rejected` with `invalid_token`, refresh the page and re-check the server-side catalog.
