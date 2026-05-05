@@ -10,6 +10,7 @@
     captchaWidgetID: null,
     tokens: [],
     selectedTokenID: "",
+    tokenCatalogStatus: "loading",
   };
 
   function el(id) {
@@ -186,12 +187,35 @@
   }
 
 
+  function formatDecimalAmount(amountWei, decimals) {
+    var raw = String(amountWei || "").trim();
+    if (!/^\d+$/.test(raw)) {
+      return "";
+    }
+    var places = Number(decimals || 0);
+    if (!Number.isFinite(places) || places < 0) {
+      places = 0;
+    }
+    if (places === 0) {
+      return raw;
+    }
+    while (raw.length <= places) {
+      raw = "0" + raw;
+    }
+    var whole = raw.slice(0, raw.length - places) || "0";
+    var frac = raw.slice(raw.length - places).replace(/0+$/, "");
+    return frac ? whole + "." + frac : whole;
+  }
+
   function formatTokenAmount(token) {
     if (!token || !token.amount_wei) {
       return "";
     }
-    var suffix = token.symbol ? " base units of " + token.symbol : " base units";
-    return token.amount_wei + suffix;
+    var display = formatDecimalAmount(token.amount_wei, token.decimals);
+    if (!display) {
+      display = token.amount_wei + " base units";
+    }
+    return token.symbol ? display + " " + token.symbol : display;
   }
 
   function tokenOptionLabel(token) {
@@ -223,6 +247,36 @@
     return null;
   }
 
+  function updateTokenStatus(text, kind) {
+    var status = el("token-status");
+    if (!status) {
+      return;
+    }
+    status.textContent = text || "";
+    status.className = "token-status " + (kind || "info") + (text ? "" : " hidden");
+  }
+
+  function renderTokenDetails(token) {
+    var details = el("token-details");
+    if (!details) {
+      return;
+    }
+    if (!token) {
+      details.innerHTML = "";
+      setHidden(details, true);
+      return;
+    }
+    var rows = [
+      ["Amount", formatTokenAmount(token) || "Configured"],
+      ["Type", token.type ? String(token.type).toUpperCase() : "Token"],
+      ["Decimals", token.decimals != null ? String(token.decimals) : "n/a"],
+    ];
+    details.innerHTML = rows.map(function (r) {
+      return '<div class="token-pill"><span>' + esc(r[0]) + '</span><strong>' + esc(r[1]) + '</strong></div>';
+    }).join("");
+    setHidden(details, false);
+  }
+
   function updateTokenNote() {
     var note = el("token-note");
     var token = selectedToken();
@@ -232,19 +286,17 @@
     if (!token) {
       note.textContent = "Default faucet token will be requested.";
       setHidden(note, true);
+      renderTokenDetails(null);
       return;
     }
     var parts = [];
     parts.push("Selected " + (token.symbol || token.id));
-    if (token.type) {
-      parts.push(String(token.type).toUpperCase());
-    }
-    var amount = formatTokenAmount(token);
-    if (amount) {
-      parts.push("amount " + amount);
+    if (token.id) {
+      parts.push("id " + token.id);
     }
     note.textContent = parts.join(" · ");
     setHidden(note, false);
+    renderTokenDetails(token);
   }
 
   function renderTokens(tokens) {
@@ -263,6 +315,7 @@
       state.selectedTokenID = "";
       select.disabled = true;
       setHidden(row, true);
+      updateTokenStatus("", "info");
       updateTokenNote();
       return;
     }
@@ -283,10 +336,32 @@
     state.selectedTokenID = select.value || "";
     select.disabled = false;
     setHidden(row, false);
+    updateTokenStatus("Token catalog loaded. Select the asset to request.", "info");
+    updateTokenNote();
+  }
+
+  function renderTokenFallback(message) {
+    var row = el("token-row");
+    var select = el("token-id");
+    state.tokens = [];
+    state.selectedTokenID = "";
+    if (select) {
+      select.innerHTML = "";
+      select.disabled = true;
+    }
+    setHidden(row, false);
+    updateTokenStatus(message || "Token catalog unavailable. Default faucet token will be requested.", "warn");
     updateTokenNote();
   }
 
   async function loadTokens() {
+    var row = el("token-row");
+    var select = el("token-id");
+    if (select) {
+      select.disabled = true;
+    }
+    setHidden(row, false);
+    updateTokenStatus("Loading token catalog...", "info");
     var response = await fetch("/api/v1/tokens", { headers: { Accept: "application/json" } });
     var data = await readJSON(response);
     if (!response.ok) {
@@ -526,7 +601,7 @@
         setStatus(el("msg"), "Unable to refresh status.", "warn");
       });
       loadTokens().catch(function () {
-        // Keep current/default token behavior when catalog refresh fails.
+        renderTokenFallback("Token catalog refresh failed. Default faucet token will be requested.");
       });
       if (state.currentClaimID) {
         pollClaim(state.currentClaimID);
@@ -551,7 +626,7 @@
     try {
       await loadTokens();
     } catch (_) {
-      renderTokens([]);
+      renderTokenFallback("Token catalog unavailable. Default faucet token will be requested.");
     }
     try {
       await loadPublicStatus();

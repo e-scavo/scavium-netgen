@@ -69,4 +69,10 @@ func TestHandlerServesStaticJS(t *testing.T) {
 	if !strings.Contains(body, "/api/v1/claim") {
 		t.Fatal("faucet.js missing claim endpoint usage")
 	}
+	if !strings.Contains(body, "Token catalog unavailable") {
+		t.Fatal("faucet.js missing token catalog fallback UX")
+	}
+	if !strings.Contains(body, "formatDecimalAmount") {
+		t.Fatal("faucet.js missing token amount display formatting")
+	}
 }

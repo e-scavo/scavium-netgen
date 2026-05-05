@@ -182,3 +182,5 @@ Operational implications:
 - The frontend selector reflects whatever `GET /api/v1/tokens` returns after restart.
 - If no valid token catalog can be loaded by the browser, the selector remains hidden and legacy/default-token claim behavior is preserved.
 - Token labels are rendered from public metadata only: `id`, `symbol`, `type`, `decimals`, and `amount_wei`.
+- Phase 17.4.2 additionally renders loading/fallback states and selected-token detail cards from that same metadata.
+- The frontend does not require a separate token-selector configuration flag; catalog availability remains the source of truth.
