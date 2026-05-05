@@ -175,6 +175,11 @@ func ValidMode(mode string) bool {
 
 // --- InMemoryAdminService -----------------------------------------------
 
+// ModeController applies operational faucet mode changes to the live runtime.
+type ModeController interface {
+	SetFaucetMode(mode string)
+}
+
 // InMemoryAdminService is a standalone in-memory implementation of AdminService.
 type InMemoryAdminService struct {
 	mu        sync.RWMutex
@@ -182,6 +187,7 @@ type InMemoryAdminService struct {
 	claims    map[string]domain.Claim
 	blocklist *abuse.Blocklist
 	auditLog  *AuditLog
+	modeCtl   ModeController
 	now       func() time.Time
 }
 
@@ -200,6 +206,13 @@ func NewInMemoryAdminService() *InMemoryAdminService {
 func (s *InMemoryAdminService) withClock(now func() time.Time) *InMemoryAdminService {
 	s.now = now
 	return s
+}
+
+// SetModeController connects admin mode changes to the live faucet runtime.
+func (s *InMemoryAdminService) SetModeController(controller ModeController) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.modeCtl = controller
 }
 
 // AddClaim inserts a claim into the in-memory store.  Used in tests and
@@ -326,6 +339,9 @@ func (s *InMemoryAdminService) SetMode(_ context.Context, mode, actor string) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mode = mode
+	if s.modeCtl != nil {
+		s.modeCtl.SetFaucetMode(mode)
+	}
 	s.auditLog.Append(AuditEntry{
 		Action:    "set_mode",
 		Actor:     actor,

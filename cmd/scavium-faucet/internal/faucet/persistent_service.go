@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
@@ -40,6 +41,7 @@ type tokenScopedClaimStore interface {
 
 // PersistentReadService implements ReadService using durable stores.
 type PersistentReadService struct {
+	modeMu          sync.RWMutex
 	cfg             config.Config
 	claims          domain.ClaimStore
 	queue           domain.QueueStore
@@ -98,9 +100,24 @@ func (s *PersistentReadService) SetAbuseSignalRecorder(recorder domain.AbuseSign
 	s.abuseSignals = recorder
 }
 
+// SetFaucetMode updates the live operational faucet mode. It is used by the
+// admin control plane and intentionally only changes runtime behavior; it does
+// not persist configuration or alter public API contracts.
+func (s *PersistentReadService) SetFaucetMode(mode string) {
+	s.modeMu.Lock()
+	defer s.modeMu.Unlock()
+	s.cfg.FaucetMode = strings.TrimSpace(mode)
+}
+
+func (s *PersistentReadService) faucetMode() string {
+	s.modeMu.RLock()
+	defer s.modeMu.RUnlock()
+	return s.cfg.FaucetMode
+}
+
 func (s *PersistentReadService) Status(context.Context) (StatusResponse, error) {
 	return StatusResponse{
-		Status:      configuredStatus(s.cfg.FaucetMode),
+		Status:      configuredStatus(s.faucetMode()),
 		NetworkName: s.cfg.NetworkName,
 		Symbol:      s.cfg.Symbol,
 		DryRun:      s.cfg.DryRun,
@@ -173,8 +190,9 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		}
 	}
 
-	if configuredStatus(s.cfg.FaucetMode) != domain.FaucetStatusActive {
-		return ClaimResponse{}, claimError(ErrFaucetUnavailable, fmt.Sprintf("faucet mode is %s", configuredStatus(s.cfg.FaucetMode)))
+	modeStatus := configuredStatus(s.faucetMode())
+	if modeStatus != domain.FaucetStatusActive {
+		return ClaimResponse{}, claimError(ErrFaucetUnavailable, fmt.Sprintf("faucet mode is %s", modeStatus))
 	}
 
 	token, err := validateClaimToken(s.cfg, request.TokenID)

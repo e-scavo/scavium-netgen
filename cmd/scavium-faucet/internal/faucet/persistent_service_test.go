@@ -704,3 +704,33 @@ func TestPersistentReadServiceRejectsInvalidTokenBeforeCaptcha(t *testing.T) {
 		t.Fatalf("signal kind = %q, want %q", signals[0].Kind, domain.AbuseSignalInvalidToken)
 	}
 }
+
+func TestPersistentReadServiceSetFaucetModeAffectsClaimsAndStatus(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+
+	service.SetFaucetMode("maintenance")
+	status, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.Status != domain.FaucetStatusMaintenance {
+		t.Fatalf("status = %q, want maintenance", status.Status)
+	}
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress()}); !errors.Is(err, ErrFaucetUnavailable) {
+		t.Fatalf("create claim err = %v, want ErrFaucetUnavailable", err)
+	}
+
+	service.SetFaucetMode("active")
+	status, err = service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.Status != domain.FaucetStatusActive {
+		t.Fatalf("status = %q, want active", status.Status)
+	}
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress()}); err != nil {
+		t.Fatalf("create claim after active mode: %v", err)
+	}
+}

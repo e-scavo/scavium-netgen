@@ -421,3 +421,37 @@ func TestInMemoryAdminServiceRecentAuditLog(t *testing.T) {
 		t.Fatalf("detail = %q, want active", entries[0].Detail)
 	}
 }
+
+type testModeController struct {
+	mode string
+}
+
+func (c *testModeController) SetFaucetMode(mode string) {
+	c.mode = mode
+}
+
+func TestInMemoryAdminServiceSetModePropagatesToController(t *testing.T) {
+	controller := &testModeController{}
+	svc := NewInMemoryAdminService()
+	svc.SetModeController(controller)
+
+	if err := svc.SetMode(context.Background(), "maintenance", "operator"); err != nil {
+		t.Fatalf("SetMode: %v", err)
+	}
+	if controller.mode != "maintenance" {
+		t.Fatalf("controller mode = %q, want maintenance", controller.mode)
+	}
+}
+
+func TestInMemoryAdminServiceSetModeDoesNotPropagateInvalidMode(t *testing.T) {
+	controller := &testModeController{mode: "active"}
+	svc := NewInMemoryAdminService()
+	svc.SetModeController(controller)
+
+	if err := svc.SetMode(context.Background(), "invalid", "operator"); err != ErrInvalidMode {
+		t.Fatalf("SetMode err = %v, want ErrInvalidMode", err)
+	}
+	if controller.mode != "active" {
+		t.Fatalf("controller mode = %q, want active", controller.mode)
+	}
+}

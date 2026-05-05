@@ -2095,3 +2095,53 @@ func TestAdminRuntimeAllowsOnlyGET(t *testing.T) {
 		t.Fatalf("allow = %q, want GET", got)
 	}
 }
+
+func TestAdminAuditActorUsesTrustedProxyHeaders(t *testing.T) {
+	var logs bytes.Buffer
+	deps := testAdminDeps()
+	deps.TrustedProxy = "127.0.0.1"
+	deps.Logger = observability.NewLogger(&logs)
+
+	req := adminRequest(http.MethodPost, "/api/v1/admin/faucet/mode", map[string]string{"mode": "maintenance"})
+	req.RemoteAddr = "127.0.0.1:45678"
+	req.Header.Set("X-Forwarded-For", "198.51.100.42, 127.0.0.1")
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	if !strings.Contains(logs.String(), `"actor":"198.51.100.42"`) {
+		t.Fatalf("expected real actor IP in audit log, got %q", logs.String())
+	}
+}
+
+func TestAdminQueueLimitIsCapped(t *testing.T) {
+	deps := testAdminDeps()
+	svc := deps.AdminService.(*admin.InMemoryAdminService)
+	now := time.Now().UTC()
+	for i := 0; i < 501; i++ {
+		svc.AddClaim(domain.Claim{
+			ID:        fmt.Sprintf("claim_%03d", i),
+			Status:    domain.ClaimStatusQueued,
+			CreatedAt: now.Add(time.Duration(i) * time.Second),
+			UpdatedAt: now.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/queue?limit=999999", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body admin.QueueResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Items) != 500 {
+		t.Fatalf("items len = %d, want 500", len(body.Items))
+	}
+	if body.Counts["queued"] != 501 {
+		t.Fatalf("queued count = %d, want 501", body.Counts["queued"])
+	}
+}

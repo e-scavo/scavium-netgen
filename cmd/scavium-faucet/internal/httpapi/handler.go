@@ -126,12 +126,12 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux.HandleFunc("/api/v1/admin/dashboard", handleAdminDashboard(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/runtime", handleAdminRuntime(deps.AdminService, deps.ReadinessChecks, deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/queue", handleAdminQueue(deps.AdminService))
-	adminMux.HandleFunc("/api/v1/admin/queue/", handleAdminQueueDispatch(deps.AdminService, deps.Logger, "/api/v1/admin/queue/"))
+	adminMux.HandleFunc("/api/v1/admin/queue/", handleAdminQueueDispatch(deps.AdminService, deps.Logger, deps.TrustedProxy, "/api/v1/admin/queue/"))
 	adminMux.HandleFunc("/api/v1/admin/metrics", handleAdminMetrics(deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/claims", handleAdminListClaims(deps.AdminService))
-	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, deps.Logger, "/api/v1/admin/claim/"))
-	adminMux.HandleFunc("/api/v1/admin/faucet/mode", handleAdminSetMode(deps.AdminService, deps.Logger))
-	adminMux.HandleFunc("/api/v1/admin/blocklist", handleAdminBlocklist(deps.AdminService, deps.Logger))
+	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, deps.Logger, deps.TrustedProxy, "/api/v1/admin/claim/"))
+	adminMux.HandleFunc("/api/v1/admin/faucet/mode", handleAdminSetMode(deps.AdminService, deps.Logger, deps.TrustedProxy))
+	adminMux.HandleFunc("/api/v1/admin/blocklist", handleAdminBlocklist(deps.AdminService, deps.Logger, deps.TrustedProxy))
 	adminMux.HandleFunc("/api/v1/admin/audit", handleAdminAuditLog(deps.AdminService))
 	mux.Handle("/api/v1/admin/", admin.TokenAuthMiddleware(deps.AdminToken, adminMux))
 
@@ -627,6 +627,9 @@ func handleAdminQueue(svc admin.AdminService) http.HandlerFunc {
 		if v := r.URL.Query().Get("limit"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				limit = n
+				if limit > 500 {
+					limit = 500
+				}
 			}
 		}
 		queue, err := svc.Queue(r.Context(), limit)
@@ -650,12 +653,8 @@ func handleAdminMetrics(metrics *observability.RuntimeMetrics) http.HandlerFunc 
 	}
 }
 
-func actorFromRequest(r *http.Request) string {
-	addr := r.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		addr = addr[:idx]
-	}
-	return addr
+func actorFromRequest(r *http.Request, trustedProxy string) string {
+	return iputil.RealIP(r, trustedProxy)
 }
 
 func logAdminAudit(logger *observability.Logger, r *http.Request, action, actor, target string, fields map[string]any) {
@@ -696,7 +695,7 @@ func handleAdminDashboard(svc admin.AdminService) http.HandlerFunc {
 // changing the existing claim-specific admin endpoints.
 //   - POST /api/v1/admin/queue/retry  {"id":"<claim_id>"}
 //   - POST /api/v1/admin/queue/cancel {"id":"<claim_id>"}
-func handleAdminQueueDispatch(svc admin.AdminService, logger *observability.Logger, prefix string) http.HandlerFunc {
+func handleAdminQueueDispatch(svc admin.AdminService, logger *observability.Logger, trustedProxy, prefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		action := strings.Trim(strings.TrimPrefix(r.URL.Path, prefix), "/")
 		switch action {
@@ -723,7 +722,7 @@ func handleAdminQueueDispatch(svc admin.AdminService, logger *observability.Logg
 			return
 		}
 
-		actor := actorFromRequest(r)
+		actor := actorFromRequest(r, trustedProxy)
 		switch action {
 		case "retry":
 			if err := svc.RetryClaim(r.Context(), body.ID, actor); err != nil {
@@ -775,7 +774,7 @@ func handleAdminListClaims(svc admin.AdminService) http.HandlerFunc {
 //   - GET  {id}         → claim detail
 //   - POST {id}/retry   → retry claim
 //   - POST {id}/cancel  → cancel claim
-func handleAdminClaimDispatch(svc admin.AdminService, logger *observability.Logger, prefix string) http.HandlerFunc {
+func handleAdminClaimDispatch(svc admin.AdminService, logger *observability.Logger, trustedProxy, prefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tail := strings.TrimPrefix(r.URL.Path, prefix)
 		parts := strings.SplitN(tail, "/", 2)
@@ -811,7 +810,7 @@ func handleAdminClaimDispatch(svc admin.AdminService, logger *observability.Logg
 			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
-		actor := actorFromRequest(r)
+		actor := actorFromRequest(r, trustedProxy)
 		switch action {
 		case "retry":
 			if err := svc.RetryClaim(r.Context(), id, actor); err != nil {
@@ -833,7 +832,7 @@ func handleAdminClaimDispatch(svc admin.AdminService, logger *observability.Logg
 	}
 }
 
-func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger) http.HandlerFunc {
+func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger, trustedProxy string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -850,7 +849,7 @@ func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger) ht
 			WriteError(w, r, http.StatusBadRequest, "missing_mode", "mode is required", nil)
 			return
 		}
-		actor := actorFromRequest(r)
+		actor := actorFromRequest(r, trustedProxy)
 		if err := svc.SetMode(r.Context(), body.Mode, actor); err != nil {
 			if errors.Is(err, admin.ErrInvalidMode) {
 				WriteError(w, r, http.StatusBadRequest, "invalid_mode", "mode must be active, paused, or maintenance", nil)
@@ -864,7 +863,7 @@ func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger) ht
 	}
 }
 
-func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger) http.HandlerFunc {
+func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger, trustedProxy string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -885,7 +884,7 @@ func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger) 
 				WriteError(w, r, http.StatusBadRequest, "missing_fields", "key_type and value are required", nil)
 				return
 			}
-			actor := actorFromRequest(r)
+			actor := actorFromRequest(r, trustedProxy)
 			if err := svc.BlocklistAdd(r.Context(), abuse.KeyType(body.KeyType), body.Value, body.Reason, actor); err != nil {
 				WriteError(w, r, http.StatusInternalServerError, "blocklist_add_failed", "blocklist add failed", nil)
 				return
@@ -901,7 +900,7 @@ func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger) 
 				WriteError(w, r, http.StatusBadRequest, "missing_fields", "key_type and value query params are required", nil)
 				return
 			}
-			actor := actorFromRequest(r)
+			actor := actorFromRequest(r, trustedProxy)
 			if err := svc.BlocklistRemove(r.Context(), abuse.KeyType(kt), value, actor); err != nil {
 				WriteError(w, r, http.StatusInternalServerError, "blocklist_remove_failed", "blocklist remove failed", nil)
 				return

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
+	"scavium-netgen/cmd/scavium-faucet/internal/admin"
 	"scavium-netgen/cmd/scavium-faucet/internal/captcha"
 	"scavium-netgen/cmd/scavium-faucet/internal/chain"
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
@@ -85,6 +86,8 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 		return nil, err
 	}
 	readService.SetCaptchaVerifier(captchaVerifier)
+	adminService := admin.NewInMemoryAdminService()
+	adminService.SetModeController(readService)
 	readinessChecks := runtimeChecks(cfg, store, senderBundle.chainClient, senderBundle.signer)
 	metrics := observability.NewRuntimeMetrics(version.Current())
 	app := &App{
@@ -92,6 +95,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 		Handler: httpapi.NewHandler(httpapi.Dependencies{
 			ReadinessChecks: readinessChecks,
 			ReadService:     readService,
+			AdminService:    adminService,
 			AdminToken:      cfg.AdminToken,
 			TrustedProxy:    cfg.TrustedProxy,
 			CORSOrigins:     cfg.CORSAllowedOrigins,
