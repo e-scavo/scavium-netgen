@@ -11,9 +11,11 @@ This document describes the security posture of the faucet **as currently implem
 - `ReadTimeout=10s`
 - `WriteTimeout=10s`
 - `IdleTimeout=60s`
+- `MaxHeaderBytes=1 MiB`
 - JSON request bodies for write endpoints are capped at `1 MiB`
+- Requests with an explicit `Content-Length` above `1 MiB` on write methods are rejected before reaching route handlers
 
-These are useful baseline protections against accidental exposure and slow or oversized requests.
+These are useful baseline protections against accidental exposure, oversized headers, slow requests, and oversized request bodies.
 
 ### HTTP security headers
 

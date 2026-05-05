@@ -231,7 +231,7 @@ Accepted response:
 Current behavior:
 
 - `address`, optional `token_id`, `captcha_token`, and `fingerprint` are decoded from the body
-- the body is capped at `1 MiB`
+- the body is capped at `1 MiB`; requests declaring a larger `Content-Length` are rejected before claim handling
 - `RemoteIP` is extracted from the request (trusting `X-Forwarded-For` / `X-Real-IP` when `SCAVIUM_FAUCET_TRUSTED_PROXY` is set)
 - `UserAgent` is forwarded from the request header
 - the address cooldown is checked against the SQLite store
@@ -248,6 +248,7 @@ Common errors:
 |---|---|---|
 | 400 | `invalid_json` | Malformed JSON body |
 | 400 | `invalid_address` | Address failed validation |
+| 413 | `request_body_too_large` | Declared JSON request body exceeds `1 MiB` |
 | 422 | `captcha_failed` | Captcha verification failed |
 | 403 | `claim_rejected` | Claim rejected by abuse or risk policy |
 | 429 | `rate_limited` | IP, address, fingerprint, or cooldown limit exceeded |

@@ -140,7 +140,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	if deps.Logger != nil {
 		handler = RequestLoggingMiddleware(handler, deps.Logger, deps.TrustedProxy)
 	}
-	return RequestIDMiddleware(SecurityHeadersMiddleware(CORSHandler(handler, deps.CORSOrigins)))
+	return RequestIDMiddleware(SecurityHeadersMiddleware(CORSHandler(RequestBodyLimitMiddleware(handler), deps.CORSOrigins)))
 }
 
 func handleHealth(metrics *observability.RuntimeMetrics) http.HandlerFunc {
@@ -293,7 +293,7 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 		// to prove control of the address before the claim is enqueued.
 
 		var body claimRequest
-		if err := decodeNoTrailingTokens(json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)), &body); err != nil {
+		if err := decodeJSONBody(w, r, &body); err != nil {
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
 			return
 		}
@@ -731,7 +731,7 @@ func handleAdminQueueDispatch(svc admin.AdminService, logger *observability.Logg
 		}
 
 		var body admin.QueueControlRequest
-		if err := decodeNoTrailingTokens(json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)), &body); err != nil {
+		if err := decodeJSONBody(w, r, &body); err != nil {
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
 			return
 		}
@@ -854,7 +854,7 @@ func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger, tr
 			return
 		}
 		var body admin.SetModeRequest
-		if err := decodeNoTrailingTokens(json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)), &body); err != nil {
+		if err := decodeJSONBody(w, r, &body); err != nil {
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
 			return
 		}
@@ -890,7 +890,7 @@ func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger, 
 
 		case http.MethodPost:
 			var body admin.BlocklistAddRequest
-			if err := decodeNoTrailingTokens(json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)), &body); err != nil {
+			if err := decodeJSONBody(w, r, &body); err != nil {
 				WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
 				return
 			}

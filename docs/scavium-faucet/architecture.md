@@ -112,7 +112,7 @@ Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`) run aut
 ## Startup and shutdown
 
 - The server listens on `SCAVIUM_FAUCET_BIND_ADDR` and defaults to `127.0.0.1:18080`.
-- Timeouts are set in `main.go`: `ReadHeaderTimeout=5s`, `ReadTimeout=10s`, `WriteTimeout=10s`, `IdleTimeout=60s`.
+- Timeouts and header caps are set in `main.go`: `ReadHeaderTimeout=5s`, `ReadTimeout=10s`, `WriteTimeout=10s`, `IdleTimeout=60s`, `MaxHeaderBytes=1 MiB`.
 - SIGINT and SIGTERM trigger graceful shutdown with a `10s` timeout.
 
 
@@ -185,3 +185,14 @@ The Phase 18 admin service has two different runtime scopes:
 This split is deliberate for the Phase 18 closure. It gives operators a safe runtime mode brake, runtime visibility, structured audit logs, and bounded admin responses without introducing new schema risk before Phase 19 hardening. Follow-up work can replace or extend the in-memory admin service with a SQLite-backed implementation while preserving the admin HTTP contracts introduced in Phase 18.
 
 Phase 18.8 closes the final audit notes by aligning the documented queue response with the real `QueueResponse` structure, validating blocklist `key_type` values (`ip`, `address`, `fingerprint`), and applying a shared `500` item cap to admin queue, claims, and audit list endpoints.
+## Phase 19.3 — Performance Safety / Request Body & Timeout Hardening
+
+The HTTP surface keeps the existing public and admin route contracts while making resource caps explicit:
+
+1. `main.go` now names the server timeout constants and sets `MaxHeaderBytes=1 MiB` explicitly.
+2. JSON write endpoints share the same `1 MiB` decode helper instead of repeating literal limits.
+3. A request-body limit middleware rejects write requests whose declared `Content-Length` exceeds `1 MiB` before route handlers run.
+4. Unknown-length or streaming requests remain protected by `http.MaxBytesReader` during JSON decoding.
+
+This is intentionally a defensive hardening pass only; bind address, routing, response envelopes, admin auth, CORS, request IDs, and security headers stay backward compatible.
+
