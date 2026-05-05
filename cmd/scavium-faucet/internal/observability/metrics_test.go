@@ -37,7 +37,7 @@ func TestRuntimeMetricsSnapshot(t *testing.T) {
 	if snapshot.Claims.Accepted != 1 {
 		t.Fatalf("claims.accepted = %d", snapshot.Claims.Accepted)
 	}
-	if snapshot.Claims.Rejected != 6 {
+	if snapshot.Claims.Rejected != 7 {
 		t.Fatalf("claims.rejected = %d", snapshot.Claims.Rejected)
 	}
 	if snapshot.Claims.RejectedByRisk != 1 {
