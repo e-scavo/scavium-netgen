@@ -382,3 +382,14 @@ Phase 17.4 is the active operator baseline for the embedded token-aware faucet U
 
 This closure does not introduce runtime token administration, token icons, balance display, database-backed catalogs, or any new frontend configuration source.
 
+## Token support closure checks (Phase 17 closed)
+
+Phase 17 is the active operator baseline for multi-token faucet operation. After deploying a Phase 17 build or changing token configuration, validate the whole token-aware surface end to end:
+
+1. Confirm the service starts with the intended `SCAVIUM_FAUCET_TOKENS_JSON` and `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` values.
+2. Confirm `GET /api/v1/tokens` and `GET /api/v1/faucet/tokens` expose only claim-safe public token metadata.
+3. Submit a default claim without `token_id` and confirm the configured default token path still works.
+4. Submit a configured non-default token claim and confirm validation, cooldown/rate-limit scope, daily budget accounting, persistence, queue processing, and claim-result rendering all stay scoped to that token.
+5. Check `/api/v1/admin/metrics` for aggregate and token-scoped counters without relying on them as durable accounting.
+
+This closure does not introduce runtime token mutation, database-backed token catalogs, durable per-token analytics, token icons, balance display, or a new admin-control surface. Those remain Phase 18+ concerns.
