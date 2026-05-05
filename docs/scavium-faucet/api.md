@@ -148,6 +148,14 @@ Operational registration note:
 
 - Token ids are configured server-side and discovered through this endpoint.
 - Existing clients can continue omitting `token_id`; the configured default token is used.
+
+Phase 17.2 closure note:
+
+- These catalog endpoints are the stable discovery and validation surface for configured faucet tokens.
+- They are read-only and do not mutate token configuration.
+- `POST /api/v1/claim` remains backward-compatible: clients that omit `token_id` receive the configured default token.
+- Token administration, frontend token selection, and database-backed token catalogs are not part of the Phase 17.2 API surface.
+
 - ERC20 clients should first read this catalog and then submit the selected `id` as `token_id` to `POST /api/v1/claim`.
 - See [token-registration.md](token-registration.md) for the testnet registration checklist.
 
