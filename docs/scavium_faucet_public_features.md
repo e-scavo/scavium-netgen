@@ -1,5 +1,28 @@
 # Faucet Server Pública SCAVIUM — Features por prioridad
 
+## Estado implementado post Phase 18
+
+Este documento conserva el backlog enriquecido de features posibles para la faucet pública. La implementación real cerrada hasta Phase 18 cubre el núcleo público, seguridad por capas, observabilidad, soporte multi-token y un primer plano de control admin. No todos los elementos listados abajo están implementados: varios permanecen como backlog deliberado para fases posteriores.
+
+Implementado y validado al cierre de Phase 18.7:
+
+- API pública versionada, frontend embebido, nginx/TLS externo, systemd, SQLite persistente y worker async.
+- Captcha configurable, rate limits persistentes, cooldown, daily budget, trusted proxy, CORS restringido, request IDs/correlation IDs y structured logging.
+- Abuse signals durables, progressive enforcement y retención configurable.
+- Multi-token nativo/ERC20 por configuración, catálogo público, claim validation token-aware, frontend selector token-aware y observabilidad por token.
+- Admin-protected metrics, runtime visibility, queue visibility, queue retry/cancel, claim retry/cancel, blocklist management, faucet mode control y audit trail.
+- Phase 18.7 post-audit fixes: `SetMode` afecta el runtime real, actor attribution usa IP real detrás de proxy confiable y la queue admin limita payloads grandes.
+
+Pendiente o explícitamente diferido:
+
+- Dynamic budget/config editing sin redeploy.
+- Exports CSV/reporting durables.
+- Admin users/roles/sessions/2FA.
+- Allowlists/campaigns y budgets por campaña.
+- Database-backed admin catalog/audit persistence.
+- RPC failover, wallet hardening avanzado, funding automation y hardening final de Phase 19.
+
+
 ## 1. Core público indispensable
 
 | Feature | Descripción |
@@ -215,33 +238,29 @@
 
 ## 9. Admin privado
 
-### Implemented admin/control baseline
-
-The current production faucet implements an API-first admin control plane protected by the configured admin bearer token. It provides runtime visibility, bounded queue and claim inspection, manual retry/cancel controls, live faucet mode changes, blocklist management, and audit visibility/logging. The implementation intentionally preserves the public claim API and avoids broad runtime configuration mutation until budget/risk-policy editing is designed as a separate durable feature.
-
-| Feature | Descripción | Estado actual |
-|---|---|---|
-| **Panel admin** | UI privada o API interna. | API interna implementada; UI privada futura. |
-| **Dashboard** | Saldo, entregado hoy, cola, errores, actividad. | Dashboard/runtime/metrics admin implementados. |
-| **Listado de claims** | Filtros por estado, address, IP, riesgo. | Listado admin básico implementado; filtros avanzados futuros. |
-| **Detalle de claim** | Toda la trazabilidad. | Detalle admin por claim implementado sobre el estado disponible. |
-| **Aprobar/rechazar claim** | Para greylist/manual review. | Manual review completo pendiente; cancel/reject operativo para claims no enviados. |
-| **Reintentar claim** | Reproceso controlado. | Implementado para estados retryables. |
-| **Cancelar claim** | Antes del envío. | Implementado para estados cancelables. |
-| **Pausar faucet** | Acción inmediata. | Implementado y conectado al runtime real. |
-| **Cambiar modo mantenimiento** | Estado público controlado. | Implementado para `active`, `paused`, `maintenance`. |
-| **Editar monto** | Config dinámica. | Pendiente/deferido; requiere diseño durable de presupuesto/config. |
-| **Editar cooldown** | Config dinámica. | Pendiente/deferido. |
-| **Editar presupuesto diario** | Control de gasto. | Pendiente/deferido. |
-| **Editar reglas de riesgo** | Anti-abuso dinámico. | Pendiente/deferido. |
-| **Gestionar blocklist** | IP/address/fingerprint/ASN. | Implementado en el plano admin actual para las claves soportadas. |
-| **Gestionar allowlist** | Excepciones y campañas. | Pendiente. |
-| **Gestionar campañas** | Crear, pausar, cerrar. | Pendiente. |
-| **Ver auditoría** | Acciones admin. | Implementado con audit log admin y structured logs seguros. |
-| **Export CSV** | Claims, tx, auditoría. | Pendiente. |
-| **Forzar reconciliación** | Job manual. | Pendiente. |
-| **Ver estado RPC** | Latencia, último bloque, errores. | Cubierto parcialmente por readiness/runtime checks. |
-| **Ver estado wallet** | Saldo, nonce, pending tx. | Cubierto parcialmente por readiness/runtime checks; vista dedicada futura. |
+| Feature | Descripción |
+|---|---|
+| **Panel admin** | UI privada o API interna. |
+| **Dashboard** | Saldo, entregado hoy, cola, errores, actividad. |
+| **Listado de claims** | Filtros por estado, address, IP, riesgo. |
+| **Detalle de claim** | Toda la trazabilidad. |
+| **Aprobar/rechazar claim** | Para greylist/manual review. |
+| **Reintentar claim** | Reproceso controlado. |
+| **Cancelar claim** | Antes del envío. |
+| **Pausar faucet** | Acción inmediata. |
+| **Cambiar modo mantenimiento** | Estado público controlado. |
+| **Editar monto** | Config dinámica. |
+| **Editar cooldown** | Config dinámica. |
+| **Editar presupuesto diario** | Control de gasto. |
+| **Editar reglas de riesgo** | Anti-abuso dinámico. |
+| **Gestionar blocklist** | IP/address/fingerprint/ASN. |
+| **Gestionar allowlist** | Excepciones y campañas. |
+| **Gestionar campañas** | Crear, pausar, cerrar. |
+| **Ver auditoría** | Acciones admin. |
+| **Export CSV** | Claims, tx, auditoría. |
+| **Forzar reconciliación** | Job manual. |
+| **Ver estado RPC** | Latencia, último bloque, errores. |
+| **Ver estado wallet** | Saldo, nonce, pending tx. |
 
 ---
 

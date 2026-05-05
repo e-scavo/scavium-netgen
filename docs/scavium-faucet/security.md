@@ -91,7 +91,7 @@ Operators can disable the full enforcement layer with `SCAVIUM_FAUCET_ABUSE_ENFO
 
 ### Admin API isolation
 
-Admin endpoints (`/api/v1/admin/*`) are protected by bearer-token authentication and are explicitly excluded from CORS. Browser-based clients cannot reach admin endpoints cross-origin even when CORS is configured for public routes.
+Admin endpoints (`/api/v1/admin/*`) are protected by bearer-token authentication and are explicitly excluded from CORS. Browser-based clients cannot reach admin endpoints cross-origin even when CORS is configured for public routes. Phase 18 admin actions use structured audit logging, avoid admin-token logging, omit raw blocklist values from structured action logs, and use trusted-proxy-aware real IP extraction for actor attribution.
 
 ## Remaining gaps
 
@@ -164,3 +164,18 @@ The same store also exposes internal aggregate summaries by signal kind through 
 Phase 15 is closed with a layered abuse-protection posture active for the public faucet. Captcha validation acts as the public entry barrier, `abuse_signals` records claim-intake behavior, progressive enforcement can reject requests through the existing `claim_rejected` contract, and retention keeps the signal ledger bounded for long-running SQLite operation.
 
 This closure does not introduce hard bans, new public endpoints, direct backend exposure, or additional third-party dependencies. It establishes the security baseline that Phase 16 observability will measure: captcha outcomes, risk decisions, rate-limit pressure, cooldown activity, budget exhaustion, accepted claims, and enforcement rejections.
+
+## Phase 18 — Admin control security posture
+
+Phase 18 expands the admin plane without widening the public attack surface. All admin routes remain under `/api/v1/admin/*`, require `Authorization: Bearer <SCAVIUM_FAUCET_ADMIN_TOKEN>`, return `503` when no admin token is configured, and remain excluded from CORS.
+
+The closed security posture is intentionally conservative:
+
+- admin token comparison is constant-time and the token is not logged
+- sensitive admin actions emit structured audit logs without request bodies or secrets
+- blocklist add/remove structured logs record action metadata but not raw blocklist values or reason text
+- mode changes are constrained to `active`, `paused`, and `maintenance`
+- audit actor attribution uses trusted-proxy-aware real IP extraction instead of the loopback nginx address
+- queue visibility is bounded by a hard `limit` cap and omits wallet addresses from queue item responses
+
+The in-process audit endpoint is an operator convenience, not a durable compliance store. If future phases persist audit entries, retention and PII handling must be re-reviewed before deployment.

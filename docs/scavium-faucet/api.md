@@ -302,19 +302,21 @@ Returns build metadata from `internal/version`.
 
 ## Admin endpoints
 
-Admin routes are active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set. `app.New` passes the token into `httpapi.Dependencies.AdminToken`; when the token is empty the routes return `503`.
+Admin routes are active when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set. `app.New` passes the token into `httpapi.Dependencies.AdminToken`; when the token is empty the routes return `503`. Admin routes are excluded from CORS even when public API CORS is configured.
 
-When the handler is constructed with an admin token, every admin request must include:
+Every admin request must include:
 
 ```text
 Authorization: Bearer <SCAVIUM_FAUCET_ADMIN_TOKEN>
 ```
 
-Wrong or missing token returns `401`. Empty configured token returns `503`.
+Wrong or missing token returns `401`. Empty configured token returns `503`. The admin token is compared with constant-time comparison and is never written to structured logs.
 
 ### `GET /api/v1/admin/metrics`
 
-Returns lightweight in-process runtime counters and build/runtime metadata. The endpoint is protected by the same bearer-token middleware as the rest of `/api/v1/admin/*`. Counters reset when the faucet process restarts and are intended for immediate operational diagnostics, not durable accounting. Post Phase 17.3.3, the response also includes token-scoped counters under `tokens`; the special `default` token id represents requests that omitted `token_id` at the HTTP boundary and therefore used the configured default-token path.
+Returns process-local runtime counters, build/runtime metadata, token-scoped claim counters, and Phase 18.1 process metrics. Counters reset when the faucet process restarts and are intended for immediate operational diagnostics, not durable accounting. The special `default` token id represents requests that omitted `token_id` at the HTTP boundary and therefore used the configured default-token path.
+
+Representative shape:
 
 ```json
 {
@@ -333,15 +335,9 @@ Returns lightweight in-process runtime counters and build/runtime metadata. The 
     "claim_unavailable": 0,
     "invalid_token": 1
   },
-  "captcha": {
-    "failed": 1
-  },
-  "rate_limits": {
-    "limited": 1
-  },
-  "budgets": {
-    "daily_exceeded": 1
-  },
+  "captcha": { "failed": 1 },
+  "rate_limits": { "limited": 1 },
+  "budgets": { "daily_exceeded": 1 },
   "tokens": [
     {
       "token_id": "default",
@@ -350,29 +346,54 @@ Returns lightweight in-process runtime counters and build/runtime metadata. The 
       "rate_limited": 0,
       "daily_exceeded": 0,
       "invalid_token": 0
-    },
-    {
-      "token_id": "scav",
-      "accepted": 4,
-      "rejected": 2,
-      "rate_limited": 1,
-      "daily_exceeded": 1,
-      "invalid_token": 0
     }
-  ]
+  ],
+  "process": {
+    "goroutines": 12,
+    "cpu_count": 2,
+    "memory_alloc_bytes": 123456,
+    "memory_sys_bytes": 789012,
+    "heap_alloc_bytes": 123456,
+    "heap_objects": 100,
+    "mallocs": 200,
+    "frees": 100,
+    "gc_cycles": 1
+  }
 }
 ```
 
 Operational notes:
 
-- `claims.*`, `captcha.*`, `rate_limits.*`, and `budgets.*` remain aggregate process-local counters.
+- `claims.*`, `captcha.*`, `rate_limits.*`, `budgets.*`, and `process.*` are process-local diagnostics.
 - `tokens[*]` is diagnostic only and is not a durable accounting ledger.
-- Token ids are configuration/public-catalog identifiers only; wallet addresses, raw fingerprints, request bodies, captcha tokens, and idempotency keys are not exposed.
-- Invalid token attempts are counted both in aggregate `claims.invalid_token` and in the token-scoped bucket matching the supplied `token_id`.
+- Token ids are configuration/public-catalog identifiers only; wallet addresses, raw fingerprints, request bodies, captcha tokens, admin tokens, and idempotency keys are not exposed.
+
+### `GET /api/v1/admin/runtime`
+
+Returns a composite operator view containing dashboard, readiness, metrics, and a server timestamp. This endpoint is a convenience aggregation over already-protected admin/runtime data; it does not mutate state.
+
+Representative shape:
+
+```json
+{
+  "dashboard": {
+    "mode": "active",
+    "claim_counts": {},
+    "blocklist_size": 0,
+    "updated_at": "2026-05-03T12:00:00Z"
+  },
+  "readiness": {
+    "status": "ready",
+    "checks": []
+  },
+  "metrics": {},
+  "time": "2026-05-03T12:00:00Z"
+}
+```
 
 ### `GET /api/v1/admin/dashboard`
 
-Returns the in-memory admin summary:
+Returns the admin summary used by the runtime endpoint:
 
 ```json
 {
@@ -383,9 +404,79 @@ Returns the in-memory admin summary:
 }
 ```
 
+### `GET /api/v1/admin/queue?limit=50`
+
+Returns bounded queue visibility for operators. The `limit` parameter defaults to the handler default and is capped at `500` to avoid accidental large admin responses.
+
+Representative shape:
+
+```json
+{
+  "summary": {
+    "counts": {
+      "queued": 3,
+      "sending": 1,
+      "failed": 2
+    },
+    "ready": 3,
+    "delayed": 0,
+    "in_flight": 1,
+    "pending_tx": 0,
+    "terminal": 2,
+    "total": 6,
+    "updated_at": "2026-05-03T12:00:00Z"
+  },
+  "items": [
+    {
+      "id": "claim-id",
+      "status": "queued",
+      "token_id": "default",
+      "tx_hash": "",
+      "attempts": 0,
+      "next_attempt_at": "2026-05-03T12:00:00Z",
+      "updated_at": "2026-05-03T12:00:00Z"
+    }
+  ]
+}
+```
+
+Wallet addresses are intentionally omitted from queue items.
+
+### `POST /api/v1/admin/queue/retry`
+
+Request body:
+
+```json
+{ "id": "claim-id" }
+```
+
+Retries an eligible queued/failed claim through the admin service.
+
+Success response:
+
+```json
+{ "status": "retried" }
+```
+
+### `POST /api/v1/admin/queue/cancel`
+
+Request body:
+
+```json
+{ "id": "claim-id" }
+```
+
+Cancels an eligible queued claim through the admin service.
+
+Success response:
+
+```json
+{ "status": "cancelled" }
+```
+
 ### `GET /api/v1/admin/claims?limit=50&offset=0`
 
-Lists in-memory claims.
+Lists admin-visible claims for operator review.
 
 ```json
 {
@@ -399,7 +490,7 @@ Returns one claim or `404`.
 
 ### `POST /api/v1/admin/claim/{id}/retry`
 
-Moves a `failed` or `rejected` claim back to `queued`.
+Moves a `failed` or `rejected` claim back to `queued` when the claim is eligible.
 
 Success response:
 
@@ -433,13 +524,23 @@ Request body:
 { "mode": "paused" }
 ```
 
+Accepted values are:
+
+- `active`
+- `paused`
+- `maintenance`
+
 Success response:
 
 ```json
 { "mode": "paused" }
 ```
 
-The in-memory admin service accepts the new mode string and records an audit entry.
+Invalid mode response:
+
+- `400` / `invalid_mode`
+
+As of Phase 18.7, accepted mode changes are propagated into the live faucet runtime, so public claim handling observes the selected mode. The action is also captured in the in-process audit log and in structured admin-action logs.
 
 ### `GET /api/v1/admin/blocklist`
 
@@ -467,6 +568,8 @@ Success response:
 { "status": "blocked" }
 ```
 
+Structured logs for this action do not include the raw blocklist value or reason text.
+
 ### `DELETE /api/v1/admin/blocklist?key_type=ip&value=1.2.3.4`
 
 Success response:
@@ -477,14 +580,14 @@ Success response:
 
 ### `GET /api/v1/admin/audit?limit=100`
 
-Returns recent in-memory audit entries.
+Returns recent in-process audit entries. The audit trail is useful for immediate operator review and is not a durable compliance ledger. Structured admin-action logs are also emitted for sensitive admin operations.
 
 ```json
 {
   "entries": [
     {
       "action": "set_mode",
-      "actor": "127.0.0.1",
+      "actor": "203.0.113.10",
       "target": "faucet",
       "detail": "paused",
       "created_at": "2026-05-03T12:00:00Z"

@@ -198,3 +198,13 @@ Phase 17 closes token support around startup-loaded configuration. `SCAVIUM_FAUC
 ## Phase 17.5 post-audit closure note
 
 Phase 17.5 does not add or change configuration variables. The post-audit fixes align frontend status handling, cooldown display, legacy-client token metrics, and defensive token-id logging with the existing Phase 17 configuration model. `SCAVIUM_FAUCET_TOKENS_JSON` and `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` remain the only token-support configuration sources in this phase.
+
+## Phase 18 admin-control notes
+
+Phase 18 does not add new environment variables. The admin control plane continues to depend on existing settings:
+
+- `SCAVIUM_FAUCET_ADMIN_TOKEN` enables `/api/v1/admin/*`; leave it unset to make admin routes return `503`.
+- `SCAVIUM_FAUCET_MODE` remains the startup mode. After startup, `POST /api/v1/admin/faucet/mode` can switch the live runtime among `active`, `paused`, and `maintenance` without editing the environment file.
+- `SCAVIUM_FAUCET_TRUSTED_PROXY` should match the reverse proxy address so admin audit actor attribution and public claim IP extraction use the real client IP.
+
+Dynamic budget editing, token catalog mutation, role-based admin accounts, and durable admin/audit storage are not configuration features in the closed Phase 18 baseline.

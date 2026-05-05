@@ -405,3 +405,50 @@ Phase 17.5 is the post-audit fix baseline for the completed token-support layer.
 5. Re-run `go test ./...` before merging or deploying additional admin-control work.
 
 This closure does not introduce new operational endpoints, runtime token mutation, database-backed token catalogs, or durable analytics. It only records the post-audit corrections that keep the Phase 17 token-aware baseline production-safe before Phase 18.
+
+## Phase 18 admin operations
+
+Admin operations require `SCAVIUM_FAUCET_ADMIN_TOKEN` and should be executed from a trusted operator shell or through a restricted internal network path. Admin routes are not CORS-enabled.
+
+Recommended smoke checks after deploy:
+
+```bash
+curl -fsS -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  http://127.0.0.1:18080/api/v1/admin/metrics | jq .
+
+curl -fsS -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  http://127.0.0.1:18080/api/v1/admin/runtime | jq .
+
+curl -fsS -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  'http://127.0.0.1:18080/api/v1/admin/queue?limit=50' | jq .
+```
+
+Operational mode changes are runtime-effective after Phase 18.7:
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"mode":"paused"}' \
+  http://127.0.0.1:18080/api/v1/admin/faucet/mode | jq .
+```
+
+Use only the supported modes: `active`, `paused`, and `maintenance`. Invalid values return `400 invalid_mode` and are not applied.
+
+Queue controls are intentionally narrow and claim-id based:
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"id":"<claim-id>"}' \
+  http://127.0.0.1:18080/api/v1/admin/queue/retry | jq .
+
+curl -fsS -X POST \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"id":"<claim-id>"}' \
+  http://127.0.0.1:18080/api/v1/admin/queue/cancel | jq .
+```
+
+If admin actor attribution appears as `127.0.0.1`, verify `SCAVIUM_FAUCET_TRUSTED_PROXY` matches the nginx source address so the backend can safely read `X-Forwarded-For` / `X-Real-IP`.

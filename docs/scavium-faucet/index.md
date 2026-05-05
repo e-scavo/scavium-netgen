@@ -8,9 +8,9 @@ This directory documents the **implemented project surface**, not the full roadm
 
 `scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
 
-Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is also CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention now documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17.2 Token Registration is also CLOSED for the current testnet scope, with configuration-driven native/ERC20 registration, public catalog validation, and operator guidance now treated as the active token-support baseline. Phase 17.3 Claim Validation Hardening is CLOSED as the token-aware claim-intake safety layer, covering strict token validation, token-scoped enforcement, and token-scoped operational visibility. Phase 17.4 Token-Aware Frontend Claim Selection is CLOSED as the browser-facing token selection layer, covering catalog consumption, selector fallback behavior, and token-aware claim-result presentation. Phase 17 Token Support is now CLOSED as the complete multi-token faucet layer for the current public testnet scope. Phase 17.5 Post-Audit Fixes is also CLOSED, with the Phase 17 audit findings resolved and documented as the final token-support baseline before Phase 18.
+Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is now CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility.
 
-The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, and enriched health/readiness probes.
+The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, and enriched health/readiness probes.
 
 ## Documentation
 
@@ -42,7 +42,11 @@ The service is production-ready for the current testnet scope, including validat
 - Each request produces a structured JSON access log line on stdout containing `request_id`, `correlation_id`, `method`, `path`, `status`, `duration`, and `remote_ip`; no secrets or request bodies are logged.
 - `X-Request-ID` and `X-Correlation-ID` are echoed on responses; when no correlation ID is supplied, the request ID is used as the correlation ID.
 - The claim path emits safe structured events for accepted and rejected claims without logging addresses, raw fingerprints, captcha tokens, request bodies, secrets, or idempotency-key values.
-- `GET /api/v1/admin/metrics` exposes lightweight in-process runtime counters when `SCAVIUM_FAUCET_ADMIN_TOKEN` is configured.
+- `GET /api/v1/admin/metrics` exposes lightweight in-process runtime counters and process metrics when `SCAVIUM_FAUCET_ADMIN_TOKEN` is configured.
+- `GET /api/v1/admin/runtime` aggregates dashboard, readiness, metrics, and timestamp data for operator inspection.
+- `GET /api/v1/admin/queue` exposes bounded queue visibility; admin queue retry/cancel endpoints provide limited operational control.
+- `POST /api/v1/admin/faucet/mode` accepts only `active`, `paused`, or `maintenance` and propagates the selected mode into the live faucet runtime.
+- Admin audit entries and structured admin-action logs avoid admin-token leakage; actor attribution uses trusted-proxy-aware real IP extraction.
 - `/health` includes uptime and build metadata; `/ready` includes per-check duration and aggregate readiness summary while keeping the real DB/queue/RPC/wallet probes.
 
 ## Quick start
@@ -153,3 +157,10 @@ Phase 17.5 is closed as the post-audit correction pass for the completed token-s
 
 The closure is documentary only. The public API contract remains unchanged: `POST /api/v1/claim` still accepts optional `token_id`, omitted values continue to use the configured default-token path, error envelopes remain stable, and no runtime token mutation or database-backed token catalog is introduced. With the audit fixes validated by `go test ./...`, Phase 18 can start from a production-safe token-aware baseline.
 
+## Phase 18.close — Admin Control Closure
+
+Phase 18 is closed as the first production-safe admin control plane over the public faucet. The implemented scope is intentionally incremental: it adds operator visibility and bounded controls without changing the public claim contract, introducing new external services, changing the SQLite schema, or moving configuration into a database.
+
+The closed Phase 18 baseline includes admin-protected runtime metrics, composite runtime visibility, queue summary visibility, queue retry/cancel endpoints, claim retry/cancel endpoints, blocklist management, faucet mode control, and audit trail behavior. The Phase 18.7 post-audit pass corrected the critical runtime gap by ensuring admin mode changes affect the live faucet service instead of only an isolated admin summary. It also aligned audit actor attribution with trusted-proxy real IP extraction and capped admin queue listing size.
+
+The closure deliberately defers broader control-plane expansion. Dynamic budget/config editing, database-backed admin catalogs, CSV/export workflows, role-based admin accounts, 2FA, allowlist/campaign controls, and durable audit persistence remain later-phase work. Phase 19 can now focus on production hardening from a verified admin-control baseline.
