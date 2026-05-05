@@ -140,7 +140,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	if deps.Logger != nil {
 		handler = RequestLoggingMiddleware(handler, deps.Logger, deps.TrustedProxy)
 	}
-	return RequestIDMiddleware(CORSHandler(handler, deps.CORSOrigins))
+	return RequestIDMiddleware(SecurityHeadersMiddleware(CORSHandler(handler, deps.CORSOrigins)))
 }
 
 func handleHealth(metrics *observability.RuntimeMetrics) http.HandlerFunc {

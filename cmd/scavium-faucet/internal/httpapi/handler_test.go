@@ -2232,3 +2232,56 @@ func TestAdminAuditLimitIsCapped(t *testing.T) {
 		t.Fatalf("entries len = %d, want 500", len(body.Entries))
 	}
 }
+
+func TestSecurityHeadersMiddlewareAppliesToAPIResponses(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+	assertSecurityHeaders(t, rec.Header())
+}
+
+func TestSecurityHeadersMiddlewareAppliesToFrontendResponses(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+	assertSecurityHeaders(t, rec.Header())
+}
+
+func TestSecurityHeadersMiddlewareDoesNotSetHSTSBehindLoopbackHTTP(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{}).ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Fatalf("Strict-Transport-Security = %q, want empty", got)
+	}
+}
+
+func assertSecurityHeaders(t *testing.T, header http.Header) {
+	t.Helper()
+
+	checks := map[string]string{
+		"X-Content-Type-Options":       "nosniff",
+		"X-Frame-Options":              "DENY",
+		"Referrer-Policy":              "no-referrer",
+		"Content-Security-Policy":      securityContentSecurityPolicy,
+		"Permissions-Policy":           securityPermissionsPolicy,
+		"Cross-Origin-Resource-Policy": "same-origin",
+	}
+	for name, want := range checks {
+		if got := header.Get(name); got != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+}

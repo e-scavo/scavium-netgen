@@ -15,6 +15,19 @@ This document describes the security posture of the faucet **as currently implem
 
 These are useful baseline protections against accidental exposure and slow or oversized requests.
 
+### HTTP security headers
+
+The Go handler applies conservative browser hardening headers to every response, including API JSON, health/readiness responses, admin responses, frontend assets, and fallback frontend routes:
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: no-referrer`
+- `Content-Security-Policy` with `default-src 'self'`, blocked object embedding, denied frame ancestors, self-only form submission, inline styles for the current static HTML, and explicit captcha script/frame allowances for hCaptcha and Turnstile
+- `Permissions-Policy` disabling camera, microphone, geolocation, payment, USB, and interest-cohort features
+- `Cross-Origin-Resource-Policy: same-origin`
+
+`Strict-Transport-Security` is intentionally not emitted by the Go process because the production topology terminates TLS at nginx and the backend normally listens on loopback HTTP. HSTS remains an operator-controlled reverse-proxy setting after HTTPS validation.
+
 ### Request tracing
 
 Every request carries an `X-Request-ID` response header. If the caller does not provide one, the server generates a random request ID. This makes log correlation and error tracing easier.
