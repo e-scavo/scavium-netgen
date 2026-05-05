@@ -346,8 +346,92 @@ func TestCORSPreflightForAllowedOrigin(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://wallet.example.test" {
 		t.Fatalf("access-control-allow-origin = %q", got)
 	}
-	if got := rec.Header().Get(requestIDHeader); got != "" {
-		t.Fatalf("request id header = %q, want empty for short-circuited preflight", got)
+	if got := rec.Header().Get(requestIDHeader); got == "" {
+		t.Fatal("request id header is empty")
+	}
+	if got := rec.Header().Get(correlationIDHeader); got == "" {
+		t.Fatal("correlation id header is empty")
+	}
+}
+
+func TestCORSPreflightPreservesIncomingRequestID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/claim", nil)
+	req.Header.Set("Origin", "https://wallet.example.test")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set(requestIDHeader, "preflight-request-id")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testReadService(),
+		CORSOrigins: []string{"https://wallet.example.test"},
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if got := rec.Header().Get(requestIDHeader); got != "preflight-request-id" {
+		t.Fatalf("request id header = %q, want preflight-request-id", got)
+	}
+	if got := rec.Header().Get(correlationIDHeader); got == "" {
+		t.Fatal("correlation id header is empty")
+	}
+}
+
+func TestRequestLoggingMiddlewareRedactsAddressStatusPath(t *testing.T) {
+	const addr = "0x1111111111111111111111111111111111111111"
+	var logs bytes.Buffer
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/address/"+addr+"/status", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testReadService(),
+		Logger:      observability.NewLogger(&logs),
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	logText := logs.String()
+	if strings.Contains(logText, addr) {
+		t.Fatalf("log contains full address: %s", logText)
+	}
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) == 0 {
+		t.Fatal("no log entries captured")
+	}
+	if got := entries[0]["path"]; got != "/api/v1/address/:address/status" {
+		t.Fatalf("path = %q, want /api/v1/address/:address/status", got)
+	}
+}
+
+func TestRequestLoggingMiddlewareRedactsFaucetEligibilityPath(t *testing.T) {
+	const addr = "0x1111111111111111111111111111111111111111"
+	var logs bytes.Buffer
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/faucet/address/"+addr+"/eligibility", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{
+		ReadService: testReadService(),
+		Logger:      observability.NewLogger(&logs),
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	logText := logs.String()
+	if strings.Contains(logText, addr) {
+		t.Fatalf("log contains full address: %s", logText)
+	}
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) == 0 {
+		t.Fatal("no log entries captured")
+	}
+	if got := entries[0]["path"]; got != "/api/v1/faucet/address/:address/eligibility" {
+		t.Fatalf("path = %q, want /api/v1/faucet/address/:address/eligibility", got)
 	}
 }
 
