@@ -126,12 +126,12 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux.HandleFunc("/api/v1/admin/dashboard", handleAdminDashboard(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/runtime", handleAdminRuntime(deps.AdminService, deps.ReadinessChecks, deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/queue", handleAdminQueue(deps.AdminService))
-	adminMux.HandleFunc("/api/v1/admin/queue/", handleAdminQueueDispatch(deps.AdminService, "/api/v1/admin/queue/"))
+	adminMux.HandleFunc("/api/v1/admin/queue/", handleAdminQueueDispatch(deps.AdminService, deps.Logger, "/api/v1/admin/queue/"))
 	adminMux.HandleFunc("/api/v1/admin/metrics", handleAdminMetrics(deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/claims", handleAdminListClaims(deps.AdminService))
-	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, "/api/v1/admin/claim/"))
-	adminMux.HandleFunc("/api/v1/admin/faucet/mode", handleAdminSetMode(deps.AdminService))
-	adminMux.HandleFunc("/api/v1/admin/blocklist", handleAdminBlocklist(deps.AdminService))
+	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, deps.Logger, "/api/v1/admin/claim/"))
+	adminMux.HandleFunc("/api/v1/admin/faucet/mode", handleAdminSetMode(deps.AdminService, deps.Logger))
+	adminMux.HandleFunc("/api/v1/admin/blocklist", handleAdminBlocklist(deps.AdminService, deps.Logger))
 	adminMux.HandleFunc("/api/v1/admin/audit", handleAdminAuditLog(deps.AdminService))
 	mux.Handle("/api/v1/admin/", admin.TokenAuthMiddleware(deps.AdminToken, adminMux))
 
@@ -658,6 +658,24 @@ func actorFromRequest(r *http.Request) string {
 	return addr
 }
 
+func logAdminAudit(logger *observability.Logger, r *http.Request, action, actor, target string, fields map[string]any) {
+	if logger == nil {
+		return
+	}
+	entry := map[string]any{
+		"request_id":     RequestID(r),
+		"correlation_id": CorrelationID(r),
+		"admin_action":   action,
+		"actor":          actor,
+		"target":         target,
+		"path":           redactAccessLogPath(r.URL.EscapedPath()),
+	}
+	for k, v := range fields {
+		entry[k] = v
+	}
+	logger.Info("admin audit", entry)
+}
+
 func handleAdminDashboard(svc admin.AdminService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -678,7 +696,7 @@ func handleAdminDashboard(svc admin.AdminService) http.HandlerFunc {
 // changing the existing claim-specific admin endpoints.
 //   - POST /api/v1/admin/queue/retry  {"id":"<claim_id>"}
 //   - POST /api/v1/admin/queue/cancel {"id":"<claim_id>"}
-func handleAdminQueueDispatch(svc admin.AdminService, prefix string) http.HandlerFunc {
+func handleAdminQueueDispatch(svc admin.AdminService, logger *observability.Logger, prefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		action := strings.Trim(strings.TrimPrefix(r.URL.Path, prefix), "/")
 		switch action {
@@ -712,12 +730,14 @@ func handleAdminQueueDispatch(svc admin.AdminService, prefix string) http.Handle
 				handleAdminServiceError(w, r, err)
 				return
 			}
+			logAdminAudit(logger, r, "queue_retry", actor, body.ID, map[string]any{"result": "success"})
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "retried", "id": body.ID})
 		case "cancel":
 			if err := svc.CancelClaim(r.Context(), body.ID, actor); err != nil {
 				handleAdminServiceError(w, r, err)
 				return
 			}
+			logAdminAudit(logger, r, "queue_cancel", actor, body.ID, map[string]any{"result": "success"})
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelled", "id": body.ID})
 		}
 	}
@@ -755,7 +775,7 @@ func handleAdminListClaims(svc admin.AdminService) http.HandlerFunc {
 //   - GET  {id}         → claim detail
 //   - POST {id}/retry   → retry claim
 //   - POST {id}/cancel  → cancel claim
-func handleAdminClaimDispatch(svc admin.AdminService, prefix string) http.HandlerFunc {
+func handleAdminClaimDispatch(svc admin.AdminService, logger *observability.Logger, prefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tail := strings.TrimPrefix(r.URL.Path, prefix)
 		parts := strings.SplitN(tail, "/", 2)
@@ -798,12 +818,14 @@ func handleAdminClaimDispatch(svc admin.AdminService, prefix string) http.Handle
 				handleAdminServiceError(w, r, err)
 				return
 			}
+			logAdminAudit(logger, r, "claim_retry", actor, id, map[string]any{"result": "success"})
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "retried"})
 		case "cancel":
 			if err := svc.CancelClaim(r.Context(), id, actor); err != nil {
 				handleAdminServiceError(w, r, err)
 				return
 			}
+			logAdminAudit(logger, r, "claim_cancel", actor, id, map[string]any{"result": "success"})
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 		default:
 			handleNotFound(w, r)
@@ -811,7 +833,7 @@ func handleAdminClaimDispatch(svc admin.AdminService, prefix string) http.Handle
 	}
 }
 
-func handleAdminSetMode(svc admin.AdminService) http.HandlerFunc {
+func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -832,11 +854,12 @@ func handleAdminSetMode(svc admin.AdminService) http.HandlerFunc {
 			WriteError(w, r, http.StatusInternalServerError, "set_mode_failed", "set mode failed", nil)
 			return
 		}
+		logAdminAudit(logger, r, "set_mode", actor, "faucet", map[string]any{"result": "success", "mode": body.Mode})
 		WriteJSON(w, http.StatusOK, map[string]string{"mode": body.Mode})
 	}
 }
 
-func handleAdminBlocklist(svc admin.AdminService) http.HandlerFunc {
+func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -862,6 +885,7 @@ func handleAdminBlocklist(svc admin.AdminService) http.HandlerFunc {
 				WriteError(w, r, http.StatusInternalServerError, "blocklist_add_failed", "blocklist add failed", nil)
 				return
 			}
+			logAdminAudit(logger, r, "blocklist_add", actor, "blocklist", map[string]any{"result": "success", "key_type": body.KeyType, "has_reason": body.Reason != ""})
 			WriteJSON(w, http.StatusCreated, map[string]string{"status": "blocked"})
 
 		case http.MethodDelete:
@@ -877,6 +901,7 @@ func handleAdminBlocklist(svc admin.AdminService) http.HandlerFunc {
 				WriteError(w, r, http.StatusInternalServerError, "blocklist_remove_failed", "blocklist remove failed", nil)
 				return
 			}
+			logAdminAudit(logger, r, "blocklist_remove", actor, "blocklist", map[string]any{"result": "success", "key_type": kt})
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "unblocked"})
 
 		default:

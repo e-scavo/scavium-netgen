@@ -1562,6 +1562,73 @@ func TestAdminAuditLog(t *testing.T) {
 	}
 }
 
+func TestAdminSensitiveActionsEmitStructuredAuditLog(t *testing.T) {
+	var logs bytes.Buffer
+	deps := testAdminDeps()
+	deps.Logger = observability.NewLogger(&logs)
+
+	rec := httptest.NewRecorder()
+	req := adminRequest(http.MethodPost, "/api/v1/admin/faucet/mode", map[string]string{"mode": "maintenance"})
+	req.Header.Set(requestIDHeader, "audit-request-id")
+	req.Header.Set(correlationIDHeader, "audit-correlation-id")
+	NewHandler(deps).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var found bool
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if !strings.Contains(line, `"message":"admin audit"`) {
+			continue
+		}
+		found = true
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("decode audit log: %v", err)
+		}
+		if entry["admin_action"] != "set_mode" {
+			t.Fatalf("admin_action = %v, want set_mode", entry["admin_action"])
+		}
+		if entry["request_id"] != "audit-request-id" {
+			t.Fatalf("request_id = %v, want audit-request-id", entry["request_id"])
+		}
+		if entry["correlation_id"] != "audit-correlation-id" {
+			t.Fatalf("correlation_id = %v, want audit-correlation-id", entry["correlation_id"])
+		}
+		if entry["mode"] != "maintenance" {
+			t.Fatalf("mode = %v, want maintenance", entry["mode"])
+		}
+	}
+	if !found {
+		t.Fatalf("expected admin audit log, got %q", logs.String())
+	}
+	if strings.Contains(logs.String(), testAdminToken) {
+		t.Fatal("admin token must not be logged")
+	}
+}
+
+func TestAdminBlocklistAuditLogDoesNotExposeValue(t *testing.T) {
+	var logs bytes.Buffer
+	deps := testAdminDeps()
+	deps.Logger = observability.NewLogger(&logs)
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/blocklist", map[string]string{
+		"key_type": "ip",
+		"value":    "203.0.113.9",
+		"reason":   "test reason",
+	}))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if !strings.Contains(logs.String(), `"admin_action":"blocklist_add"`) {
+		t.Fatalf("expected blocklist_add audit log, got %q", logs.String())
+	}
+	if strings.Contains(logs.String(), "203.0.113.9") || strings.Contains(logs.String(), "test reason") {
+		t.Fatalf("blocklist audit log must not expose value or reason, got %q", logs.String())
+	}
+}
+
 func TestAdminGetClaimNotFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	NewHandler(testAdminDeps()).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/claim/does-not-exist", nil))
