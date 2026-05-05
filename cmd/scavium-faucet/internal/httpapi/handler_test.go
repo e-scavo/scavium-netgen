@@ -2285,3 +2285,43 @@ func assertSecurityHeaders(t *testing.T, header http.Header) {
 		}
 	}
 }
+
+func TestRequestBodyLimitRejectsOversizedClaimByContentLength(t *testing.T) {
+	service := &recordingClaimService{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", strings.NewReader(`{"address":"0x0000000000000000000000000000000000000001"}`))
+	req.Header.Set(requestIDHeader, "oversized-request")
+	req.ContentLength = maxJSONRequestBodyBytes + 1
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: service}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if service.request.Address != (common.Address{}) {
+		t.Fatalf("claim service was called for oversized body")
+	}
+
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "request_body_too_large" {
+		t.Fatalf("code = %q, want request_body_too_large", body.Code)
+	}
+	if body.RequestID != "oversized-request" {
+		t.Fatalf("request id = %q, want oversized-request", body.RequestID)
+	}
+}
+
+func TestRequestBodyLimitDoesNotApplyToReadEndpoints(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.ContentLength = maxJSONRequestBodyBytes + 1
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+}

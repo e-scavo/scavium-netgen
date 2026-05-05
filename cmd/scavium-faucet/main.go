@@ -14,6 +14,15 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/observability"
 )
 
+const (
+	serverReadHeaderTimeout = 5 * time.Second
+	serverReadTimeout       = 10 * time.Second
+	serverWriteTimeout      = 10 * time.Second
+	serverIdleTimeout       = 60 * time.Second
+	serverShutdownTimeout   = 10 * time.Second
+	serverMaxHeaderBytes    = 1 << 20
+)
+
 func main() {
 	logger := observability.DefaultLogger()
 
@@ -31,10 +40,11 @@ func main() {
 	server := &http.Server{
 		Addr:              application.Config.BindAddr,
 		Handler:           application.Handler,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		MaxHeaderBytes:    serverMaxHeaderBytes,
 	}
 
 	errs := make(chan error, 1)
@@ -49,7 +59,7 @@ func main() {
 	select {
 	case err := <-errs:
 		if err != nil && err != http.ErrServerClosed {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 			defer cancel()
 			if closeErr := application.Close(ctx); closeErr != nil {
 				logger.Error("application close failed", map[string]any{"error": closeErr.Error()})
@@ -58,7 +68,7 @@ func main() {
 			os.Exit(1)
 		}
 	case <-stop:
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 		defer cancel()
 
 		if err := server.Shutdown(ctx); err != nil {
