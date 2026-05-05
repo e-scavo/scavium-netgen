@@ -110,12 +110,13 @@ func (s *PersistentReadService) Config(context.Context) (ConfigResponse, error) 
 		amountWei = s.cfg.AmountWei.String()
 	}
 
+	tokens := tokenResponses(s.cfg.NormalizedTokens())
 	return ConfigResponse{
 		NetworkName:         s.cfg.NetworkName,
 		ChainID:             s.cfg.ChainID,
 		Symbol:              s.cfg.Symbol,
 		AmountWei:           amountWei,
-		Tokens:              tokenResponses(s.cfg.NormalizedTokens()),
+		Tokens:              tokens,
 		CooldownSeconds:     s.cfg.CooldownSeconds,
 		ExplorerTxURL:       s.cfg.ExplorerTxURL,
 		DryRun:              s.cfg.DryRun,
@@ -124,6 +125,12 @@ func (s *PersistentReadService) Config(context.Context) (ConfigResponse, error) 
 		CaptchaProvider:     s.cfg.CaptchaProvider,
 		CaptchaSiteKey:      s.cfg.CaptchaSiteKey,
 	}, nil
+}
+
+// Tokens returns the public faucet token catalog. It intentionally exposes only
+// claim-safe metadata and never includes private keys or operational secrets.
+func (s *PersistentReadService) Tokens(context.Context) ([]TokenResponse, error) {
+	return tokenResponses(s.cfg.NormalizedTokens()), nil
 }
 
 func (s *PersistentReadService) AddressStatus(ctx context.Context, address common.Address) (AddressStatusResponse, error) {

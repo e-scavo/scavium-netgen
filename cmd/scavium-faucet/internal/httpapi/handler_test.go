@@ -676,6 +676,61 @@ func TestWalletConfigAlias(t *testing.T) {
 	}
 }
 
+func TestPublicTokens(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tokens", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Tokens []faucet.TokenResponse `json:"tokens"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Tokens) != 2 {
+		t.Fatalf("tokens = %d, want 2", len(body.Tokens))
+	}
+	if body.Tokens[0].ID != "native" || body.Tokens[0].Type != "native" {
+		t.Fatalf("native token = %#v", body.Tokens[0])
+	}
+	if body.Tokens[1].ID != "scav" || body.Tokens[1].Type != "erc20" {
+		t.Fatalf("erc20 token = %#v", body.Tokens[1])
+	}
+	if body.Tokens[1].Address != "0x1111111111111111111111111111111111111111" {
+		t.Fatalf("erc20 address = %q", body.Tokens[1].Address)
+	}
+}
+
+func TestWalletTokensAlias(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/faucet/tokens", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestPublicTokensRejectsUnsupportedMethod(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tokens", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testReadService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+	if got := rec.Header().Get("Allow"); got != http.MethodGet {
+		t.Fatalf("allow header = %q, want %q", got, http.MethodGet)
+	}
+}
+
 func TestAddressStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/address/0x52908400098527886E0F7030069857D2E4169EE7/status", nil)
 	rec := httptest.NewRecorder()
@@ -1213,6 +1268,25 @@ func testReadService() faucet.ReadService {
 	cfg.DryRun = false
 	cfg.CaptchaProvider = "turnstile"
 	cfg.CaptchaSiteKey = "1x00000000000000000000AA"
+	cfg.Tokens = []config.TokenConfig{
+		{
+			ID:             "native",
+			Symbol:         "tSCAV",
+			Type:           domain.TokenTypeNative,
+			Decimals:       18,
+			AmountWei:      big.NewInt(42),
+			DailyBudgetWei: big.NewInt(4200),
+		},
+		{
+			ID:             "scav",
+			Symbol:         "SCAV",
+			Type:           domain.TokenTypeERC20,
+			Address:        common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Decimals:       18,
+			AmountWei:      big.NewInt(100),
+			DailyBudgetWei: big.NewInt(10000),
+		},
+	}
 
 	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 	return faucet.NewInMemoryReadServiceWithClock(cfg, func() time.Time { return now })
@@ -1234,6 +1308,10 @@ func (s *recordingClaimService) Status(context.Context) (faucet.StatusResponse, 
 
 func (s *recordingClaimService) Config(context.Context) (faucet.ConfigResponse, error) {
 	return faucet.ConfigResponse{}, nil
+}
+
+func (s *recordingClaimService) Tokens(context.Context) ([]faucet.TokenResponse, error) {
+	return nil, nil
 }
 
 func (s *recordingClaimService) AddressStatus(context.Context, common.Address) (faucet.AddressStatusResponse, error) {
@@ -1266,6 +1344,10 @@ func (s *failingClaimService) Status(context.Context) (faucet.StatusResponse, er
 
 func (s *failingClaimService) Config(context.Context) (faucet.ConfigResponse, error) {
 	return faucet.ConfigResponse{}, nil
+}
+
+func (s *failingClaimService) Tokens(context.Context) ([]faucet.TokenResponse, error) {
+	return nil, nil
 }
 
 func (s *failingClaimService) AddressStatus(context.Context, common.Address) (faucet.AddressStatusResponse, error) {

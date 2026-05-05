@@ -96,8 +96,22 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 - SQLite migration `004_token_claim_metadata.sql` adds token fields without altering existing claim statuses or error codes
 
 ### 17.2 — Token Registration (testnet)
-- API endpoint
-- Basic validation
+**Status:** STARTED with 17.2.1. The faucet now exposes a public token catalog derived from the already-validated runtime token configuration, allowing the frontend and external clients to discover claimable assets without reading deployment secrets or depending on out-of-band configuration.
+
+#### 17.2.1 — Public Token Catalog Endpoint
+**Status:** IMPLEMENTED.
+
+Implemented:
+- `GET /api/v1/tokens`
+- `GET /api/v1/faucet/tokens`
+- Public response envelope: `{ "tokens": [...] }`
+- Native and ERC20 metadata exposure using the Phase 17.1 token model
+- GET-only method handling through the existing `method_not_allowed` error envelope
+- No changes to `POST /api/v1/claim`, claim statuses, error codes, idempotency semantics, queue behavior, or admin authentication
+
+Remaining for 17.2:
+- Testnet token registration guidance using real deployed token ids/addresses
+- Optional operator checklist for validating configured ERC20 balances and decimals before enabling frontend selection
 
 ### 17.3 — Frontend Token Selection
 - Token selector UI
