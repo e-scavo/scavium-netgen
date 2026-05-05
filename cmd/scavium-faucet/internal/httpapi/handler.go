@@ -304,14 +304,15 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 		}
 
 		claim, err := readService.CreateClaim(r.Context(), claimRequest)
+		observedTokenID := observedRequestTokenID(claimRequest.TokenID)
 		if err != nil {
-			metrics.IncClaimRejectedForToken(claimRequest.TokenID, claimErrorCode(err))
+			metrics.IncClaimRejectedForToken(observedTokenID, claimErrorCode(err))
 			logClaimRejected(logger, r, claimRequest, err)
 			handleCreateClaimError(w, r, err)
 			return
 		}
 
-		metrics.IncClaimAcceptedForToken(claim.TokenID)
+		metrics.IncClaimAcceptedForToken(observedTokenID)
 		logClaimAccepted(logger, r, claimRequest, claim)
 		WriteJSON(w, http.StatusAccepted, claim)
 	}
@@ -403,7 +404,20 @@ func observedRequestTokenID(tokenID string) string {
 	if trimmed == "" {
 		return "default"
 	}
-	return trimmed
+	return sanitizeTokenID(trimmed)
+}
+
+// sanitizeTokenID strips non-printable ASCII characters and truncates to 64 bytes
+// to prevent log contamination from adversarial token_id values.
+func sanitizeTokenID(id string) string {
+	const maxLen = 64
+	out := make([]byte, 0, len(id))
+	for i := 0; i < len(id) && len(out) < maxLen; i++ {
+		if id[i] >= 0x20 && id[i] < 0x7f {
+			out = append(out, id[i])
+		}
+	}
+	return string(out)
 }
 
 func claimErrorCode(err error) string {

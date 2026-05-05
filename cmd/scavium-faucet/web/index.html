@@ -184,7 +184,7 @@
       fetch("/api/v1/status")
         .then(function(r) { return r.json(); })
         .then(function(data) {
-          var mode = data.mode || "active";
+          var mode = data.status || "active";
           if (mode === "paused") {
             setPauseBanner("⚠ Faucet is currently paused. Please try again later.", "warn");
             document.getElementById("btn-send").disabled = true;
@@ -249,7 +249,7 @@
       var code = (data && data.code) || "";
       var msg  = (data && data.message) || "Request failed.";
       if (code === "cooldown_active") {
-        var secs = data && data.details && data.details.cooldown_remaining_seconds;
+        var secs = data && data.details && data.details.retry_after_seconds;
         setMsg("Cooldown active. Try again in " + (secs ? secs + "s" : "a while") + ".", "warn");
       } else if (code === "faucet_paused") {
         setMsg("Faucet is paused. Please try again later.", "warn");
