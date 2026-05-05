@@ -734,3 +734,77 @@ func TestPersistentReadServiceSetFaucetModeAffectsClaimsAndStatus(t *testing.T) 
 		t.Fatalf("create claim after active mode: %v", err)
 	}
 }
+
+func TestPersistentReadServiceRateLimitReasonDoesNotExposeKey(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.RateLimitAddrPerDay = 100
+	cfg.RateLimitIPPerHour = 1
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	service.SetAbuseSignalRecorder(store)
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:  persistentTestAddress(),
+		RemoteIP: "203.0.113.10",
+	}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:  persistentSecondTestAddress(),
+		RemoteIP: "203.0.113.10",
+	})
+	if err == nil {
+		t.Fatal("second claim returned nil error")
+	}
+	var claimErr *ClaimError
+	if !errors.As(err, &claimErr) {
+		t.Fatalf("error = %T, want ClaimError", err)
+	}
+	if claimErr.Reason != "IP rate limit exceeded" {
+		t.Fatalf("reason = %q, want sanitized IP rate limit reason", claimErr.Reason)
+	}
+	if claimErr.RetryAfterSeconds < 1 {
+		t.Fatalf("retry after = %d, want >= 1", claimErr.RetryAfterSeconds)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	last := signals[len(signals)-1]
+	if last.Kind != domain.AbuseSignalRateLimited {
+		t.Fatalf("last signal kind = %q, want %q", last.Kind, domain.AbuseSignalRateLimited)
+	}
+	if last.Reason != "IP rate limit exceeded" {
+		t.Fatalf("signal reason = %q, want sanitized reason", last.Reason)
+	}
+}
+
+func TestPersistentReadServiceRateLimitTrimsAndLowercasesFingerprint(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.RateLimitAddrPerDay = 100
+	cfg.RateLimitIPPerHour = 1
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:     persistentTestAddress(),
+		Fingerprint: " Browser-1 ",
+	}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:     persistentSecondTestAddress(),
+		Fingerprint: "browser-1",
+	})
+	if err == nil {
+		t.Fatal("second claim returned nil error")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("error = %v, want ErrRateLimited", err)
+	}
+}

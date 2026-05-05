@@ -467,17 +467,33 @@ func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request C
 	}
 
 	scope := s.tokenRateLimitScope(tokenID)
+	checks := []rateLimitCheck{
+		{key: rateLimitKey(scope, "ip", request.RemoteIP), limit: s.cfg.RateLimitIPPerHour, window: time.Hour, reason: "IP rate limit exceeded"},
+		{key: rateLimitKey(scope, "addr", request.Address.Hex()), limit: s.cfg.RateLimitAddrPerDay, window: 24 * time.Hour, reason: "address rate limit exceeded"},
+		{key: rateLimitKey(scope, "fp", request.Fingerprint), limit: s.cfg.RateLimitIPPerHour, window: time.Hour, reason: "fingerprint rate limit exceeded"},
+	}
 
-	if err := s.allowRateLimit(ctx, scope+"ip:"+strings.TrimSpace(request.RemoteIP), s.cfg.RateLimitIPPerHour, time.Hour, "IP rate limit exceeded"); err != nil {
-		return err
-	}
-	if err := s.allowRateLimit(ctx, scope+"addr:"+strings.ToLower(request.Address.Hex()), s.cfg.RateLimitAddrPerDay, 24*time.Hour, "address rate limit exceeded"); err != nil {
-		return err
-	}
-	if err := s.allowRateLimit(ctx, scope+"fp:"+strings.ToLower(strings.TrimSpace(request.Fingerprint)), s.cfg.RateLimitIPPerHour, time.Hour, "fingerprint rate limit exceeded"); err != nil {
-		return err
+	for _, check := range checks {
+		if err := s.allowRateLimit(ctx, check.key, check.limit, check.window, check.reason); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+type rateLimitCheck struct {
+	key    string
+	limit  int
+	window time.Duration
+	reason string
+}
+
+func rateLimitKey(scope, kind, value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	return scope + kind + ":" + value
 }
 
 func (s *PersistentReadService) tokenRateLimitScope(tokenID string) string {
@@ -506,7 +522,7 @@ func (s *PersistentReadService) recordAbuseSignal(ctx context.Context, request C
 }
 
 func (s *PersistentReadService) allowRateLimit(ctx context.Context, key string, limit int, window time.Duration, fallbackReason string) error {
-	if limit <= 0 || key == "" || strings.HasSuffix(key, ":") {
+	if limit <= 0 || key == "" {
 		return nil
 	}
 	decision, err := s.rateLimiter.Allow(ctx, key, limit, window)
@@ -517,8 +533,8 @@ func (s *PersistentReadService) allowRateLimit(ctx context.Context, key string, 
 		return nil
 	}
 	retryAfterSeconds := int(math.Ceil(decision.RetryAfter.Seconds()))
-	if decision.Reason != "" {
-		return claimRetryError(ErrRateLimited, decision.Reason, retryAfterSeconds)
+	if retryAfterSeconds < 1 {
+		retryAfterSeconds = 1
 	}
 	return claimRetryError(ErrRateLimited, fallbackReason, retryAfterSeconds)
 }

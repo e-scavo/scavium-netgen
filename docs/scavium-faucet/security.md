@@ -52,6 +52,8 @@ Claim creation enforces rate limits via the SQLite-backed `RateLimiter`:
 - per Ethereum address: `SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY` requests per day
 - per fingerprint: same hourly limit as IP when a `fingerprint` field is supplied in the claim body
 
+Phase 19.2 keeps the existing public `rate_limited` contract while tightening edge cases: rate-limit keys are built only from non-empty trimmed values, fingerprint keys are canonicalized case-insensitively, retry hints are floored to at least one second when a limiter denies a claim, and public/admin abuse reasons use generic scope text instead of exposing raw rate-limit keys.
+
 Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to your reverse-proxy address so that IP extraction uses the real client IP rather than `127.0.0.1`.
 
 ### Captcha verification

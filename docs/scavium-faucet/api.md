@@ -235,7 +235,7 @@ Current behavior:
 - `RemoteIP` is extracted from the request (trusting `X-Forwarded-For` / `X-Real-IP` when `SCAVIUM_FAUCET_TRUSTED_PROXY` is set)
 - `UserAgent` is forwarded from the request header
 - the address cooldown is checked against the SQLite store
-- persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided)
+- persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided); empty scope values are skipped, fingerprint values are trimmed/lowercased for keying, and denial reasons remain generic rather than exposing raw limiter keys
 - the daily budget is enforced for the selected token when token-scoped configuration is available; legacy deployments keep the existing faucet-wide budget behavior
 - captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; missing or failed verification returns `422 captcha_failed`
 - risk evaluation runs when a risk engine is configured
