@@ -10,6 +10,16 @@ import (
 // ClaimStatus represents the lifecycle state of a faucet claim.
 type ClaimStatus string
 
+// TokenType identifies how a faucet token is transferred on-chain.
+type TokenType string
+
+const (
+	// TokenTypeNative represents the chain native coin transferred as tx value.
+	TokenTypeNative TokenType = "native"
+	// TokenTypeERC20 represents an ERC20 token transferred via transfer(address,uint256).
+	TokenTypeERC20 TokenType = "erc20"
+)
+
 const (
 	// ClaimStatusReceived indicates the request was accepted by the API.
 	ClaimStatusReceived ClaimStatus = "received"
@@ -35,6 +45,11 @@ const (
 type Claim struct {
 	ID            string
 	Address       common.Address
+	TokenID       string
+	TokenSymbol   string
+	TokenType     TokenType
+	TokenAddress  common.Address
+	TokenDecimals int
 	AmountWei     *big.Int
 	Status        ClaimStatus
 	Transaction   *Transaction
@@ -47,15 +62,20 @@ type Claim struct {
 
 // Transaction stores chain-level data associated with a claim payout.
 type Transaction struct {
-	Hash        common.Hash
-	From        common.Address
-	To          common.Address
-	ValueWei    *big.Int
-	Status      ClaimStatus
-	BlockNumber uint64
-	GasUsed     uint64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	Hash          common.Hash
+	From          common.Address
+	To            common.Address
+	TokenID       string
+	TokenSymbol   string
+	TokenType     TokenType
+	TokenAddress  common.Address
+	TokenDecimals int
+	ValueWei      *big.Int
+	Status        ClaimStatus
+	BlockNumber   uint64
+	GasUsed       uint64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // AbuseSignalKind classifies production-safe signals captured during claim intake.
@@ -102,12 +122,34 @@ type AbuseSignalSummary struct {
 	Count int
 }
 
+// FaucetToken is a public-safe configured faucet asset descriptor.
+type FaucetToken struct {
+	ID          string
+	Symbol      string
+	Type        TokenType
+	Address     common.Address
+	Decimals    int
+	AmountWei   *big.Int
+	DailyBudget *big.Int
+}
+
+// IsValidTokenType reports whether tokenType is supported by the faucet sender.
+func IsValidTokenType(tokenType TokenType) bool {
+	switch tokenType {
+	case TokenTypeNative, TokenTypeERC20:
+		return true
+	default:
+		return false
+	}
+}
+
 // FaucetConfig is the read model exposed by faucet status/config endpoints.
 type FaucetConfig struct {
 	NetworkName     string
 	ChainID         int64
 	Symbol          string
 	AmountWei       *big.Int
+	Tokens          []FaucetToken
 	CooldownSeconds int
 	ExplorerTxURL   string
 	DryRun          bool

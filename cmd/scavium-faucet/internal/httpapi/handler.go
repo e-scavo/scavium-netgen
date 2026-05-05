@@ -47,6 +47,7 @@ type ErrorEnvelope struct {
 
 type claimRequest struct {
 	Address      string `json:"address"`
+	TokenID      string `json:"token_id"`
 	CaptchaToken string `json:"captcha_token"`
 	Fingerprint  string `json:"fingerprint"`
 }
@@ -273,6 +274,7 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 
 		claimRequest := faucet.ClaimRequest{
 			Address:        address,
+			TokenID:        strings.TrimSpace(body.TokenID),
 			IdempotencyKey: strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)),
 			RemoteIP:       iputil.RealIP(r, trustedProxy),
 			UserAgent:      r.UserAgent(),

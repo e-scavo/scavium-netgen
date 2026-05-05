@@ -30,6 +30,10 @@ type budgetedClaimStore interface {
 	CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, claim domain.Claim, idempotencyKey string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error)
 }
 
+type tokenBudgetedClaimStore interface {
+	CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error)
+}
+
 // PersistentReadService implements ReadService using durable stores.
 type PersistentReadService struct {
 	cfg             config.Config
@@ -111,6 +115,7 @@ func (s *PersistentReadService) Config(context.Context) (ConfigResponse, error) 
 		ChainID:             s.cfg.ChainID,
 		Symbol:              s.cfg.Symbol,
 		AmountWei:           amountWei,
+		Tokens:              tokenResponses(s.cfg.NormalizedTokens()),
 		CooldownSeconds:     s.cfg.CooldownSeconds,
 		ExplorerTxURL:       s.cfg.ExplorerTxURL,
 		DryRun:              s.cfg.DryRun,
@@ -193,13 +198,22 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, fmt.Errorf("generate claim id: %w", err)
 	}
 	now := s.now()
+	token, ok := s.cfg.TokenByID(request.TokenID)
+	if !ok {
+		return ClaimResponse{}, claimError(ErrClaimRejected, "unsupported token")
+	}
 	claim := domain.Claim{
-		ID:        id,
-		Address:   request.Address,
-		AmountWei: copyBigInt(s.cfg.AmountWei),
-		Status:    domain.ClaimStatusReceived,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:            id,
+		Address:       request.Address,
+		TokenID:       token.ID,
+		TokenSymbol:   token.Symbol,
+		TokenType:     token.Type,
+		TokenAddress:  token.Address,
+		TokenDecimals: token.Decimals,
+		AmountWei:     copyBigInt(token.AmountWei),
+		Status:        domain.ClaimStatusReceived,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	created, err := s.createClaim(ctx, claim, idempotencyKey)
@@ -243,8 +257,18 @@ func (s *PersistentReadService) GetClaim(ctx context.Context, id string) (ClaimR
 }
 
 func (s *PersistentReadService) createClaim(ctx context.Context, claim domain.Claim, idempotencyKey string) (domain.Claim, error) {
-	if budget := s.cfg.DailyBudgetWei; budget != nil && budget.Sign() > 0 {
+	if budget := s.dailyBudgetForClaim(claim); budget != nil && budget.Sign() > 0 {
 		dayStart, dayEnd := utcDayWindow(s.now())
+		if store, ok := s.claims.(tokenBudgetedClaimStore); ok {
+			created, used, exceeded, err := store.CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx, claim, idempotencyKey, claim.TokenID, dayStart, dayEnd, copyBigInt(budget), dailyBudgetStatuses())
+			if err != nil {
+				return domain.Claim{}, err
+			}
+			if exceeded {
+				return domain.Claim{}, dailyBudgetExceededError(used, copyBigInt(claim.AmountWei), copyBigInt(budget))
+			}
+			return created, nil
+		}
 		if store, ok := s.claims.(budgetedClaimStore); ok {
 			created, used, exceeded, err := store.CreateClaimWithIdempotencyAndDailyBudget(ctx, claim, idempotencyKey, dayStart, dayEnd, copyBigInt(budget), dailyBudgetStatuses())
 			if err != nil {
@@ -269,7 +293,7 @@ func (s *PersistentReadService) createClaim(ctx context.Context, claim domain.Cl
 }
 
 func (s *PersistentReadService) enforceDailyBudget(ctx context.Context) error {
-	budget := s.cfg.DailyBudgetWei
+	budget := s.dailyBudgetForTokenID("")
 	if budget == nil || budget.Sign() <= 0 {
 		return nil
 	}
@@ -283,12 +307,29 @@ func (s *PersistentReadService) enforceDailyBudget(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	claimAmount := copyBigInt(s.cfg.AmountWei)
+	claimAmount := copyBigInt(s.cfg.DefaultToken().AmountWei)
 	nextTotal := new(big.Int).Add(used, claimAmount)
 	if nextTotal.Cmp(budget) > 0 {
 		return dailyBudgetExceededError(used, claimAmount, budget)
 	}
 	return nil
+}
+
+func (s *PersistentReadService) dailyBudgetForClaim(claim domain.Claim) *big.Int {
+	if claim.TokenID != "" {
+		if token, ok := s.cfg.TokenByID(claim.TokenID); ok {
+			return copyBigIntOrNil(token.DailyBudgetWei)
+		}
+	}
+	return s.dailyBudgetForTokenID("")
+}
+
+func (s *PersistentReadService) dailyBudgetForTokenID(tokenID string) *big.Int {
+	token, ok := s.cfg.TokenByID(tokenID)
+	if ok && token.DailyBudgetWei != nil {
+		return copyBigInt(token.DailyBudgetWei)
+	}
+	return copyBigIntOrNil(s.cfg.DailyBudgetWei)
 }
 
 func dailyBudgetExceededError(used, claimAmount, budget *big.Int) error {
@@ -446,6 +487,13 @@ func configuredStatus(mode string) domain.FaucetStatus {
 func copyBigInt(v *big.Int) *big.Int {
 	if v == nil {
 		return big.NewInt(0)
+	}
+	return new(big.Int).Set(v)
+}
+
+func copyBigIntOrNil(v *big.Int) *big.Int {
+	if v == nil {
+		return nil
 	}
 	return new(big.Int).Set(v)
 }
