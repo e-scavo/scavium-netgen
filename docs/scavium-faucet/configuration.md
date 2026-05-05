@@ -78,8 +78,9 @@ SCAVIUM_FAUCET_EXPLORER_TX_URL=https://explorer.example.test/tx/{txHash}
 SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db
 SCAVIUM_FAUCET_AMOUNT_WEI=1000000000000000000
 # Optional multi-token configuration; omit to keep single native-token behavior.
+# Keep the JSON value on one line in systemd environment files.
 # SCAVIUM_FAUCET_DEFAULT_TOKEN_ID=native
-# SCAVIUM_FAUCET_TOKENS_JSON=[{"id":"native","symbol":"SCAV","type":"native","decimals":18,"amount_wei":"1000000000000000000"},{"id":"scat","symbol":"SCAT","type":"erc20","address":"0x0000000000000000000000000000000000000000","decimals":18,"amount_wei":"1000000000000000000"}]
+# SCAVIUM_FAUCET_TOKENS_JSON=[{"id":"native","symbol":"SCAV","type":"native","decimals":18,"amount_wei":"1000000000000000000","daily_budget_wei":"100000000000000000000"},{"id":"scat","symbol":"SCAT","type":"erc20","address":"0x1111111111111111111111111111111111111111","decimals":18,"amount_wei":"25000000000000000000","daily_budget_wei":"2500000000000000000000"}]
 SCAVIUM_FAUCET_COOLDOWN_SECONDS=86400
 SCAVIUM_FAUCET_RATE_LIMIT_IP_PER_HOUR=10
 SCAVIUM_FAUCET_RATE_LIMIT_ADDR_PER_DAY=3
@@ -106,6 +107,35 @@ SCAVIUM_FAUCET_ADMIN_TOKEN=replace-me
 # Optional override; omitted uses the provider default verify endpoint.
 # SCAVIUM_FAUCET_CAPTCHA_VERIFY_URL=https://challenges.cloudflare.com/turnstile/v0/siteverify
 ```
+
+
+## Testnet token registration
+
+Phase 17 token registration is intentionally configuration-driven. To add an ERC20 testnet asset, deploy or identify the ERC20 contract on the same chain configured by `SCAVIUM_FAUCET_CHAIN_ID`, then add an entry to `SCAVIUM_FAUCET_TOKENS_JSON` and restart the service. The public token catalog can be verified after restart with `GET /api/v1/tokens` or `GET /api/v1/faucet/tokens`.
+
+Minimum ERC20 entry:
+
+```json
+{
+  "id": "scat",
+  "symbol": "SCAT",
+  "type": "erc20",
+  "address": "0x1111111111111111111111111111111111111111",
+  "decimals": 18,
+  "amount_wei": "25000000000000000000"
+}
+```
+
+Operational requirements before enabling an ERC20 token:
+
+- token id is stable, unique, and matches the `token_id` clients will submit
+- contract address exists on the configured testnet chain
+- decimals match the deployed ERC20 contract
+- amount and budget values are expressed in base units, not display units
+- faucet signer has enough native SCAV for gas and enough ERC20 balance for claims
+- `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` points to a configured token
+
+See [token-registration.md](token-registration.md) for the full testnet operator checklist and validation commands.
 
 ## Practical notes
 

@@ -25,12 +25,13 @@ The service is production-ready for the current testnet scope, including validat
 | [deployment-rollback.md](deployment-rollback.md) | Rollback procedure for release symlinks and service recovery |
 | [runbook.md](runbook.md) | Build, run, health checks, and operational caveats |
 | [security.md](security.md) | Current security properties, gaps, and deployment guidance |
+| [token-registration.md](token-registration.md) | Phase 17.2 testnet token registration guide for native and ERC20 faucet assets |
 
 ## Current implementation snapshot
 
 - The binary loads environment config and listens on `127.0.0.1:18080` by default.
 - Non-API paths serve the embedded frontend; `/api/*` paths return JSON.
-- Public endpoints support health, readiness, status, config, claim creation, claim lookup, address eligibility, and version.
+- Public endpoints support health, readiness, status, config, token catalog discovery, claim creation, claim lookup, address eligibility, and version.
 - Claim data and abuse-signal observations are persisted in SQLite (WAL mode). Restarting the process does not lose queued or in-flight claims or recorded claim-intake signals.
 - The background worker processes the SQLite claim queue and dispatches the configured sender (dry-run or real).
 - Readiness checks are real probes against the database and queue; RPC and wallet checks activate when not in dry-run mode.
@@ -82,3 +83,10 @@ The closure is documentary only: no runtime code, public API contract, deploymen
 Phase 16 is closed as an incremental observability layer over the production faucet. Request correlation, safe structured logging, runtime counters, admin-protected metrics, and enriched health/readiness responses are now part of the active operational baseline.
 
 The closure remains contract-preserving: no public claim response shape changed, no backend exposure model changed, no database migration was added, and no external metrics service was required. Phase 17 can now extend token support with enough runtime visibility to diagnose claim intake, rejection classes, readiness degradation, and deployed build identity.
+
+
+## Phase 17.2.2 — Testnet Token Registration Guidance
+
+Phase 17.2.2 documents the production-safe operator path for registering SCAVIUM testnet faucet assets through configuration. The new guide keeps Phase 17.1 and 17.2.1 behavior intact: token ids remain config-driven, `POST /api/v1/claim` remains backward-compatible, and public catalog discovery continues through `GET /api/v1/tokens` and `GET /api/v1/faucet/tokens`.
+
+The guidance covers native-only operation, native + ERC20 testnet registration, faucet wallet balance checks, decimals and base-unit conversion, post-restart catalog validation, and explicit `token_id` claim testing. No runtime admin mutation, frontend selector, database-backed token catalog, or public contract change is introduced in this subphase.

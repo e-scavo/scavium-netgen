@@ -116,7 +116,7 @@ Alias routes for public faucet configuration.
 ### `GET /api/v1/tokens`
 ### `GET /api/v1/faucet/tokens`
 
-Alias routes for the public faucet token catalog. These endpoints expose only claim-safe token metadata derived from runtime configuration. They do not expose private keys, admin tokens, RPC credentials, or any operational secret.
+Alias routes for the public faucet token catalog. These endpoints expose only claim-safe token metadata derived from runtime configuration. They do not expose private keys, admin tokens, RPC credentials, or any operational secret. They are the canonical post-restart validation point after registering testnet tokens through `SCAVIUM_FAUCET_TOKENS_JSON`.
 
 ```json
 {
@@ -141,6 +141,15 @@ Alias routes for the public faucet token catalog. These endpoints expose only cl
   ]
 }
 ```
+
+
+
+Operational registration note:
+
+- Token ids are configured server-side and discovered through this endpoint.
+- Existing clients can continue omitting `token_id`; the configured default token is used.
+- ERC20 clients should first read this catalog and then submit the selected `id` as `token_id` to `POST /api/v1/claim`.
+- See [token-registration.md](token-registration.md) for the testnet registration checklist.
 
 Only `GET` is allowed. Unsupported methods return `405` with the existing `method_not_allowed` envelope.
 
