@@ -2325,3 +2325,62 @@ func TestRequestBodyLimitDoesNotApplyToReadEndpoints(t *testing.T) {
 		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
+
+func TestCreateClaimRejectsUnsupportedContentType(t *testing.T) {
+	service := &recordingClaimService{}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", strings.NewReader(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: service}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusUnsupportedMediaType)
+	}
+	if service.request.Address != (common.Address{}) {
+		t.Fatalf("claim service was called for unsupported content type")
+	}
+
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "unsupported_media_type" {
+		t.Fatalf("code = %q, want unsupported_media_type", body.Code)
+	}
+}
+
+func TestCreateClaimAllowsJSONContentTypeWithParameters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", strings.NewReader(`{
+		"address":"0x52908400098527886E0F7030069857D2E4169EE7"
+	}`))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testClaimService()}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+}
+
+func TestAdminJSONWriteRejectsUnsupportedContentType(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/faucet/mode", strings.NewReader(`{"mode":"paused"}`))
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+
+	NewHandler(testAdminDeps()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusUnsupportedMediaType)
+	}
+
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "unsupported_media_type" {
+		t.Fatalf("code = %q, want unsupported_media_type", body.Code)
+	}
+}

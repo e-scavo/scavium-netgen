@@ -17,6 +17,7 @@ GO := go
 GOFMT := gofmt
 TARGET_OS ?= linux
 TARGET_ARCH ?= amd64
+TEST_TIMEOUT ?= 300s
 
 .PHONY: all build clean fmt tidy test release release-linux-amd64 help
 
@@ -28,7 +29,7 @@ help:
 	@echo "  make clean              Remove ./bin and ./dist"
 	@echo "  make fmt                Run gofmt on all Go files"
 	@echo "  make tidy               Run go mod tidy"
-	@echo "  make test               Run go test ./..."
+	@echo "  make test               Run go test ./... with TEST_TIMEOUT (default 300s)"
 	@echo "  make release            Build release binaries into ./dist/<os>-<arch>"
 	@echo "  make release-linux-amd64"
 	@echo ""
@@ -55,7 +56,7 @@ tidy:
 
 test:
 	@echo "==> Running tests"
-	$(GO) test ./...
+	$(GO) test ./... -timeout $(TEST_TIMEOUT)
 
 clean:
 	@echo "==> Cleaning build artifacts"

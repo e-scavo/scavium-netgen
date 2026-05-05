@@ -20,6 +20,7 @@ const (
 	serverWriteTimeout      = 10 * time.Second
 	serverIdleTimeout       = 60 * time.Second
 	serverShutdownTimeout   = 10 * time.Second
+	appShutdownTimeout      = 10 * time.Second
 	serverMaxHeaderBytes    = 1 << 20
 )
 
@@ -60,20 +61,23 @@ func main() {
 	select {
 	case err := <-errs:
 		if err != nil && err != http.ErrServerClosed {
-			ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
-			defer cancel()
-			if closeErr := application.Close(ctx); closeErr != nil {
+			appCtx, appCancel := context.WithTimeout(context.Background(), appShutdownTimeout)
+			defer appCancel()
+			if closeErr := application.Close(appCtx); closeErr != nil {
 				logger.Error("application close failed", map[string]any{"error": closeErr.Error()})
 			}
 			logger.Error("server failed", map[string]any{"error": err.Error()})
 			os.Exit(1)
 		}
 	case <-stop:
-		ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
-		defer cancel()
+		httpCtx, httpCancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
+		defer httpCancel()
 
-		shutdownErr := server.Shutdown(ctx)
-		closeErr := application.Close(ctx)
+		shutdownErr := server.Shutdown(httpCtx)
+
+		appCtx, appCancel := context.WithTimeout(context.Background(), appShutdownTimeout)
+		defer appCancel()
+		closeErr := application.Close(appCtx)
 		if shutdownErr != nil {
 			logger.Error("server shutdown failed", map[string]any{"error": shutdownErr.Error()})
 		}

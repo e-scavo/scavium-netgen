@@ -120,6 +120,7 @@ The following limitations remain in the current binary:
 
 - **CORS wildcard not supported.** `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` does not accept `*`. Operators must supply an explicit origin list. This is by design to prevent overly permissive cross-origin access.
 - **`Retry-After` header not set.** Rate-limited and budget-exceeded responses (429) include `details.retry_after_seconds` in the JSON body but do not set the standard `Retry-After` HTTP response header.
+- **Legacy empty content type accepted.** JSON write endpoints reject explicit non-JSON content types, but an absent `Content-Type` remains accepted for backward compatibility with existing clients.
 - **Single-node daily budget.** `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced atomically within a single SQLite instance. Multi-replica deployments sharing one database are not a supported configuration; each instance would enforce the budget independently.
 
 ## Phase 19 production-hardening closure

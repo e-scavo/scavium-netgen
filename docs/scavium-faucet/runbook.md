@@ -108,7 +108,7 @@ In dry-run mode the background worker picks up the queued claim and advances its
 - `/api/v1/admin/metrics` reports process-local runtime counters and resets on process restart.
 - In dry-run mode no on-chain transactions are submitted; the `DryRunSender` simulates success.
 - The watcher (on-chain confirmation poller) is only active when `DRY_RUN=false`.
-- On `SIGINT` or `SIGTERM`, the process stops accepting HTTP traffic, cancels background runtime work, waits up to the configured shutdown window, and closes owned resources once.
+- On `SIGINT` or `SIGTERM`, the process stops accepting HTTP traffic with a bounded HTTP shutdown context, then uses a separate bounded application-cleanup context to cancel background runtime work and close owned resources once.
 
 ## CORS, daily budget, metrics, and logging
 
@@ -446,5 +446,7 @@ Use this checklist after deploying the Phase 19 hardened binary behind nginx:
 4. Submit an oversized write request and confirm it is rejected as `413 request_body_too_large` without changing the claim contract for normal requests.
 5. Re-run `go test ./...` before merge and after applying the partial ZIP.
 6. Exercise service restart or `systemctl restart scavium-faucet` and confirm graceful shutdown logs complete without duplicate resource-close errors.
+7. Confirm the public nginx response contains one copy of each security header after the template's `proxy_hide_header` directives are active.
+8. Submit a JSON write request with `Content-Type: text/plain` and confirm it is rejected as `415 unsupported_media_type`.
 
-Phase 19.5 closes the documentation/audit pass only. If validation finds a runtime defect, fix it in a follow-up implementation phase rather than widening this closure pass.
+Phase 19.6 closes the post-audit fixes for duplicate proxy headers, shutdown budgets, JSON content-type enforcement, and test timeout hygiene. If validation finds another runtime defect, fix it in a later implementation phase rather than widening this closure pass.

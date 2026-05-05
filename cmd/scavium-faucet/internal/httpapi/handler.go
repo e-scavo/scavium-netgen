@@ -292,6 +292,10 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 		// The wallet may include an `X-Signature` header containing a signed challenge
 		// to prove control of the address before the claim is enqueued.
 
+		if !requireJSONContentType(w, r) {
+			return
+		}
+
 		var body claimRequest
 		if err := decodeJSONBody(w, r, &body); err != nil {
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
@@ -730,6 +734,10 @@ func handleAdminQueueDispatch(svc admin.AdminService, logger *observability.Logg
 			return
 		}
 
+		if !requireJSONContentType(w, r) {
+			return
+		}
+
 		var body admin.QueueControlRequest
 		if err := decodeJSONBody(w, r, &body); err != nil {
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
@@ -853,6 +861,10 @@ func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger, tr
 			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
+		if !requireJSONContentType(w, r) {
+			return
+		}
+
 		var body admin.SetModeRequest
 		if err := decodeJSONBody(w, r, &body); err != nil {
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
@@ -889,6 +901,10 @@ func handleAdminBlocklist(svc admin.AdminService, logger *observability.Logger, 
 			WriteJSON(w, http.StatusOK, map[string]any{"entries": entries})
 
 		case http.MethodPost:
+			if !requireJSONContentType(w, r) {
+				return
+			}
+
 			var body admin.BlocklistAddRequest
 			if err := decodeJSONBody(w, r, &body); err != nil {
 				WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)

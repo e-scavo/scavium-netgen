@@ -113,7 +113,7 @@ Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`, `004_to
 
 - The server listens on `SCAVIUM_FAUCET_BIND_ADDR` and defaults to `127.0.0.1:18080`.
 - Timeouts and header caps are set in `main.go`: `ReadHeaderTimeout=5s`, `ReadTimeout=10s`, `WriteTimeout=10s`, `IdleTimeout=60s`, `MaxHeaderBytes=1 MiB`.
-- SIGINT and SIGTERM trigger graceful shutdown with a `10s` timeout.
+- SIGINT and SIGTERM trigger graceful shutdown with separate `10s` HTTP-drain and `10s` application-cleanup timeouts.
 
 
 ## Phase 15.3 — Progressive Abuse Enforcement
@@ -201,7 +201,7 @@ This is intentionally a defensive hardening pass only; bind address, routing, re
 
 The faucet keeps the same HTTP surface and deployment topology while making shutdown behavior more deterministic:
 
-1. `main.go` stops signal notification after registration and, on `SIGINT`/`SIGTERM`, attempts both HTTP server shutdown and application cleanup before deciding whether to exit with failure.
+1. `main.go` stops signal notification after registration and, on `SIGINT`/`SIGTERM`, attempts HTTP server shutdown and application cleanup with separate bounded contexts before deciding whether to exit with failure.
 2. `App.Close` is idempotent. Repeated close calls reuse the first close result and do not re-run database or chain-client closers.
 3. Background worker and watcher cancellation still flows through the application context, preserving the existing persistent queue and SQLite-backed claim behavior.
 
@@ -217,6 +217,15 @@ The closed Phase 19 production-hardening baseline is:
 1. **HTTP security headers:** conservative browser headers are emitted by the Go handler for public API, admin API, health/readiness, frontend assets, and frontend fallback routes. HSTS remains intentionally owned by the TLS-terminating reverse proxy.
 2. **Rate-limit edge-case hardening:** limiter keys are canonicalized from non-empty scopes, fingerprint scope is normalized, retry hints remain bounded, and public/admin abuse reasons avoid exposing raw limiter keys.
 3. **Performance safety:** the server has explicit timeout/header caps and write JSON request bodies are limited to `1 MiB` both before routing when `Content-Length` is oversized and during decoding for streaming or unknown-length requests.
-4. **Operational resilience:** `SIGINT`/`SIGTERM` use bounded graceful shutdown, and application cleanup is idempotent so owned runtime resources are closed once.
+4. **Operational resilience:** `SIGINT`/`SIGTERM` use bounded graceful shutdown with separate HTTP and application cleanup budgets, and application cleanup is idempotent so owned runtime resources are closed once.
 
 Phase 19 remains intentionally conservative. It does not introduce RPC failover, wallet refills, new dependencies, durable admin audit persistence, SQLite-backed admin claim control, or runtime configuration mutation. Those are deferred to later phases so the production binary remains deployable and backward compatible after hardening.
+
+## Phase 19.6 — Post-Audit Hardening Fixes
+
+Phase 19.6 applies the post-audit closure fixes without changing the route topology or storage model:
+
+1. The nginx deployment template hides upstream security-header copies before emitting the proxy-owned values, preventing duplicate security headers at the public edge.
+2. `main.go` separates the HTTP shutdown timeout from the application cleanup timeout so a slow HTTP drain cannot consume the entire cleanup budget.
+3. JSON write endpoints reject explicit non-`application/json` content types while preserving backward compatibility for clients that omit `Content-Type`.
+4. `make test` uses a default `300s` timeout to avoid false CI failures from SQLite-backed integration tests.
