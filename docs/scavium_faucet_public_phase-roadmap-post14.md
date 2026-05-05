@@ -166,6 +166,21 @@ Deferred:
 - Runtime admin token mutation
 - Database-backed token catalogs
 
+#### 17.3.3 — Token-Aware Observability Alignment
+**Status:** IMPLEMENTED.
+
+Implemented:
+- Admin runtime metrics now include token-scoped claim counters under `tokens`
+- Accepted claim metrics are counted against the resolved token id returned by the claim service
+- Rejected claim metrics are counted against the supplied token id, or the `default` bucket when the request omitted `token_id`
+- Invalid token attempts remain under the existing aggregate `claims.invalid_token` counter and are also visible in the token-scoped bucket
+- Claim-flow logs include production-safe token context without exposing wallet addresses, raw fingerprints, captcha tokens, request bodies, secrets, or idempotency-key values
+
+Deferred:
+- Durable per-token analytics
+- External metrics backends
+- Admin UI visualizations
+
 ---
 
 ## Phase 18 — Admin & Control Plane

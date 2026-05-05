@@ -305,13 +305,13 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 
 		claim, err := readService.CreateClaim(r.Context(), claimRequest)
 		if err != nil {
-			metrics.IncClaimRejected(claimErrorCode(err))
+			metrics.IncClaimRejectedForToken(claimRequest.TokenID, claimErrorCode(err))
 			logClaimRejected(logger, r, claimRequest, err)
 			handleCreateClaimError(w, r, err)
 			return
 		}
 
-		metrics.IncClaimAccepted()
+		metrics.IncClaimAcceptedForToken(claim.TokenID)
 		logClaimAccepted(logger, r, claimRequest, claim)
 		WriteJSON(w, http.StatusAccepted, claim)
 	}
@@ -362,6 +362,7 @@ func logClaimAccepted(logger *observability.Logger, r *http.Request, request fau
 	fields["claim_id"] = claim.ID
 	fields["token_id"] = claim.TokenID
 	fields["claim_status"] = string(claim.Status)
+	fields["event"] = "token_claim_accepted"
 	logger.Info("claim accepted", fields)
 }
 
@@ -371,9 +372,7 @@ func logClaimRejected(logger *observability.Logger, r *http.Request, request fau
 	}
 	fields := claimLogFields(r, request)
 	fields["error_code"] = claimErrorCode(err)
-	if strings.TrimSpace(request.TokenID) != "" {
-		fields["token_id"] = strings.TrimSpace(request.TokenID)
-	}
+	fields["token_id"] = observedRequestTokenID(request.TokenID)
 	if details := claimErrorDetails(err); details != nil {
 		if reason, ok := details["reason"].(string); ok && reason != "" {
 			fields["reason"] = reason
@@ -397,6 +396,14 @@ func claimLogFields(r *http.Request, request faucet.ClaimRequest) map[string]any
 		"has_fingerprint":       request.Fingerprint != "",
 		"captcha_token_present": request.CaptchaToken != "",
 	}
+}
+
+func observedRequestTokenID(tokenID string) string {
+	trimmed := strings.TrimSpace(tokenID)
+	if trimmed == "" {
+		return "default"
+	}
+	return trimmed
 }
 
 func claimErrorCode(err error) string {

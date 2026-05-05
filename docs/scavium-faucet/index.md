@@ -110,3 +110,9 @@ The subphase also records invalid token attempts as durable abuse signals and ex
 Phase 17.3.2 narrows claim-intake enforcement scopes so that cooldown and rate-limit decisions are evaluated against the selected token rather than only against the wallet/IP/fingerprint globally. This keeps the Phase 17.3.1 validation boundary intact while preventing one configured faucet asset from unintentionally consuming another asset's eligibility window.
 
 The change remains backward-compatible with the existing claim API. Clients still submit the same optional `token_id`; omitted token ids resolve to the configured default token before enforcement. Daily budgets were already token-aware from the Phase 17 foundation and remain unchanged.
+
+## Phase 17.3.3 — Token-Aware Observability Alignment
+
+Phase 17.3.3 aligns the Phase 16 observability surface with the token-aware claim pipeline introduced across Phase 17. Claims now increment token-scoped runtime counters in addition to the existing aggregate metrics, allowing operators to distinguish default-token traffic, ERC20 token traffic, rate-limit pressure, daily-budget pressure, and invalid token attempts from `/api/v1/admin/metrics` without introducing an external metrics dependency.
+
+The logging posture remains production-safe. Accepted claim-flow logs include the resolved `token_id` and a token claim event marker, while rejected claim-flow logs include only the supplied token scope or the `default` bucket for omitted `token_id`. Addresses, raw fingerprints, captcha tokens, request bodies, secrets, and idempotency-key values remain excluded from structured logs.
