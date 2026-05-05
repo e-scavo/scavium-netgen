@@ -96,7 +96,7 @@ The SCAVIUM Faucet is fully deployed and production-ready on testnet:
 - SQLite migration `004_token_claim_metadata.sql` adds token fields without altering existing claim statuses or error codes
 
 ### 17.2 — Token Registration (testnet)
-**Status:** STARTED with 17.2.1. The faucet now exposes a public token catalog derived from the already-validated runtime token configuration, allowing the frontend and external clients to discover claimable assets without reading deployment secrets or depending on out-of-band configuration.
+**Status:** ADVANCED through 17.2.2. The faucet exposes a public token catalog derived from validated runtime token configuration, and operators now have a documented testnet registration path for native and ERC20 assets without introducing runtime mutation or changing the claim contract.
 
 #### 17.2.1 — Public Token Catalog Endpoint
 **Status:** IMPLEMENTED.
@@ -109,9 +109,23 @@ Implemented:
 - GET-only method handling through the existing `method_not_allowed` error envelope
 - No changes to `POST /api/v1/claim`, claim statuses, error codes, idempotency semantics, queue behavior, or admin authentication
 
+
+#### 17.2.2 — Testnet Token Registration Guidance
+**Status:** IMPLEMENTED.
+
+Implemented:
+- New `docs/scavium-faucet/token-registration.md` guide for native-only and native + ERC20 testnet registration
+- One-line `SCAVIUM_FAUCET_TOKENS_JSON` examples suitable for systemd environment files
+- Operator checklist covering ERC20 contract address, decimals, faucet signer gas, ERC20 balances, stable token ids, and default-token validation
+- Post-restart validation using `GET /api/v1/tokens` and `GET /api/v1/faucet/tokens`
+- Explicit claim test example using `token_id` and `Idempotency-Key`
+- Troubleshooting matrix for configuration, startup, catalog, and ERC20 send failures
+
+No runtime code, schema, endpoint, or claim contract change was introduced in 17.2.2.
+
 Remaining for 17.2:
-- Testnet token registration guidance using real deployed token ids/addresses
-- Optional operator checklist for validating configured ERC20 balances and decimals before enabling frontend selection
+- Optional live testnet deployment notes once real deployed token ids/addresses are selected
+- Optional final 17.2 closure after operator validation on the VPS
 
 ### 17.3 — Frontend Token Selection
 - Token selector UI
