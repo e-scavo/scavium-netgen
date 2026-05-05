@@ -29,12 +29,22 @@ func RequestLoggingMiddleware(next http.Handler, logger *observability.Logger, t
 			"request_id":     RequestID(r),
 			"correlation_id": CorrelationID(r),
 			"method":         r.Method,
-			"path":           r.URL.EscapedPath(),
+			"path":           redactAccessLogPath(r.URL.EscapedPath()),
 			"status":         status,
 			"duration":       time.Since(start).String(),
 			"remote_ip":      iputil.RealIP(r, trustedProxy),
 		})
 	})
+}
+
+func redactAccessLogPath(path string) string {
+	if _, ok := pathMiddle(path, "/api/v1/address/", "/status"); ok {
+		return "/api/v1/address/:address/status"
+	}
+	if _, ok := pathMiddle(path, "/api/v1/faucet/address/", "/eligibility"); ok {
+		return "/api/v1/faucet/address/:address/eligibility"
+	}
+	return path
 }
 
 type statusRecorder struct {
