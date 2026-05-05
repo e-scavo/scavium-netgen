@@ -128,3 +128,9 @@ The closure is documentary only and preserves the production contract. `POST /ap
 Phase 17.4.1 starts the frontend side of token support by consuming the public token catalog already exposed by Phase 17.2. The embedded HTML/JS faucet UI now loads `GET /api/v1/tokens`, renders a token selector from claim-safe metadata, and submits the selected token id as optional `token_id` in `POST /api/v1/claim`.
 
 The implementation remains backward-compatible and failure-safe: if the token catalog cannot be loaded, the selector stays hidden and the claim payload continues to omit `token_id`, preserving the existing default-token path. No admin mutation, database-backed catalog, new dependency, or public claim contract change is introduced.
+
+## Phase 17.4.2 — Token Selector UX Hardening
+
+Phase 17.4.2 hardens the browser-side token selector introduced in Phase 17.4.1 without changing any backend contract. The frontend now exposes explicit catalog loading and fallback states, keeps default-token claim behavior visible when catalog discovery fails, and renders selected-token details using claim-safe metadata from `GET /api/v1/tokens`.
+
+The UI remains dependency-free and CSP-compatible. Token labels and detail cards use only public metadata (`id`, `symbol`, `type`, `decimals`, and `amount_wei`), while the claim payload continues to send only the optional selected `token_id`. No token icons, balance checks, runtime admin mutation, or database-backed catalog behavior is introduced.

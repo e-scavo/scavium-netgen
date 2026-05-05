@@ -345,3 +345,15 @@ Troubleshooting notes:
 - If the selector is hidden, validate `/api/v1/tokens` first.
 - If a token is missing, review `SCAVIUM_FAUCET_TOKENS_JSON` and restart the service.
 - If a selected token claim returns `claim_rejected` with `invalid_token`, refresh the page and re-check the server-side catalog.
+
+## Frontend token selector UX checks (Phase 17.4.2)
+
+After deploying the frontend bundle, validate token selector behavior from a browser session:
+
+1. Load the faucet page and confirm the token row reports catalog loading before the catalog response is rendered.
+2. Confirm configured tokens appear in the selector using public catalog metadata only.
+3. Select a non-default token and confirm the detail cards show amount, type, and decimals.
+4. Temporarily block or fail `/api/v1/tokens` in a local/browser test and confirm the UI reports catalog fallback while preserving default-token claim behavior.
+5. Submit a claim and confirm the browser request includes `token_id` only when a catalog token is selected.
+
+The fallback state is intentional: catalog discovery failure must not make legacy/default-token claims impossible. Operators should still inspect `/api/v1/tokens`, `/api/v1/status`, and `/api/v1/admin/metrics` when diagnosing token selector issues.

@@ -511,3 +511,9 @@ Phase 17.4.1 frontend consumption note:
 - Browser clients submit the selected catalog `id` as optional `token_id` in `POST /api/v1/claim`.
 - If catalog discovery fails, the frontend omits `token_id` and preserves the configured default-token path.
 - The catalog remains read-only and claim-safe; it does not expose private keys, admin tokens, RPC credentials, request bodies, fingerprints, or idempotency keys.
+
+Phase 17.4.2 frontend UX note:
+
+- The selector now presents explicit loading and fallback states for catalog discovery.
+- Selected-token details are rendered from claim-safe catalog metadata only.
+- Fallback UX remains contract-preserving: when no catalog token is selected, the browser omits `token_id` and the backend resolves the configured default token.
