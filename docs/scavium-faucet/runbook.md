@@ -314,3 +314,16 @@ Quick check:
 curl -sS -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
   http://127.0.0.1:18080/api/v1/admin/metrics
 ```
+
+
+## Claim validation closure operations (Phase 17.3 closed)
+
+Phase 17.3 is the active operator baseline for token-aware claim intake. When validating a deployment after token configuration changes, operators should check the full chain rather than only the catalog response:
+
+1. Confirm configured tokens appear in `GET /api/v1/tokens` or `GET /api/v1/faucet/tokens`.
+2. Submit a claim without `token_id` and confirm it follows the configured default-token path.
+3. Submit a claim with a configured non-default token and confirm enforcement is scoped to that token.
+4. Submit a claim with an unknown `token_id` and confirm it is rejected through `claim_rejected` with `invalid_token` as the reason.
+5. Review `/api/v1/admin/metrics` and confirm aggregate and token-scoped counters move as expected.
+
+This closure does not introduce runtime token mutation, frontend token selection, database-backed catalogs, durable per-token analytics, or external metrics. Those remain later-phase concerns.

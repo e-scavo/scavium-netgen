@@ -181,6 +181,26 @@ Deferred:
 - External metrics backends
 - Admin UI visualizations
 
+#### 17.3.close — Claim Validation Hardening Closure
+**Status:** CLOSED.
+
+Implemented:
+- Closed Phase 17.3 as the token-aware claim validation hardening layer
+- Consolidated strict token validation, token-scoped enforcement, and token-aware observability as the active claim-intake baseline
+- Confirmed that omitted `token_id` remains backward-compatible through the configured default token path
+- Confirmed that invalid token selections continue to reuse the existing `claim_rejected` public envelope with `invalid_token` reason
+- Kept deferred items out of scope: frontend token selector UI, runtime admin token mutation, database-backed token catalogs, durable per-token analytics, and external metrics backends
+
+Outcome:
+- Phase 18 can start from a stable token-aware pipeline suitable for admin/control-plane capabilities without revisiting the public claim contract.
+
+Deferred:
+- Frontend token selector UI
+- Runtime admin token mutation
+- Database-backed token catalogs
+- Durable per-token analytics
+- External metrics backends
+
 ---
 
 ## Phase 18 — Admin & Control Plane
