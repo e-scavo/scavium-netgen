@@ -164,3 +164,10 @@ The configuration loader still validates token definitions at startup, and Phase
 As of Phase 17.3.2, claim-time cooldown and rate-limit checks are scoped by the resolved token id. The configured token catalog therefore defines not only transfer metadata, but also the unit of eligibility for cooldown and rate limiting. Keep token ids stable once public clients depend on them; changing a token id creates a new enforcement scope.
 
 Daily budgets remain configured per token through each token's `daily_budget_wei` value, with the legacy `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` still serving the native/default compatibility path when token-specific budget metadata is not present.
+
+
+## Phase 17.3 closure note
+
+Phase 17.3 closes the configuration-driven token claim path without adding runtime configuration mutation. Token ids loaded from `SCAVIUM_FAUCET_TOKENS_JSON` now define transfer metadata, claim validation eligibility, cooldown/rate-limit scope, daily budget scope, and token-scoped runtime metrics. Keep token ids stable once published because changing an id creates a new claim/enforcement/metrics scope.
+
+Changing token definitions still requires editing environment configuration and restarting the service. Hot reload, admin-driven token mutation, database-backed catalogs, and durable per-token analytics remain deferred.

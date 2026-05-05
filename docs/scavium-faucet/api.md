@@ -496,3 +496,11 @@ Returns recent in-memory audit entries.
 ## Token-aware claim enforcement
 
 `POST /api/v1/claim` continues to accept an optional `token_id`. After token validation, cooldown and rate-limit enforcement are applied to the resolved token scope. The public response and error contracts do not change: invalid tokens still use `claim_rejected` with reason `invalid_token`, cooldown uses `cooldown_active`, rate limiting uses `rate_limited`, and daily budget exhaustion uses `daily_budget_exceeded`.
+
+
+Phase 17.3 closure note:
+
+- Token validation, token-scoped enforcement, and token-scoped metrics are now part of the stable claim-intake baseline.
+- `token_id` remains optional; omitted values continue to use the configured default token.
+- Invalid token selections continue to use the existing `claim_rejected` public contract with `invalid_token` as the details reason.
+- No response body shape, public endpoint path, admin authentication model, or claim error envelope is changed by the closure.
