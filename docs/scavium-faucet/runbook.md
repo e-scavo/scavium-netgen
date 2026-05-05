@@ -369,3 +369,16 @@ After deploying the frontend bundle, validate the post-claim result panel with b
 5. Confirm no address masking, token metadata, or explorer-copy changes alter the backend claim response contract.
 
 This is a presentation-layer alignment only. API validation, token-scoped enforcement, and token-aware metrics remain owned by the backend layers closed in Phase 17.3.
+
+## Frontend token-aware closure checks (Phase 17.4 closed)
+
+Phase 17.4 is the active operator baseline for the embedded token-aware faucet UI. After deploying a frontend bundle or changing token configuration, operators should validate the complete browser-facing flow rather than only the backend catalog:
+
+1. Confirm `GET /api/v1/tokens` returns the expected configured tokens after service restart.
+2. Open the public faucet page and confirm the selector loads from the catalog.
+3. Confirm catalog failure preserves default-token claim behavior by omitting `token_id`.
+4. Submit a selected-token claim and confirm the request includes only the selected public token id.
+5. Confirm accepted and polled claim results render token-aware summaries while preserving the raw claim details.
+
+This closure does not introduce runtime token administration, token icons, balance display, database-backed catalogs, or any new frontend configuration source.
+

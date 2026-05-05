@@ -238,6 +238,19 @@ Deferred:
 - Runtime admin token mutation
 - Database-backed token catalogs
 
+
+#### 17.4.close — Token-Aware Frontend Closure
+**Status:** CLOSED.
+
+Closed scope:
+- Closed Phase 17.4 as the browser-facing token selection and claim-result alignment layer
+- Confirmed public catalog consumption, selector fallback behavior, selected-token metadata rendering, and token-aware claim-result summaries as the active frontend baseline
+- Preserved the existing claim API contract: `token_id` remains optional and default-token fallback remains intact
+- Confirmed no backend runtime token mutation, database-backed catalog, token icons, or new frontend dependency is introduced by this closure
+
+Phase 18 can now introduce admin control features on top of a stable token-aware backend and frontend surface.
+
+
 ---
 
 ## Phase 18 — Admin & Control Plane
@@ -280,3 +293,4 @@ Remaining phases focus on:
 - Feature expansion
 - Admin/control-plane maturation
 - Mainnet readiness
+

@@ -185,3 +185,8 @@ Operational implications:
 - Phase 17.4.2 additionally renders loading/fallback states and selected-token detail cards from that same metadata.
 - Phase 17.4.3 additionally formats claim result summaries from returned claim metadata (`token_id`, `token_symbol`, `token_type`, `token_decimals`, and `amount_wei`) without introducing a frontend-specific configuration source.
 - The frontend does not require a separate token-selector or claim-result configuration flag; catalog availability and claim responses remain the source of truth.
+
+## Phase 17.4 closure note
+
+Phase 17.4 closes the frontend-facing token selection behavior without adding frontend-specific configuration. The embedded UI continues to derive selector options from `GET /api/v1/tokens`, which is generated from `SCAVIUM_FAUCET_TOKENS_JSON` and the configured default token. Token configuration changes therefore still require environment updates and service restart before the browser-visible catalog and claim-result presentation reflect the new metadata.
+

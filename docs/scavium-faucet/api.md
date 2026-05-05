@@ -524,3 +524,11 @@ Phase 17.4.3 claim-result UX note:
 - The frontend now formats returned `amount_wei` with token decimals when token metadata is available, while preserving the raw base-unit value in the result details.
 - Explorer links continue to use the configured explorer URL and `tx_hash`; only the user-facing copy is clarified as a transaction action.
 - Native/default claims remain supported even when `token_id`, `token_symbol`, or `token_type` are absent from older/default responses.
+
+Phase 17.4 closure note:
+
+- The embedded frontend now treats `GET /api/v1/tokens` as the stable browser-side catalog source.
+- `token_id` remains optional in `POST /api/v1/claim`; omitted values continue to use the configured default token.
+- Catalog discovery failures are handled on the client by omitting `token_id`, not by changing the claim API contract.
+- Claim-result rendering may display token-aware summaries, but the API response shape and existing error envelope remain unchanged.
+
