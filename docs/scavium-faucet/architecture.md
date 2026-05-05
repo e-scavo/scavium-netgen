@@ -86,7 +86,7 @@ The live binary persists state in SQLite (WAL journal mode, 5 s busy timeout):
 - queue metadata (`next_attempt_at`, retry count) used by the background worker
 - abuse signals with kind, address, remote IP, fingerprint, user-agent, claim ID, reason, score, and timestamp
 
-Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`) run automatically on startup inside `sqlite.Open()`. Restarting the process does not lose queued or in-flight claims or recorded abuse observations.
+Migrations (`001_initial.sql`, `002_queue.sql`, `003_abuse_signals.sql`, `004_token_claim_metadata.sql`) run automatically on startup inside `sqlite.Open()`. Restarting the process does not lose queued or in-flight claims or recorded abuse observations.
 
 ## Package roles
 
@@ -206,3 +206,17 @@ The faucet keeps the same HTTP surface and deployment topology while making shut
 3. Background worker and watcher cancellation still flows through the application context, preserving the existing persistent queue and SQLite-backed claim behavior.
 
 This pass does not change routes, response envelopes, admin scope, SQLite schema, worker semantics, or runtime configuration names.
+
+
+## Phase 19.5 — Final Production Hardening Audit / Documentation Closure
+
+Phase 19.5 is a documentation and audit-closure pass over the production-hardening work completed in 19.1 through 19.4. No HTTP route, response envelope, configuration variable, SQLite schema, worker behavior, or admin runtime scope is changed by this closure.
+
+The closed Phase 19 production-hardening baseline is:
+
+1. **HTTP security headers:** conservative browser headers are emitted by the Go handler for public API, admin API, health/readiness, frontend assets, and frontend fallback routes. HSTS remains intentionally owned by the TLS-terminating reverse proxy.
+2. **Rate-limit edge-case hardening:** limiter keys are canonicalized from non-empty scopes, fingerprint scope is normalized, retry hints remain bounded, and public/admin abuse reasons avoid exposing raw limiter keys.
+3. **Performance safety:** the server has explicit timeout/header caps and write JSON request bodies are limited to `1 MiB` both before routing when `Content-Length` is oversized and during decoding for streaming or unknown-length requests.
+4. **Operational resilience:** `SIGINT`/`SIGTERM` use bounded graceful shutdown, and application cleanup is idempotent so owned runtime resources are closed once.
+
+Phase 19 remains intentionally conservative. It does not introduce RPC failover, wallet refills, new dependencies, durable admin audit persistence, SQLite-backed admin claim control, or runtime configuration mutation. Those are deferred to later phases so the production binary remains deployable and backward compatible after hardening.

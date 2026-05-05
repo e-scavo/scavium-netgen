@@ -434,3 +434,17 @@ Operational scope notes:
 - Admin list limits for queue, claims, and audit are capped at `500` even if a larger `limit` query value is supplied.
 
 This closure does not introduce dynamic budget editing, CSV exports, allowlist/campaign management, SQLite-backed admin claim control, durable audit persistence, or runtime token mutation. Those remain explicitly deferred from the Phase 18 production-safe admin-control baseline.
+
+
+## Phase 19 hardening validation checklist
+
+Use this checklist after deploying the Phase 19 hardened binary behind nginx:
+
+1. Confirm the backend still binds to the intended loopback address, usually `127.0.0.1:18080`.
+2. Confirm nginx terminates TLS and owns `Strict-Transport-Security` policy; the Go backend intentionally does not emit HSTS.
+3. Verify representative responses include the backend security headers: `/health`, `/ready`, `/api/v1/config`, `/api/v1/tokens`, `/api/v1/admin/runtime` when admin auth is enabled, and `/`.
+4. Submit an oversized write request and confirm it is rejected as `413 request_body_too_large` without changing the claim contract for normal requests.
+5. Re-run `go test ./...` before merge and after applying the partial ZIP.
+6. Exercise service restart or `systemctl restart scavium-faucet` and confirm graceful shutdown logs complete without duplicate resource-close errors.
+
+Phase 19.5 closes the documentation/audit pass only. If validation finds a runtime defect, fix it in a follow-up implementation phase rather than widening this closure pass.

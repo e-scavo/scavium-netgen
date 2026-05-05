@@ -164,3 +164,12 @@ Phase 18 is closed as the first production-safe admin control plane over the pub
 The closed Phase 18 baseline includes admin-protected runtime metrics, composite runtime visibility, queue summary visibility, queue retry/cancel endpoints, claim retry/cancel endpoints, blocklist management, faucet mode control, and audit trail behavior. The Phase 18.7 post-audit pass corrected the critical runtime gap by ensuring admin mode changes affect the live faucet service instead of only an isolated admin summary. It also aligned audit actor attribution with trusted-proxy real IP extraction and capped admin queue listing size.
 
 The closure deliberately defers broader control-plane expansion. Dynamic budget/config editing, database-backed admin catalogs, CSV/export workflows, role-based admin accounts, 2FA, allowlist/campaign controls, and durable audit persistence remain later-phase work. Phase 19 can now focus on production hardening from a verified admin-control baseline.
+
+## Phase 19.close — Production Hardening Closure
+
+Phase 19 is closed as a conservative production-hardening pass over the already-stable faucet runtime. The implemented scope covers backend security headers, defensive rate-limit edge cases, explicit request/header/body/time limits, and deterministic graceful shutdown.
+
+The closure preserves the public contract for `POST /api/v1/claim`, error envelopes, request/correlation headers, token-aware behavior, admin bearer authentication, and the intentionally in-memory admin queue/claim/blocklist surfaces from Phase 18. It does not introduce new external dependencies, schema migrations, RPC failover, hot-wallet refill automation, SQLite-backed admin controls, dynamic config mutation, or durable admin audit persistence.
+
+With Phase 19.5, the documentation is aligned to the current production-hardening scope and Phase 20 can start from a deployable, backward-compatible baseline.
+

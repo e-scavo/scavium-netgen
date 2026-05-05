@@ -122,6 +122,19 @@ The following limitations remain in the current binary:
 - **`Retry-After` header not set.** Rate-limited and budget-exceeded responses (429) include `details.retry_after_seconds` in the JSON body but do not set the standard `Retry-After` HTTP response header.
 - **Single-node daily budget.** `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced atomically within a single SQLite instance. Multi-replica deployments sharing one database are not a supported configuration; each instance would enforce the budget independently.
 
+## Phase 19 production-hardening closure
+
+Phase 19 closes the production-hardening pass without expanding the public API or admin control plane. The active security baseline now combines the earlier captcha, abuse-signal, progressive-enforcement, rate-limit, daily-budget, CORS, admin-auth, and trusted-proxy controls with the 19.x hardening additions:
+
+- browser hardening headers are applied uniformly by the backend handler;
+- JSON write bodies are capped at `1 MiB`, including streaming bodies without a declared length;
+- oversized declared write bodies are rejected before route handling;
+- server read/write/idle/header limits are explicit in `main.go`;
+- rate-limit scope construction is defensive against empty or inconsistently-cased inputs;
+- graceful shutdown and application cleanup are bounded and idempotent.
+
+The closure deliberately does not claim protections that remain outside this binary: HSTS is still configured at nginx, RPC/network exposure is controlled by firewall and deployment topology, and the Phase 18 admin queue/claim/blocklist views remain in-memory until a later SQLite-backed admin implementation is introduced.
+
 ## Deployment guidance
 
 ### Reverse proxy and network placement

@@ -337,19 +337,30 @@ Deferred beyond Phase 18:
 
 ---
 
-## Phase 19 — Production Readiness (Mainnet)
+## Phase 19 — Production Hardening (Closed)
 
-### 19.1 — RPC Failover
-- Multiple node support
+Phase 19 was completed as a conservative production-hardening pass rather than a mainnet feature-expansion phase. The closed scope intentionally preserves the public API, admin contracts, SQLite schema, deployment topology, and dependency footprint.
 
-### 19.2 — Wallet Hardening
-- Hot/cold separation
+### 19.1 — HTTP Security Headers / Hardening Pass
+- Backend security headers are applied uniformly across API, admin, health/readiness, and frontend responses.
+- HSTS remains owned by the TLS-terminating reverse proxy.
 
-### 19.3 — Funding Automation
-- Auto refill logic
+### 19.2 — Rate-Limit Refinements / Abuse Edge Cases
+- Rate-limit scopes are built from non-empty canonical values.
+- Fingerprint scope is normalized.
+- Public/admin abuse reasons avoid exposing raw limiter keys.
 
-### 19.4 — Security Hardening
-- Final production posture
+### 19.3 — Performance Safety / Request Body & Timeout Hardening
+- Server timeouts and header caps are explicit.
+- JSON write request bodies are limited to `1 MiB` before routing when possible and during decode for streaming bodies.
+
+### 19.4 — Operational Resilience / Graceful Shutdown & Runtime Safety
+- `SIGINT`/`SIGTERM` use bounded graceful shutdown.
+- Application cleanup is idempotent and closes owned resources once.
+
+### 19.5 — Final Production Hardening Audit / Documentation Closure
+- Documentation is aligned with the actual implemented Phase 19 scope.
+- Deferred items remain explicit: RPC failover, hot/cold-wallet automation, funding refill workflows, durable admin audit persistence, and SQLite-backed admin claim/control surfaces.
 
 ---
 
