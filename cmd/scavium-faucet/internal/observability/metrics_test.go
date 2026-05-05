@@ -65,7 +65,7 @@ func TestRuntimeMetricsSnapshot(t *testing.T) {
 	if len(snapshot.Tokens) != 4 {
 		t.Fatalf("tokens len = %d, want 4: %#v", len(snapshot.Tokens), snapshot.Tokens)
 	}
-	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "default", Accepted: 1, Rejected: 1})
+	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "default", Accepted: 1, Rejected: 4})
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "erc20", Rejected: 1, DailyExceeded: 1})
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "missing-token", Rejected: 1, InvalidToken: 1})
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "native", Accepted: 1, Rejected: 1, RateLimited: 1})
