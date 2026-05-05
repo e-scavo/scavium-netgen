@@ -145,6 +145,43 @@ func TestListAndLastClaimsByAddress(t *testing.T) {
 	}
 }
 
+func TestLastClaimByAddressAndToken(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	nativeClaim := testClaim("claim_native")
+	nativeClaim.TokenID = "native"
+	nativeClaim.CreatedAt = time.Date(2026, 5, 3, 10, 0, 0, 0, time.UTC)
+	nativeClaim.UpdatedAt = nativeClaim.CreatedAt
+	otherTokenClaim := testClaim("claim_scat")
+	otherTokenClaim.TokenID = "scat"
+	otherTokenClaim.CreatedAt = time.Date(2026, 5, 3, 11, 0, 0, 0, time.UTC)
+	otherTokenClaim.UpdatedAt = otherTokenClaim.CreatedAt
+
+	if _, err := store.CreateClaim(context.Background(), nativeClaim); err != nil {
+		t.Fatalf("create native claim: %v", err)
+	}
+	if _, err := store.CreateClaim(context.Background(), otherTokenClaim); err != nil {
+		t.Fatalf("create other token claim: %v", err)
+	}
+
+	lastNative, err := store.LastClaimByAddressAndToken(context.Background(), nativeClaim.Address, "native")
+	if err != nil {
+		t.Fatalf("last native claim: %v", err)
+	}
+	if lastNative.ID != nativeClaim.ID {
+		t.Fatalf("last native claim = %q, want %q", lastNative.ID, nativeClaim.ID)
+	}
+
+	lastOther, err := store.LastClaimByAddressAndToken(context.Background(), otherTokenClaim.Address, "scat")
+	if err != nil {
+		t.Fatalf("last other token claim: %v", err)
+	}
+	if lastOther.ID != otherTokenClaim.ID {
+		t.Fatalf("last other token claim = %q, want %q", lastOther.ID, otherTokenClaim.ID)
+	}
+}
+
 func TestDailyClaimAmountWeiUsesUTCWindowAndIncludedStatuses(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()

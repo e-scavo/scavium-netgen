@@ -150,6 +150,17 @@ Implemented:
 - Runtime metrics now expose `claims.invalid_token` without changing the existing admin metrics envelope
 - Existing backward compatibility is preserved: omitted `token_id` still resolves to the configured default token
 
+
+#### 17.3.2 — Token-Aware Abuse & Rate-Limit Scope
+**Status:** IMPLEMENTED.
+
+Implemented:
+- Cooldown checks during claim creation now resolve against the selected token id
+- Rate-limit keys for IP, wallet address, and fingerprint now include the resolved token scope
+- Distinct configured tokens no longer consume each other's cooldown/rate-limit windows
+- Daily budget enforcement remains token-aware through the existing token budget path
+- Public claim contracts and error envelopes remain unchanged
+
 Deferred:
 - Frontend token selector UI
 - Runtime admin token mutation

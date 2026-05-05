@@ -565,6 +565,23 @@ func (s *Store) ListClaimsByAddress(ctx context.Context, address common.Address,
 	return claims, nil
 }
 
+// LastClaimByAddressAndToken returns the latest persisted claim for one address and token_id.
+func (s *Store) LastClaimByAddressAndToken(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		FROM requests
+		WHERE address = ? AND token_id = ?
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, address.Hex(), strings.TrimSpace(tokenID))
+
+	claim, err := scanClaim(row)
+	if err != nil {
+		return domain.Claim{}, err
+	}
+	return claim, nil
+}
+
 func (s *Store) LastClaimByAddress(ctx context.Context, address common.Address) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at

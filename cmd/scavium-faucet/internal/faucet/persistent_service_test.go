@@ -566,6 +566,63 @@ func newPersistentTestService(t *testing.T, store *sqlite.Store, cfg config.Conf
 	return service
 }
 
+func TestPersistentReadServiceCooldownIsTokenScoped(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.CooldownSeconds = 600
+	cfg.Tokens = []config.TokenConfig{
+		{ID: "native", Symbol: "SCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42)},
+		{ID: "scat", Symbol: "SCAT", Type: domain.TokenTypeERC20, Address: common.HexToAddress("0x485Fcfa4F1e1b574F0d333452d9722DddbC5fBe9"), Decimals: 18, AmountWei: big.NewInt(7)},
+	}
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), TokenID: "native"}); err != nil {
+		t.Fatalf("create native claim: %v", err)
+	}
+
+	laterService := newPersistentTestService(t, store, cfg, persistentTestNow().Add(time.Minute))
+	if _, err := laterService.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), TokenID: "scat"}); err != nil {
+		t.Fatalf("create different-token claim within native cooldown: %v", err)
+	}
+
+	_, err := laterService.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), TokenID: "native"})
+	if err == nil {
+		t.Fatal("second native claim returned nil error")
+	}
+	if !errors.Is(err, ErrCooldownActive) {
+		t.Fatalf("error = %v, want ErrCooldownActive", err)
+	}
+}
+
+func TestPersistentReadServiceRateLimitIsTokenScoped(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.RateLimitIPPerHour = 1
+	cfg.RateLimitAddrPerDay = 100
+	cfg.Tokens = []config.TokenConfig{
+		{ID: "native", Symbol: "SCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42)},
+		{ID: "scat", Symbol: "SCAT", Type: domain.TokenTypeERC20, Address: common.HexToAddress("0x485Fcfa4F1e1b574F0d333452d9722DddbC5fBe9"), Decimals: 18, AmountWei: big.NewInt(7)},
+	}
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), TokenID: "native", RemoteIP: "203.0.113.10"}); err != nil {
+		t.Fatalf("create native claim: %v", err)
+	}
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentSecondTestAddress(), TokenID: "scat", RemoteIP: "203.0.113.10"}); err != nil {
+		t.Fatalf("create different-token claim with same IP: %v", err)
+	}
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{Address: common.HexToAddress("0xde709f2102306220921060314715629080e2fb77"), TokenID: "native", RemoteIP: "203.0.113.10"})
+	if err == nil {
+		t.Fatal("second native claim returned nil error")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("error = %v, want ErrRateLimited", err)
+	}
+}
+
 func persistentTestConfig() config.Config {
 	cfg := testConfig()
 	cfg.FaucetMode = "active"

@@ -104,3 +104,9 @@ The closure is documentary only and preserves the production contract: existing 
 Phase 17.3.1 hardens the token-aware claim path introduced in Phase 17.1 and operationalized in Phase 17.2. Claims now resolve and validate `token_id` before captcha, risk, cooldown, rate-limit, daily-budget, persistence, and queue processing. Unknown or non-executable token selections are rejected through the existing `claim_rejected` contract with `invalid_token` as the reason, preserving the public error envelope while making token validation explicit.
 
 The subphase also records invalid token attempts as durable abuse signals and exposes `claims.invalid_token` in admin metrics. Backward compatibility is unchanged: clients that omit `token_id` continue to receive the configured default token.
+
+## Phase 17.3.2 — Token-Aware Abuse & Rate-Limit Scope
+
+Phase 17.3.2 narrows claim-intake enforcement scopes so that cooldown and rate-limit decisions are evaluated against the selected token rather than only against the wallet/IP/fingerprint globally. This keeps the Phase 17.3.1 validation boundary intact while preventing one configured faucet asset from unintentionally consuming another asset's eligibility window.
+
+The change remains backward-compatible with the existing claim API. Clients still submit the same optional `token_id`; omitted token ids resolve to the configured default token before enforcement. Daily budgets were already token-aware from the Phase 17 foundation and remain unchanged.
