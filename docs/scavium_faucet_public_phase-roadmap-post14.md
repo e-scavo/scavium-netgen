@@ -364,6 +364,76 @@ Phase 19 was completed as a conservative production-hardening pass rather than a
 
 ---
 
+## Phase 20 — SQLite-backed Admin State and Enforcement (Planned)
+
+Phase 20 is the next required roadmap phase after Phase 19 closure. Its purpose is to remove the largest documented Phase 18 limitation: queue visibility/control, claim lookup/control, blocklist management, and admin audit history currently operate through the production-safe in-memory admin service. Phase 20 must move those operator surfaces onto SQLite-backed production state while preserving public contracts and existing admin endpoint shapes.
+
+Required closure scope:
+
+- SQLite-backed admin claim listing and detail lookup.
+- SQLite-backed queue snapshots derived from persisted claim/queue state.
+- SQLite-backed retry and cancel control for eligible persisted claims.
+- Durable admin audit history.
+- Persisted blocklist storage and claim-path enforcement for IP, address, and fingerprint.
+- Documentation that distinguishes durable Phase 20 behavior from still-deferred dynamic config, campaigns, runtime token mutation, and multi-instance control.
+
+---
+
+## Phase 21 — Operator Observability and Alerting Baseline (Planned)
+
+Phase 21 must turn the existing Phase 16/19 observability baseline into operator feedback loops suitable for public operation without requiring a heavy external stack.
+
+Required closure scope:
+
+- Stable protected metrics export plan, preferably Prometheus-compatible without dependency bloat.
+- Queue, worker, watcher, blockchain, abuse, blocklist, and token metrics aligned with real behavior.
+- Alert threshold documentation for low balance, RPC failure, stuck queue, high failure rate, captcha spike, and blocklist spike.
+- Nginx, journald, request ID, and correlation ID operational guidance.
+- Smoke-test commands for operators.
+
+---
+
+## Phase 22 — Blockchain and Runtime Resilience (Planned)
+
+Phase 22 must harden the transaction path and runtime blockchain dependencies for longer production operation.
+
+Required closure scope:
+
+- Conservative RPC failover configuration and tests.
+- Wallet balance and nonce runtime visibility for operators.
+- Stuck transaction reconciliation controls where safe.
+- Reorg/min-confirmation and replacement-policy documentation.
+- No high-availability or distributed-lock redesign in this phase.
+
+---
+
+## Phase 23 — Operational Runbooks, Backup/Restore, and Wallet Procedures (Planned)
+
+Phase 23 must make production operation repeatable after the durable admin and observability layers are complete.
+
+Required closure scope:
+
+- SQLite backup/restore scripts or documented commands with dry-run validation.
+- Configuration backup checklist.
+- Wallet refill and wallet rotation runbooks.
+- Deployment rollback verification.
+- Production checklist update.
+
+---
+
+## Phase 24 — Post-14 Roadmap Closure Audit (Planned)
+
+Phase 24 must close the post-Phase-14 roadmap before any broader feature-list expansion begins.
+
+Required closure scope:
+
+- Audit Phases 15 through 23 against code, tests, docs, scripts, and deployment templates.
+- Confirm all post-14 deferred items are implemented or explicitly moved into the broader feature backlog.
+- Update this roadmap with closure status.
+- Produce a Copilot audit prompt and manual validation checklist.
+
+---
+
 ## Conclusion
 
 The faucet has reached a stable production baseline.
