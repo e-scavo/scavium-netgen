@@ -5,11 +5,13 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+	storesqlite "scavium-netgen/cmd/scavium-faucet/internal/store/sqlite"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -453,5 +455,130 @@ func TestInMemoryAdminServiceSetModeDoesNotPropagateInvalidMode(t *testing.T) {
 	}
 	if controller.mode != "active" {
 		t.Fatalf("controller mode = %q, want active", controller.mode)
+	}
+}
+
+func TestSQLiteReadAdminServiceReadsPersistedClaimsAndQueue(t *testing.T) {
+	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	ready := testClaim("ready", domain.ClaimStatusQueued)
+	ready.CreatedAt = now.Add(-6 * time.Minute)
+	ready.UpdatedAt = now.Add(-6 * time.Minute)
+	delayed := testClaim("delayed", domain.ClaimStatusQueued)
+	delayed.CreatedAt = now.Add(-5 * time.Minute)
+	delayed.UpdatedAt = now.Add(-5 * time.Minute)
+	sending := testClaim("sending", domain.ClaimStatusSending)
+	sending.CreatedAt = now.Add(-4 * time.Minute)
+	sending.UpdatedAt = now.Add(-4 * time.Minute)
+	sent := testClaim("sent", domain.ClaimStatusSent)
+	sent.CreatedAt = now.Add(-3 * time.Minute)
+	sent.UpdatedAt = now.Add(-3 * time.Minute)
+	failed := testClaim("failed", domain.ClaimStatusFailed)
+	failed.CreatedAt = now.Add(-2 * time.Minute)
+	failed.UpdatedAt = now.Add(-2 * time.Minute)
+	confirmed := testClaim("confirmed", domain.ClaimStatusConfirmed)
+	confirmed.CreatedAt = now.Add(-1 * time.Minute)
+	confirmed.UpdatedAt = now.Add(-1 * time.Minute)
+
+	for _, claim := range []domain.Claim{ready, delayed, sending, sent, failed, confirmed} {
+		if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+			t.Fatalf("create claim %s: %v", claim.ID, err)
+		}
+	}
+	if err := store.Fail(context.Background(), delayed.ID, "retry later", 3); err != nil {
+		t.Fatalf("mark delayed claim for retry: %v", err)
+	}
+
+	svc := NewSQLiteReadAdminService(store).withClock(time.Now)
+
+	dash, err := svc.Dashboard(context.Background())
+	if err != nil {
+		t.Fatalf("dashboard: %v", err)
+	}
+	if dash.ClaimCounts["queued"] != 2 || dash.ClaimCounts["confirmed"] != 1 {
+		t.Fatalf("claim counts = %#v", dash.ClaimCounts)
+	}
+
+	queue, err := svc.Queue(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	if queue.Ready != 1 || queue.Delayed != 1 || queue.InFlight != 1 || queue.PendingTx != 1 || queue.Terminal != 2 {
+		t.Fatalf("summary = %#v", queue)
+	}
+	if len(queue.Items) != 5 {
+		t.Fatalf("items len = %d, want 5", len(queue.Items))
+	}
+	for _, item := range queue.Items {
+		if item.ID == "confirmed" {
+			t.Fatal("confirmed claim should not be included in queue items")
+		}
+	}
+
+	claims, err := svc.ListClaims(context.Background(), 2, 1)
+	if err != nil {
+		t.Fatalf("list claims: %v", err)
+	}
+	if len(claims) != 2 || claims[0].ID != "failed" || claims[1].ID != "sent" {
+		t.Fatalf("claims = %#v", claims)
+	}
+
+	claim, found, err := svc.GetClaim(context.Background(), ready.ID)
+	if err != nil {
+		t.Fatalf("get claim: %v", err)
+	}
+	if !found || claim.ID != ready.ID {
+		t.Fatalf("found = %v, id = %q", found, claim.ID)
+	}
+}
+
+func TestSQLiteReadAdminServiceKeepsControlsInMemory(t *testing.T) {
+	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	controller := &testModeController{}
+	svc := NewSQLiteReadAdminService(store)
+	svc.SetModeController(controller)
+
+	if err := svc.SetMode(context.Background(), "maintenance", "operator"); err != nil {
+		t.Fatalf("set mode: %v", err)
+	}
+	if controller.mode != "maintenance" {
+		t.Fatalf("controller mode = %q, want maintenance", controller.mode)
+	}
+
+	dash, err := svc.Dashboard(context.Background())
+	if err != nil {
+		t.Fatalf("dashboard: %v", err)
+	}
+	if dash.Mode != "maintenance" {
+		t.Fatalf("mode = %q, want maintenance", dash.Mode)
+	}
+
+	if err := svc.BlocklistAdd(context.Background(), abuse.KeyTypeIP, "203.0.113.10", "spam", "operator"); err != nil {
+		t.Fatalf("blocklist add: %v", err)
+	}
+	entries, err := svc.BlocklistList(context.Background())
+	if err != nil {
+		t.Fatalf("blocklist list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries len = %d, want 1", len(entries))
+	}
+
+	logs, err := svc.RecentAuditLog(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("audit log: %v", err)
+	}
+	if len(logs) < 2 {
+		t.Fatalf("audit entries = %d, want at least 2", len(logs))
 	}
 }

@@ -145,6 +145,102 @@ func TestListAndLastClaimsByAddress(t *testing.T) {
 	}
 }
 
+func TestListAdminClaims(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	first := testClaim("claim_1")
+	first.CreatedAt = time.Date(2026, 5, 3, 10, 0, 0, 0, time.UTC)
+	first.UpdatedAt = first.CreatedAt
+	second := testClaim("claim_2")
+	second.CreatedAt = time.Date(2026, 5, 3, 11, 0, 0, 0, time.UTC)
+	second.UpdatedAt = second.CreatedAt
+	third := testClaim("claim_3")
+	third.CreatedAt = time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	third.UpdatedAt = third.CreatedAt
+
+	for _, claim := range []domain.Claim{first, second, third} {
+		if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+			t.Fatalf("create claim %s: %v", claim.ID, err)
+		}
+	}
+
+	claims, err := store.ListAdminClaims(context.Background(), 2, 1)
+	if err != nil {
+		t.Fatalf("list admin claims: %v", err)
+	}
+	if len(claims) != 2 {
+		t.Fatalf("claims length = %d, want 2", len(claims))
+	}
+	if claims[0].ID != "claim_2" || claims[1].ID != "claim_1" {
+		t.Fatalf("claims order = %q, %q; want claim_2, claim_1", claims[0].ID, claims[1].ID)
+	}
+}
+
+func TestAdminQueueCountsAndListAdminQueueClaims(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Now().UTC()
+	ready := testClaim("ready")
+	ready.Status = domain.ClaimStatusQueued
+	ready.CreatedAt = now.Add(-6 * time.Minute)
+	ready.UpdatedAt = now.Add(-6 * time.Minute)
+	delayed := testClaim("delayed")
+	delayed.Status = domain.ClaimStatusQueued
+	delayed.CreatedAt = now.Add(-5 * time.Minute)
+	delayed.UpdatedAt = now.Add(-5 * time.Minute)
+	sending := testClaim("sending")
+	sending.Status = domain.ClaimStatusSending
+	sending.CreatedAt = now.Add(-4 * time.Minute)
+	sending.UpdatedAt = now.Add(-4 * time.Minute)
+	sent := testClaim("sent")
+	sent.Status = domain.ClaimStatusSent
+	sent.CreatedAt = now.Add(-3 * time.Minute)
+	sent.UpdatedAt = now.Add(-3 * time.Minute)
+	failed := testClaim("failed")
+	failed.Status = domain.ClaimStatusFailed
+	failed.CreatedAt = now.Add(-2 * time.Minute)
+	failed.UpdatedAt = now.Add(-2 * time.Minute)
+	confirmed := testClaim("confirmed")
+	confirmed.Status = domain.ClaimStatusConfirmed
+	confirmed.CreatedAt = now.Add(-1 * time.Minute)
+	confirmed.UpdatedAt = now.Add(-1 * time.Minute)
+
+	for _, claim := range []domain.Claim{ready, delayed, sending, sent, failed, confirmed} {
+		if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+			t.Fatalf("create claim %s: %v", claim.ID, err)
+		}
+	}
+	if err := store.Fail(context.Background(), delayed.ID, "retry later", 3); err != nil {
+		t.Fatalf("mark delayed claim for retry: %v", err)
+	}
+
+	counts, readyCount, delayedCount, inFlight, pendingTx, terminal, err := store.AdminQueueCounts(context.Background(), now)
+	if err != nil {
+		t.Fatalf("admin queue counts: %v", err)
+	}
+	if readyCount != 1 || delayedCount != 1 || inFlight != 1 || pendingTx != 1 || terminal != 2 {
+		t.Fatalf("summary = ready:%d delayed:%d inFlight:%d pending:%d terminal:%d", readyCount, delayedCount, inFlight, pendingTx, terminal)
+	}
+	if counts[string(domain.ClaimStatusQueued)] != 2 || counts[string(domain.ClaimStatusSending)] != 1 || counts[string(domain.ClaimStatusSent)] != 1 || counts[string(domain.ClaimStatusFailed)] != 1 || counts[string(domain.ClaimStatusConfirmed)] != 1 {
+		t.Fatalf("counts = %#v", counts)
+	}
+
+	items, err := store.ListAdminQueueClaims(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list admin queue claims: %v", err)
+	}
+	if len(items) != 5 {
+		t.Fatalf("items length = %d, want 5", len(items))
+	}
+	for _, item := range items {
+		if item.ID == "confirmed" {
+			t.Fatal("confirmed claim should not be included in queue items")
+		}
+	}
+}
+
 func TestLastClaimByAddressAndToken(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()

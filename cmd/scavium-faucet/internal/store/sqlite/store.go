@@ -565,6 +565,141 @@ func (s *Store) ListClaimsByAddress(ctx context.Context, address common.Address,
 	return claims, nil
 }
 
+// ListAdminClaims returns persisted claims for admin listing in reverse
+// creation order.
+func (s *Store) ListAdminClaims(ctx context.Context, limit, offset int) ([]domain.Claim, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		FROM requests
+		ORDER BY created_at DESC, id DESC
+		LIMIT ? OFFSET ?
+	`, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list admin claims: %w", err)
+	}
+	defer rows.Close()
+
+	var claims []domain.Claim
+	for rows.Next() {
+		claim, err := scanClaim(rows)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// AdminClaimCounts returns persisted claim counts grouped by status for the
+// admin dashboard and queue snapshot.
+func (s *Store) AdminClaimCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT status, COUNT(*)
+		FROM requests
+		GROUP BY status
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("admin claim counts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		counts[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+// AdminQueueCounts summarizes persisted queue state without exposing sensitive
+// claim fields.
+func (s *Store) AdminQueueCounts(ctx context.Context, now time.Time) (map[string]int, int, int, int, int, int, error) {
+	counts, err := s.AdminClaimCounts(ctx)
+	if err != nil {
+		return nil, 0, 0, 0, 0, 0, err
+	}
+	nowStr := formatTime(now.UTC())
+
+	var ready int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM requests
+		WHERE status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+	`, string(domain.ClaimStatusQueued), nowStr).Scan(&ready); err != nil {
+		return nil, 0, 0, 0, 0, 0, fmt.Errorf("admin ready queue count: %w", err)
+	}
+
+	var delayed int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM requests
+		WHERE status = ? AND next_attempt_at IS NOT NULL AND next_attempt_at > ?
+	`, string(domain.ClaimStatusQueued), nowStr).Scan(&delayed); err != nil {
+		return nil, 0, 0, 0, 0, 0, fmt.Errorf("admin delayed queue count: %w", err)
+	}
+
+	inFlight := counts[string(domain.ClaimStatusSending)]
+	pendingTx := counts[string(domain.ClaimStatusSent)]
+	terminal := counts[string(domain.ClaimStatusConfirmed)] + counts[string(domain.ClaimStatusFailed)] + counts[string(domain.ClaimStatusRejected)]
+	return counts, ready, delayed, inFlight, pendingTx, terminal, nil
+}
+
+// ListAdminQueueClaims returns the bounded item slice used by the admin queue
+// endpoint. Only queue-relevant persisted states are included.
+func (s *Store) ListAdminQueueClaims(ctx context.Context, limit int) ([]domain.Claim, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		FROM requests
+		WHERE status IN (?, ?, ?, ?)
+		ORDER BY updated_at DESC, id ASC
+		LIMIT ?
+	`,
+		string(domain.ClaimStatusQueued),
+		string(domain.ClaimStatusSending),
+		string(domain.ClaimStatusSent),
+		string(domain.ClaimStatusFailed),
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list admin queue claims: %w", err)
+	}
+	defer rows.Close()
+
+	var claims []domain.Claim
+	for rows.Next() {
+		claim, err := scanClaim(rows)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
 // LastClaimByAddressAndToken returns the latest persisted claim for one address and token_id.
 func (s *Store) LastClaimByAddressAndToken(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `

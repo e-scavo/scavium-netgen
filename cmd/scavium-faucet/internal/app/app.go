@@ -88,7 +88,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 		return nil, err
 	}
 	readService.SetCaptchaVerifier(captchaVerifier)
-	adminService := admin.NewInMemoryAdminService()
+	adminService := admin.NewSQLiteReadAdminService(store)
 	adminService.SetModeController(readService)
 	readinessChecks := runtimeChecks(cfg, store, senderBundle.chainClient, senderBundle.signer)
 	metrics := observability.NewRuntimeMetrics(version.Current())

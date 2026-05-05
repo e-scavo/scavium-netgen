@@ -373,7 +373,7 @@ Operational notes:
 
 ### `GET /api/v1/admin/dashboard`
 
-Returns the admin summary. The faucet `mode` is runtime-effective for claim intake after the Phase 18.7 post-audit fix. Queue/claim and blocklist counts reflect the current in-memory admin service scope.
+Returns the admin summary. The faucet `mode` is runtime-effective for claim intake after the Phase 18.7 post-audit fix. Since Phase 20.1, `claim_counts` are derived from persisted SQLite claim rows while blocklist size remains in the current in-memory admin control scope.
 
 ```json
 {
@@ -386,7 +386,7 @@ Returns the admin summary. The faucet `mode` is runtime-effective for claim inta
 
 ### `GET /api/v1/admin/queue?limit=50`
 
-Returns an operator-safe queue snapshot from the current admin service. `limit` controls only the returned `items` slice and is capped at `500`; counters still summarize the visible in-memory admin queue state.
+Returns an operator-safe queue snapshot from persisted SQLite claim/queue state. `limit` controls only the returned `items` slice and is capped at `500`.
 
 ```json
 {
@@ -415,7 +415,7 @@ Returns an operator-safe queue snapshot from the current admin service. `limit` 
 }
 ```
 
-Queue item responses intentionally omit wallet addresses, idempotency keys, request bodies, captcha tokens, and transaction internals. The broader SQLite-backed admin service remains deferred; in the current Phase 18 closure, production claim rows are not pre-populated into this in-memory admin queue view.
+Queue item responses intentionally omit wallet addresses, idempotency keys, request bodies, captcha tokens, and transaction internals. Phase 20.1 moves this read surface to persisted SQLite state, but retry/cancel actions, blocklist controls, and audit history remain on the existing in-memory admin control layer until later Phase 20 steps.
 
 ### `POST /api/v1/admin/queue/retry`
 

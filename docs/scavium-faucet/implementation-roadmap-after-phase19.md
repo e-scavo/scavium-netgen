@@ -78,6 +78,12 @@ Still missing or partial:
 
 Goal: remove the largest intentional Phase 18 limitation by moving admin queue/claim/control/audit/blocklist behavior from process memory to SQLite-backed production state.
 
+Current step status:
+
+- 20.1 is in progress and establishes the SQLite admin read model foundation.
+- Dashboard claim counts, admin claim listing/detail, and admin queue snapshots now read persisted SQLite state.
+- Retry/cancel controls, blocklist durability, and durable admin audit persistence remain deferred to 20.2-20.4.
+
 Scope:
 
 - Introduce minimal SQLite tables for admin audit and persisted blocklist.
@@ -90,7 +96,7 @@ Scope:
 
 Suggested subphases:
 
-- 20.1: SQLite admin read model foundation.
+- 20.1: SQLite admin read model foundation. (started)
 - 20.2: SQLite queue/claim retry and cancel control.
 - 20.3: Durable admin audit log.
 - 20.4: Persisted blocklist and claim-path enforcement.

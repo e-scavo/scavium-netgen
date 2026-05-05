@@ -177,12 +177,13 @@ The claim handler logs safe structured events for accepted and rejected claims. 
 
 Phase 18 adds an admin-control plane inside the existing faucet binary. It does not introduce a second service, a new database schema, or a public control endpoint. All `/api/v1/admin/*` routes remain behind the existing bearer-token middleware and are excluded from CORS.
 
-The Phase 18 admin service has two different runtime scopes:
+The admin service currently has split runtime scopes:
 
 - **Runtime-effective mode control:** `POST /api/v1/admin/faucet/mode` validates `active`, `paused`, and `maintenance`, records an audit entry, and propagates the accepted mode into the live `PersistentReadService` through the `ModeController` boundary added in Phase 18.7.
-- **In-memory admin surfaces:** queue snapshots, claim retry/cancel, claim lookup, blocklist management, and the audit ring buffer operate on the current in-memory admin service. The broader SQLite-backed admin service remains intentionally deferred, so production SQLite claim rows are not hydrated into the admin claim/queue views in this phase.
+- **SQLite-backed read surfaces (Phase 20.1):** dashboard claim counts, claim listing/detail, and queue snapshots now read from persisted SQLite claim/queue state.
+- **In-memory control surfaces (still deferred for durability):** retry/cancel mutations, blocklist management, and the audit ring buffer still operate on the current in-memory admin service.
 
-This split is deliberate for the Phase 18 closure. It gives operators a safe runtime mode brake, runtime visibility, structured audit logs, and bounded admin responses without introducing new schema risk before Phase 19 hardening. Follow-up work can replace or extend the in-memory admin service with a SQLite-backed implementation while preserving the admin HTTP contracts introduced in Phase 18.
+This split is deliberate for the Phase 20.1 step. It improves operator read visibility against persisted state while preserving existing admin HTTP contracts and deferring durable admin mutations to later Phase 20 substeps.
 
 Phase 18.8 closes the final audit notes by aligning the documented queue response with the real `QueueResponse` structure, validating blocklist `key_type` values (`ip`, `address`, `fingerprint`), and applying a shared `500` item cap to admin queue, claims, and audit list endpoints.
 ## Phase 19.3 — Performance Safety / Request Body & Timeout Hardening

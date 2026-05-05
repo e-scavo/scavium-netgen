@@ -144,8 +144,8 @@ var (
 
 // AdminService provides admin-plane operations on the faucet.
 // The InMemoryAdminService is the default implementation (suitable for tests
-// and standalone mode).  A SQLite-backed implementation is planned for a
-// later step.
+// and standalone mode). A SQLite-backed read model is introduced in Phase 20.1
+// without yet making the control plane itself durable.
 type AdminService interface {
 	Dashboard(ctx context.Context) (DashboardResponse, error)
 	Queue(ctx context.Context, limit int) (QueueResponse, error)
@@ -161,6 +161,16 @@ type AdminService interface {
 	BlocklistAdd(ctx context.Context, kt abuse.KeyType, value, reason, actor string) error
 	BlocklistRemove(ctx context.Context, kt abuse.KeyType, value, actor string) error
 	RecentAuditLog(ctx context.Context, limit int) ([]AuditEntry, error)
+}
+
+// ReadStore provides persisted admin read-model access without requiring the
+// broader durable admin control plane.
+type ReadStore interface {
+	GetClaim(ctx context.Context, id string) (domain.Claim, error)
+	ListAdminClaims(ctx context.Context, limit, offset int) ([]domain.Claim, error)
+	AdminClaimCounts(ctx context.Context) (map[string]int, error)
+	AdminQueueCounts(ctx context.Context, now time.Time) (map[string]int, int, int, int, int, int, error)
+	ListAdminQueueClaims(ctx context.Context, limit int) ([]domain.Claim, error)
 }
 
 // ValidMode reports whether mode is a supported faucet operational mode.
@@ -191,6 +201,15 @@ type InMemoryAdminService struct {
 	now       func() time.Time
 }
 
+// SQLiteReadAdminService uses SQLite for admin reads while delegating the
+// existing non-durable control surfaces to the in-memory admin service until
+// later Phase 20 steps make them persistent.
+type SQLiteReadAdminService struct {
+	reads    ReadStore
+	fallback *InMemoryAdminService
+	now      func() time.Time
+}
+
 // NewInMemoryAdminService creates an in-memory admin service in "active" mode.
 func NewInMemoryAdminService() *InMemoryAdminService {
 	return &InMemoryAdminService{
@@ -202,9 +221,27 @@ func NewInMemoryAdminService() *InMemoryAdminService {
 	}
 }
 
-// withClock replaces the time source.  Useful for testing.
+// NewSQLiteReadAdminService creates a hybrid admin service whose read surfaces
+// reflect persisted SQLite state while keeping the existing in-memory control
+// behavior intact.
+func NewSQLiteReadAdminService(reads ReadStore) *SQLiteReadAdminService {
+	return &SQLiteReadAdminService{
+		reads:    reads,
+		fallback: NewInMemoryAdminService(),
+		now:      time.Now,
+	}
+}
+
+// withClock replaces the time source. Useful for testing.
 func (s *InMemoryAdminService) withClock(now func() time.Time) *InMemoryAdminService {
 	s.now = now
+	return s
+}
+
+// withClock replaces the time source. Useful for testing.
+func (s *SQLiteReadAdminService) withClock(now func() time.Time) *SQLiteReadAdminService {
+	s.now = now
+	s.fallback.withClock(now)
 	return s
 }
 
@@ -213,6 +250,11 @@ func (s *InMemoryAdminService) SetModeController(controller ModeController) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.modeCtl = controller
+}
+
+// SetModeController connects admin mode changes to the live faucet runtime.
+func (s *SQLiteReadAdminService) SetModeController(controller ModeController) {
+	s.fallback.SetModeController(controller)
 }
 
 // AddClaim inserts a claim into the in-memory store.  Used in tests and
@@ -429,6 +471,100 @@ func (s *InMemoryAdminService) BlocklistRemove(_ context.Context, kt abuse.KeyTy
 
 func (s *InMemoryAdminService) RecentAuditLog(_ context.Context, limit int) ([]AuditEntry, error) {
 	return s.auditLog.Recent(limit), nil
+}
+
+func (s *SQLiteReadAdminService) Dashboard(ctx context.Context) (DashboardResponse, error) {
+	base, err := s.fallback.Dashboard(ctx)
+	if err != nil {
+		return DashboardResponse{}, err
+	}
+	if s.reads == nil {
+		return base, nil
+	}
+	counts, err := s.reads.AdminClaimCounts(ctx)
+	if err != nil {
+		return DashboardResponse{}, err
+	}
+	base.ClaimCounts = counts
+	base.UpdatedAt = s.now().UTC().Format(time.RFC3339)
+	return base, nil
+}
+
+func (s *SQLiteReadAdminService) Queue(ctx context.Context, limit int) (QueueResponse, error) {
+	if s.reads == nil {
+		return s.fallback.Queue(ctx, limit)
+	}
+	now := s.now().UTC()
+	counts, ready, delayed, inFlight, pendingTx, terminal, err := s.reads.AdminQueueCounts(ctx, now)
+	if err != nil {
+		return QueueResponse{}, err
+	}
+	items, err := s.reads.ListAdminQueueClaims(ctx, limit)
+	if err != nil {
+		return QueueResponse{}, err
+	}
+	resp := QueueResponse{
+		Counts:    counts,
+		Ready:     ready,
+		Delayed:   delayed,
+		InFlight:  inFlight,
+		PendingTx: pendingTx,
+		Terminal:  terminal,
+		UpdatedAt: now.Format(time.RFC3339),
+	}
+	for _, claim := range items {
+		resp.Items = append(resp.Items, queueItemResponse(claim))
+	}
+	return resp, nil
+}
+
+func (s *SQLiteReadAdminService) ListClaims(ctx context.Context, limit, offset int) ([]domain.Claim, error) {
+	if s.reads == nil {
+		return s.fallback.ListClaims(ctx, limit, offset)
+	}
+	return s.reads.ListAdminClaims(ctx, limit, offset)
+}
+
+func (s *SQLiteReadAdminService) GetClaim(ctx context.Context, id string) (domain.Claim, bool, error) {
+	if s.reads == nil {
+		return s.fallback.GetClaim(ctx, id)
+	}
+	claim, err := s.reads.GetClaim(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.Claim{}, false, nil
+		}
+		return domain.Claim{}, false, err
+	}
+	return claim, true, nil
+}
+
+func (s *SQLiteReadAdminService) SetMode(ctx context.Context, mode, actor string) error {
+	return s.fallback.SetMode(ctx, mode, actor)
+}
+
+func (s *SQLiteReadAdminService) RetryClaim(ctx context.Context, id, actor string) error {
+	return s.fallback.RetryClaim(ctx, id, actor)
+}
+
+func (s *SQLiteReadAdminService) CancelClaim(ctx context.Context, id, actor string) error {
+	return s.fallback.CancelClaim(ctx, id, actor)
+}
+
+func (s *SQLiteReadAdminService) BlocklistList(ctx context.Context) ([]abuse.BlocklistEntry, error) {
+	return s.fallback.BlocklistList(ctx)
+}
+
+func (s *SQLiteReadAdminService) BlocklistAdd(ctx context.Context, kt abuse.KeyType, value, reason, actor string) error {
+	return s.fallback.BlocklistAdd(ctx, kt, value, reason, actor)
+}
+
+func (s *SQLiteReadAdminService) BlocklistRemove(ctx context.Context, kt abuse.KeyType, value, actor string) error {
+	return s.fallback.BlocklistRemove(ctx, kt, value, actor)
+}
+
+func (s *SQLiteReadAdminService) RecentAuditLog(ctx context.Context, limit int) ([]AuditEntry, error) {
+	return s.fallback.RecentAuditLog(ctx, limit)
 }
 
 // --- TokenAuthMiddleware ------------------------------------------------
