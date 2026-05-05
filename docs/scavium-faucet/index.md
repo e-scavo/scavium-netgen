@@ -97,3 +97,10 @@ Phase 17.2 is closed as a configuration-driven token registration layer for the 
 
 The closure is documentary only and preserves the production contract: existing clients may still call `POST /api/v1/claim` without `token_id`, the configured default token remains the fallback, token metadata remains claim-safe, and no runtime admin mutation or database-backed token catalog is introduced. Phase 17.3 can now harden token-aware claim validation on top of a stable registration and discovery baseline.
 
+
+
+## Phase 17.3.1 — Token Validation Layer
+
+Phase 17.3.1 hardens the token-aware claim path introduced in Phase 17.1 and operationalized in Phase 17.2. Claims now resolve and validate `token_id` before captcha, risk, cooldown, rate-limit, daily-budget, persistence, and queue processing. Unknown or non-executable token selections are rejected through the existing `claim_rejected` contract with `invalid_token` as the reason, preserving the public error envelope while making token validation explicit.
+
+The subphase also records invalid token attempts as durable abuse signals and exposes `claims.invalid_token` in admin metrics. Backward compatibility is unchanged: clients that omit `token_id` continue to receive the configured default token.

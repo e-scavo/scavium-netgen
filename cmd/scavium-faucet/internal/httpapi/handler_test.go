@@ -1257,6 +1257,45 @@ func TestAdminMetricsCountsRejectedClaimClasses(t *testing.T) {
 	}
 }
 
+func TestAdminMetricsCountsInvalidTokenClaims(t *testing.T) {
+	metrics := observability.NewRuntimeMetrics(version.Info{})
+	handler := NewHandler(Dependencies{
+		ReadService: &failingClaimService{err: &faucet.ClaimError{Kind: faucet.ErrClaimRejected, Reason: "invalid_token"}},
+		AdminToken:  testAdminToken,
+		Metrics:     metrics,
+	})
+
+	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7","token_id":"missing-token"}`))
+	claimReq.Header.Set("Content-Type", "application/json")
+	claimRec := httptest.NewRecorder()
+	handler.ServeHTTP(claimRec, claimReq)
+	if claimRec.Code != http.StatusForbidden {
+		t.Fatalf("claim status code = %d", claimRec.Code)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/metrics", nil)
+	metricsReq.Header.Set("Authorization", "Bearer "+testAdminToken)
+	metricsRec := httptest.NewRecorder()
+	handler.ServeHTTP(metricsRec, metricsReq)
+
+	if metricsRec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", metricsRec.Code, http.StatusOK)
+	}
+	var body observability.RuntimeMetricsSnapshot
+	if err := json.NewDecoder(metricsRec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Claims.Rejected != 1 {
+		t.Fatalf("claims.rejected = %d, want 1", body.Claims.Rejected)
+	}
+	if body.Claims.InvalidToken != 1 {
+		t.Fatalf("claims.invalid_token = %d, want 1", body.Claims.InvalidToken)
+	}
+	if body.Claims.RejectedByRisk != 0 {
+		t.Fatalf("claims.rejected_by_risk = %d, want 0", body.Claims.RejectedByRisk)
+	}
+}
+
 func testReadService() faucet.ReadService {
 	cfg := config.Defaults()
 	cfg.NetworkName = "scavium-test"

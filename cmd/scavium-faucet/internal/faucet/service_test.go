@@ -2,6 +2,7 @@ package faucet
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -155,5 +156,28 @@ func TestInMemoryReadServiceIdempotency(t *testing.T) {
 	}
 	if nextID != 1 {
 		t.Fatalf("generated ids = %d, want 1", nextID)
+	}
+}
+
+func TestInMemoryReadServiceRejectsInvalidToken(t *testing.T) {
+	service := NewInMemoryReadService(testConfig())
+	address := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address: address,
+		TokenID: "missing-token",
+	})
+	if err == nil {
+		t.Fatal("create claim returned nil error")
+	}
+	if !errors.Is(err, ErrClaimRejected) {
+		t.Fatalf("error = %v, want ErrClaimRejected", err)
+	}
+	var claimErr *ClaimError
+	if !errors.As(err, &claimErr) {
+		t.Fatalf("error = %T, want ClaimError", err)
+	}
+	if claimErr.Reason != "invalid_token" {
+		t.Fatalf("reason = %q, want invalid_token", claimErr.Reason)
 	}
 }

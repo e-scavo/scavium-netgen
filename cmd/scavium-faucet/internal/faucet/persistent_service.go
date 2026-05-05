@@ -173,6 +173,12 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, claimError(ErrFaucetUnavailable, fmt.Sprintf("faucet mode is %s", configuredStatus(s.cfg.FaucetMode)))
 	}
 
+	token, err := validateClaimToken(s.cfg, request.TokenID)
+	if err != nil {
+		s.recordAbuseSignal(ctx, request, domain.AbuseSignalInvalidToken, "", "invalid_token", 0)
+		return ClaimResponse{}, err
+	}
+
 	if err := s.verifyCaptcha(ctx, request); err != nil {
 		return ClaimResponse{}, err
 	}
@@ -205,10 +211,6 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, fmt.Errorf("generate claim id: %w", err)
 	}
 	now := s.now()
-	token, ok := s.cfg.TokenByID(request.TokenID)
-	if !ok {
-		return ClaimResponse{}, claimError(ErrClaimRejected, "unsupported token")
-	}
 	claim := domain.Claim{
 		ID:            id,
 		Address:       request.Address,

@@ -271,3 +271,16 @@ Phase 16 closes with the following operational baseline:
 - `/ready` carries real dependency probes, per-check duration, and aggregate summary counts
 
 No reverse-proxy exposure change is required. Keep the backend bound to loopback and expose only through nginx/TLS.
+
+
+## Token validation operations (Phase 17.3.1)
+
+Phase 17.3.1 validates token selection at claim time before captcha, risk, cooldown, rate-limit, daily-budget, persistence, and queue processing. Operators should use this flow when validating a new token registration:
+
+1. Restart the service after changing `SCAVIUM_FAUCET_TOKENS_JSON`.
+2. Confirm the token appears in `GET /api/v1/tokens` or `GET /api/v1/faucet/tokens`.
+3. Submit a claim with the selected `token_id`.
+4. Submit a negative claim with an unknown `token_id` and confirm the response uses `claim_rejected` with `invalid_token` as the reason.
+5. Review `/api/v1/admin/metrics` and confirm `claims.invalid_token` increments for rejected token selections.
+
+An invalid token rejection is expected to happen before the claim is persisted or enqueued. It does not indicate RPC, wallet, queue, or SQLite failure.

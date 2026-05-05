@@ -96,6 +96,8 @@ const (
 	AbuseSignalRateLimited AbuseSignalKind = "rate_limited"
 	// AbuseSignalDailyBudgetExceeded records a claim denied by the daily faucet budget.
 	AbuseSignalDailyBudgetExceeded AbuseSignalKind = "daily_budget_exceeded"
+	// AbuseSignalInvalidToken records a claim denied by token catalog validation.
+	AbuseSignalInvalidToken AbuseSignalKind = "invalid_token"
 	// AbuseSignalClaimAccepted records a claim accepted into durable storage.
 	AbuseSignalClaimAccepted AbuseSignalKind = "claim_accepted"
 )
