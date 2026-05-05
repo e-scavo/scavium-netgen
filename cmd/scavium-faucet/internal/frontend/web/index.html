@@ -229,7 +229,8 @@
       margin-bottom: 7px;
     }
 
-    input[type="text"] {
+    input[type="text"],
+    select {
       width: 100%;
       padding: 13px 14px;
       border-radius: var(--scavo-radius-sm);
@@ -239,9 +240,31 @@
       font-size: 15px;
     }
 
-    input[type="text"]:focus {
+    input[type="text"]:focus,
+    select:focus {
       outline: 2px solid rgba(249, 115, 22, 0.34);
       border-color: var(--scavo-focus-ring);
+    }
+
+    select {
+      appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--scavo-text-secondary) 50%),
+        linear-gradient(135deg, var(--scavo-text-secondary) 50%, transparent 50%);
+      background-position:
+        calc(100% - 18px) 50%,
+        calc(100% - 12px) 50%;
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+      padding-right: 40px;
+    }
+
+    .token-note {
+      margin-top: -6px;
+      margin-bottom: 14px;
+      color: var(--scavo-text-muted);
+      font-size: 12px;
+      line-height: 1.45;
     }
 
     .actions {
@@ -389,6 +412,11 @@
           <label for="address">Scavium Address</label>
           <input type="text" id="address" placeholder="0x..." autocomplete="off" spellcheck="false" />
         </div>
+        <div id="token-row" class="field hidden">
+          <label for="token-id">Token</label>
+          <select id="token-id" aria-describedby="token-note"></select>
+        </div>
+        <div id="token-note" class="token-note hidden"></div>
         <div id="captcha-row" class="field hidden">
           <label>Human Verification</label>
           <div id="captcha-widget" aria-live="polite"></div>

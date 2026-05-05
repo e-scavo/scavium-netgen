@@ -8,6 +8,8 @@
     captchaSiteKey: "",
     captchaToken: "",
     captchaWidgetID: null,
+    tokens: [],
+    selectedTokenID: "",
   };
 
   function el(id) {
@@ -183,6 +185,116 @@
     }
   }
 
+
+  function formatTokenAmount(token) {
+    if (!token || !token.amount_wei) {
+      return "";
+    }
+    var suffix = token.symbol ? " base units of " + token.symbol : " base units";
+    return token.amount_wei + suffix;
+  }
+
+  function tokenOptionLabel(token) {
+    var label = token.symbol || token.id || "Token";
+    if (token.id && token.id !== label) {
+      label += " (" + token.id + ")";
+    }
+    if (token.type) {
+      label += " · " + token.type;
+    }
+    return label;
+  }
+
+  function selectedTokenID() {
+    var select = el("token-id");
+    if (!select || select.disabled || !select.value) {
+      return "";
+    }
+    return select.value;
+  }
+
+  function selectedToken() {
+    var id = selectedTokenID();
+    for (var i = 0; i < state.tokens.length; i += 1) {
+      if (state.tokens[i].id === id) {
+        return state.tokens[i];
+      }
+    }
+    return null;
+  }
+
+  function updateTokenNote() {
+    var note = el("token-note");
+    var token = selectedToken();
+    if (!note) {
+      return;
+    }
+    if (!token) {
+      note.textContent = "Default faucet token will be requested.";
+      setHidden(note, true);
+      return;
+    }
+    var parts = [];
+    parts.push("Selected " + (token.symbol || token.id));
+    if (token.type) {
+      parts.push(String(token.type).toUpperCase());
+    }
+    var amount = formatTokenAmount(token);
+    if (amount) {
+      parts.push("amount " + amount);
+    }
+    note.textContent = parts.join(" · ");
+    setHidden(note, false);
+  }
+
+  function renderTokens(tokens) {
+    var row = el("token-row");
+    var select = el("token-id");
+    if (!row || !select) {
+      return;
+    }
+
+    state.tokens = Array.isArray(tokens) ? tokens.filter(function (token) {
+      return token && token.id;
+    }) : [];
+
+    select.innerHTML = "";
+    if (state.tokens.length === 0) {
+      state.selectedTokenID = "";
+      select.disabled = true;
+      setHidden(row, true);
+      updateTokenNote();
+      return;
+    }
+
+    state.tokens.forEach(function (token) {
+      var option = document.createElement("option");
+      option.value = token.id;
+      option.textContent = tokenOptionLabel(token);
+      select.appendChild(option);
+    });
+
+    if (state.selectedTokenID) {
+      select.value = state.selectedTokenID;
+    }
+    if (!select.value && state.tokens[0]) {
+      select.value = state.tokens[0].id;
+    }
+    state.selectedTokenID = select.value || "";
+    select.disabled = false;
+    setHidden(row, false);
+    updateTokenNote();
+  }
+
+  async function loadTokens() {
+    var response = await fetch("/api/v1/tokens", { headers: { Accept: "application/json" } });
+    var data = await readJSON(response);
+    if (!response.ok) {
+      throw new Error("token catalog unavailable");
+    }
+    renderTokens(data.tokens || []);
+  }
+
   async function loadConfig() {
     var response = await fetch("/api/v1/config", { headers: { Accept: "application/json" } });
     var data = await readJSON(response);
@@ -200,7 +312,7 @@
     var rows = [];
     if (data.network_name) rows.push(["Network", data.network_name]);
     if (data.symbol) rows.push(["Symbol", data.symbol]);
-    if (data.amount_eth) rows.push(["Amount", data.amount_eth + (data.symbol ? " " + data.symbol : "")]);
+    if (data.amount_wei) rows.push(["Amount", data.amount_wei + (data.symbol ? " base units of " + data.symbol : " base units")]);
     if (data.cooldown_seconds != null) rows.push(["Cooldown", String(data.cooldown_seconds) + "s"]);
     if (data.dry_run != null) rows.push(["Dry Run", data.dry_run ? "yes" : "no"]);
 
@@ -249,7 +361,7 @@
     if (data.id) rows.push(["Claim ID", data.id]);
     if (data.status) rows.push(["Status", data.status]);
     if (data.address) rows.push(["Address", data.address]);
-    if (data.amount_eth) rows.push(["Amount", data.amount_eth + (data.symbol ? " " + data.symbol : "")]);
+    if (data.amount_wei) rows.push(["Amount", data.amount_wei + (data.symbol ? " base units of " + data.symbol : " base units")]);
     if (data.tx_hash) rows.push(["Tx Hash", data.tx_hash]);
     if (data.created_at) rows.push(["Created", data.created_at]);
     if (data.updated_at) rows.push(["Updated", data.updated_at]);
@@ -287,6 +399,10 @@
       return;
     }
     if (code === "claim_rejected") {
+      if (details.reason === "invalid_token") {
+        setStatus(el("msg"), "Selected token is not available. Refresh the page and retry.", "warn");
+        return;
+      }
       setStatus(el("msg"), "Claim rejected by risk checks.", "warn");
       return;
     }
@@ -352,6 +468,10 @@
     }
 
     var body = { address: addr };
+    var tokenID = selectedTokenID();
+    if (tokenID) {
+      body.token_id = tokenID;
+    }
     var captchaToken = state.captchaToken || el("captcha-token").value.trim();
     if (state.captchaProvider && state.captchaProvider !== "disabled" && !captchaToken) {
       setStatus(el("msg"), "Please complete the captcha challenge.", "error");
@@ -405,10 +525,20 @@
       loadPublicStatus().catch(function () {
         setStatus(el("msg"), "Unable to refresh status.", "warn");
       });
+      loadTokens().catch(function () {
+        // Keep current/default token behavior when catalog refresh fails.
+      });
       if (state.currentClaimID) {
         pollClaim(state.currentClaimID);
       }
     });
+    var tokenSelect = el("token-id");
+    if (tokenSelect) {
+      tokenSelect.addEventListener("change", function () {
+        state.selectedTokenID = tokenSelect.value || "";
+        updateTokenNote();
+      });
+    }
   }
 
   async function init() {
@@ -417,6 +547,11 @@
       await loadConfig();
     } catch (_) {
       setStatus(el("msg"), "Unable to load faucet config.", "warn");
+    }
+    try {
+      await loadTokens();
+    } catch (_) {
+      renderTokens([]);
     }
     try {
       await loadPublicStatus();

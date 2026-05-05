@@ -122,3 +122,9 @@ The logging posture remains production-safe. Accepted claim-flow logs include th
 Phase 17.3 is closed as the token-aware claim validation and enforcement hardening layer for the public testnet faucet. The implemented scope covers strict claim-time token validation, token-scoped cooldown and rate-limit evaluation, and token-aware observability over the existing aggregate runtime metrics.
 
 The closure is documentary only and preserves the production contract. `POST /api/v1/claim` remains backward-compatible, omitted `token_id` still resolves to the configured default token, invalid token selections continue to use the existing `claim_rejected` envelope with `invalid_token` as the reason, and no frontend selector, runtime admin mutation, database-backed token catalog, or external metrics backend is introduced. Phase 18 can now build admin/control-plane capabilities on top of a stable token-aware claim pipeline.
+
+## Phase 17.4.1 — Public Token Catalog Consumption
+
+Phase 17.4.1 starts the frontend side of token support by consuming the public token catalog already exposed by Phase 17.2. The embedded HTML/JS faucet UI now loads `GET /api/v1/tokens`, renders a token selector from claim-safe metadata, and submits the selected token id as optional `token_id` in `POST /api/v1/claim`.
+
+The implementation remains backward-compatible and failure-safe: if the token catalog cannot be loaded, the selector stays hidden and the claim payload continues to omit `token_id`, preserving the existing default-token path. No admin mutation, database-backed catalog, new dependency, or public claim contract change is introduced.

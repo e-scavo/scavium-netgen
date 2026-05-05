@@ -504,3 +504,10 @@ Phase 17.3 closure note:
 - `token_id` remains optional; omitted values continue to use the configured default token.
 - Invalid token selections continue to use the existing `claim_rejected` public contract with `invalid_token` as the details reason.
 - No response body shape, public endpoint path, admin authentication model, or claim error envelope is changed by the closure.
+
+Phase 17.4.1 frontend consumption note:
+
+- The embedded public faucet UI consumes `GET /api/v1/tokens` as its token-selection source.
+- Browser clients submit the selected catalog `id` as optional `token_id` in `POST /api/v1/claim`.
+- If catalog discovery fails, the frontend omits `token_id` and preserves the configured default-token path.
+- The catalog remains read-only and claim-safe; it does not expose private keys, admin tokens, RPC credentials, request bodies, fingerprints, or idempotency keys.

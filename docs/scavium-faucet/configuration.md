@@ -171,3 +171,14 @@ Daily budgets remain configured per token through each token's `daily_budget_wei
 Phase 17.3 closes the configuration-driven token claim path without adding runtime configuration mutation. Token ids loaded from `SCAVIUM_FAUCET_TOKENS_JSON` now define transfer metadata, claim validation eligibility, cooldown/rate-limit scope, daily budget scope, and token-scoped runtime metrics. Keep token ids stable once published because changing an id creates a new claim/enforcement/metrics scope.
 
 Changing token definitions still requires editing environment configuration and restarting the service. Hot reload, admin-driven token mutation, database-backed catalogs, and durable per-token analytics remain deferred.
+
+## Frontend token selector behavior
+
+The Phase 17.4.1 frontend does not introduce new environment variables. It derives its browser-visible token selector from the same public catalog generated from `SCAVIUM_FAUCET_TOKENS_JSON` and the configured default token.
+
+Operational implications:
+
+- Changing token registration still requires editing environment configuration and restarting the service.
+- The frontend selector reflects whatever `GET /api/v1/tokens` returns after restart.
+- If no valid token catalog can be loaded by the browser, the selector remains hidden and legacy/default-token claim behavior is preserved.
+- Token labels are rendered from public metadata only: `id`, `symbol`, `type`, `decimals`, and `amount_wei`.
