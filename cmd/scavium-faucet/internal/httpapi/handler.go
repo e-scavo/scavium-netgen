@@ -97,11 +97,13 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.HandleFunc("/ready", handleReady(deps.ReadinessChecks))
 	mux.HandleFunc("/api/v1/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/config", handleFaucetConfig(deps.ReadService))
+	mux.HandleFunc("/api/v1/tokens", handleFaucetTokens(deps.ReadService))
 	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger, deps.Metrics))
 	mux.HandleFunc("/api/v1/claim/", handleGetClaim(deps.ReadService, "/api/v1/claim/"))
 	mux.HandleFunc("/api/v1/address/", handleAddressStatus(deps.ReadService, "/api/v1/address/", "/status"))
 	mux.HandleFunc("/api/v1/faucet/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/config", handleFaucetConfig(deps.ReadService))
+	mux.HandleFunc("/api/v1/faucet/tokens", handleFaucetTokens(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger, deps.Metrics))
 	mux.HandleFunc("/api/v1/faucet/claim/", handleGetClaim(deps.ReadService, "/api/v1/faucet/claim/"))
 	mux.HandleFunc("/api/v1/faucet/address/", handleAddressStatus(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
@@ -212,6 +214,25 @@ func handleFaucetConfig(readService faucet.ReadService) http.HandlerFunc {
 			return
 		}
 		WriteJSON(w, http.StatusOK, cfg)
+	}
+}
+
+func handleFaucetTokens(readService faucet.ReadService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		tokens, err := readService.Tokens(r.Context())
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "tokens_unavailable", "tokens unavailable", nil)
+			return
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{
+			"tokens": tokens,
+		})
 	}
 }
 

@@ -95,6 +95,16 @@ Alias routes for public faucet configuration.
   "chain_id": 123,
   "symbol": "tSCAV",
   "amount_wei": "42",
+  "tokens": [
+    {
+      "id": "native",
+      "symbol": "tSCAV",
+      "type": "native",
+      "decimals": 18,
+      "amount_wei": "42",
+      "daily_budget_wei": "4200"
+    }
+  ],
   "cooldown_seconds": 60,
   "explorer_tx_url": "https://explorer.example.test/tx/{txHash}",
   "dry_run": false,
@@ -102,6 +112,37 @@ Alias routes for public faucet configuration.
   "rate_limit_addr_per_day": 3
 }
 ```
+
+### `GET /api/v1/tokens`
+### `GET /api/v1/faucet/tokens`
+
+Alias routes for the public faucet token catalog. These endpoints expose only claim-safe token metadata derived from runtime configuration. They do not expose private keys, admin tokens, RPC credentials, or any operational secret.
+
+```json
+{
+  "tokens": [
+    {
+      "id": "native",
+      "symbol": "tSCAV",
+      "type": "native",
+      "decimals": 18,
+      "amount_wei": "42",
+      "daily_budget_wei": "4200"
+    },
+    {
+      "id": "scav",
+      "symbol": "SCAV",
+      "type": "erc20",
+      "address": "0x1111111111111111111111111111111111111111",
+      "decimals": 18,
+      "amount_wei": "100",
+      "daily_budget_wei": "10000"
+    }
+  ]
+}
+```
+
+Only `GET` is allowed. Unsupported methods return `405` with the existing `method_not_allowed` envelope.
 
 ### `GET /api/v1/address/{address}/status`
 ### `GET /api/v1/faucet/address/{address}/eligibility`

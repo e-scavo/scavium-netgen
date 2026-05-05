@@ -14,7 +14,7 @@ Configuration is loaded from environment variables at startup via `internal/conf
 | `SCAVIUM_FAUCET_SYMBOL` | `SCAV` | Exposed by `/api/v1/status` and `/api/v1/config` |
 | `SCAVIUM_FAUCET_EXPLORER_TX_URL` | empty | Exposed by `/api/v1/config` |
 | `SCAVIUM_FAUCET_AMOUNT_WEI` | `1000000000000000000` | Legacy/default native token amount; still copied into claims when no token override is configured |
-| `SCAVIUM_FAUCET_TOKENS_JSON` | empty | Optional JSON array of claimable tokens. When empty, the faucet exposes one backward-compatible native token from `SYMBOL` + `AMOUNT_WEI` |
+| `SCAVIUM_FAUCET_TOKENS_JSON` | empty | Optional JSON array of claimable tokens. When empty, the faucet exposes one backward-compatible native token from `SYMBOL` + `AMOUNT_WEI`; when set, the public catalog is exposed by `/api/v1/tokens` and `/api/v1/faucet/tokens` |
 | `SCAVIUM_FAUCET_DEFAULT_TOKEN_ID` | `native` | Token used when a claim omits `token_id`; preserves the existing claim contract |
 | `SCAVIUM_FAUCET_COOLDOWN_SECONDS` | `86400` | Per-address cooldown enforced by `PersistentReadService`; exposed by `/api/v1/config` and address-status responses |
 | `SCAVIUM_FAUCET_DRY_RUN` | `true` | When `true`, uses `DryRunSender` and skips RPC/wallet startup checks; exposed by `/api/v1/status` and `/api/v1/config` |
