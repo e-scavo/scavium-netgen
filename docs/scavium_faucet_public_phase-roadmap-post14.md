@@ -284,16 +284,53 @@ Outcome:
 
 ## Phase 18 — Admin & Control Plane
 
-### 18.1 — Admin Interface
-- Pause/resume faucet
-- Stats overview
+**Status:** CLOSED after post-audit fixes.
 
-### 18.2 — Dynamic Budget Control
-- Runtime config changes
+Phase 18 turns the faucet from a passive, observable production service into an operator-controlled service, while preserving the public `/api/v1/claim` contract and the token-aware behavior closed in Phase 17. The admin surface is intentionally API-first, bearer-token protected, and designed for use behind the existing private operational boundary.
 
-### 18.3 — Claim Audit
-- History
-- Export
+### 18.1 — Admin Metrics Expansion
+- Expanded the admin metrics snapshot with Go runtime/process visibility.
+- Preserved backward compatibility by adding fields instead of replacing the existing metrics shape.
+- Kept metrics safe for admin consumption only; no public endpoint contract changed.
+
+### 18.2 — Admin Runtime Visibility
+- Added a consolidated admin runtime view combining dashboard, readiness, metrics, and server time.
+- Kept the response deterministic and read-only.
+- Avoided duplicating public status semantics or exposing secrets.
+
+### 18.3 — Admin Queue Visibility
+- Added admin queue visibility with status counts and bounded recent operational items.
+- Exposes queue state without wallet/address disclosure in compact queue rows.
+- Supports operator triage without changing worker behavior or public claim flow.
+
+### 18.4 — Admin Queue Control
+- Added admin retry/cancel controls for queued claim operations.
+- Reuses existing claim states and service validation; no new DB schema or worker refactor was introduced.
+- Keeps all control operations under the admin-authenticated route tree.
+
+### 18.5 — Admin Operational Audit Trail
+- Added structured audit logging for sensitive admin actions: mode changes, queue retry/cancel, claim retry/cancel, and blocklist add/remove.
+- Avoids logging the admin token and avoids exposing blocklist values in structured HTTP logs.
+- Retains in-memory audit visibility for the current single-process operational scope.
+
+### 18.6 — Admin Control Closure Audit
+- Hardened mode validation so only `active`, `paused`, and `maintenance` are accepted.
+- Invalid mode changes now fail before mutation and return `invalid_mode`.
+- Added tests around service-level and HTTP-level rejection behavior.
+
+### 18.7 — Post-Audit Fixes
+- Connected admin mode changes to the live faucet runtime so `active`, `paused`, and `maintenance` affect production claim behavior immediately.
+- Corrected admin audit actor attribution behind nginx/trusted proxy by using the real client IP resolution path.
+- Capped admin queue visibility limits to avoid accidental oversized responses.
+
+### Phase 18 scope notes
+- Dynamic budget/config editing remains intentionally deferred. The current production-safe control plane supports runtime mode control, visibility, retry/cancel operations, blocklist management, and auditability, but does not yet mutate amount, cooldown, daily budget, or risk rules at runtime.
+- Export-oriented admin features remain backlog items; current claim and audit visibility are API-first and bounded.
+- A fully SQLite-backed admin control plane can be introduced later if the project needs durable admin state beyond the current runtime control and existing persistent claim queue.
+
+Outcome:
+- Phase 18 is closed as a production-safe admin/control-plane layer for the current single-instance SQLite-backed faucet.
+- Phase 19 can proceed from a runtime-controllable, audited, token-aware service without revisiting the public claim contract.
 
 ---
 
