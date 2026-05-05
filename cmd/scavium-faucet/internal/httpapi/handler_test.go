@@ -242,6 +242,12 @@ func TestCreateClaimLogsAcceptedClaimFlowWithCorrelationID(t *testing.T) {
 	if claimLog["claim_id"] != "claim_test" {
 		t.Fatalf("claim_id = %q", claimLog["claim_id"])
 	}
+	if claimLog["event"] != "token_claim_accepted" {
+		t.Fatalf("event = %q", claimLog["event"])
+	}
+	if claimLog["token_id"] != "native" {
+		t.Fatalf("token_id = %q", claimLog["token_id"])
+	}
 	if claimLog["has_idempotency_key"] != true {
 		t.Fatalf("has_idempotency_key = %v", claimLog["has_idempotency_key"])
 	}
@@ -1294,6 +1300,21 @@ func TestAdminMetricsCountsInvalidTokenClaims(t *testing.T) {
 	if body.Claims.RejectedByRisk != 0 {
 		t.Fatalf("claims.rejected_by_risk = %d, want 0", body.Claims.RejectedByRisk)
 	}
+	assertHTTPTokenMetrics(t, body.Tokens, observability.RuntimeTokenMetrics{TokenID: "missing-token", Rejected: 1, InvalidToken: 1})
+}
+
+func assertHTTPTokenMetrics(t *testing.T, tokens []observability.RuntimeTokenMetrics, want observability.RuntimeTokenMetrics) {
+	t.Helper()
+	for _, got := range tokens {
+		if got.TokenID != want.TokenID {
+			continue
+		}
+		if got.Accepted != want.Accepted || got.Rejected != want.Rejected || got.RateLimited != want.RateLimited || got.DailyExceeded != want.DailyExceeded || got.InvalidToken != want.InvalidToken {
+			t.Fatalf("token metrics for %q = %#v, want %#v", want.TokenID, got, want)
+		}
+		return
+	}
+	t.Fatalf("missing token metrics for %q in %#v", want.TokenID, tokens)
 }
 
 func testReadService() faucet.ReadService {

@@ -314,7 +314,7 @@ Wrong or missing token returns `401`. Empty configured token returns `503`.
 
 ### `GET /api/v1/admin/metrics`
 
-Returns lightweight in-process runtime counters and build/runtime metadata. The endpoint is protected by the same bearer-token middleware as the rest of `/api/v1/admin/*`. Counters reset when the faucet process restarts and are intended for immediate operational diagnostics, not durable accounting.
+Returns lightweight in-process runtime counters and build/runtime metadata. The endpoint is protected by the same bearer-token middleware as the rest of `/api/v1/admin/*`. Counters reset when the faucet process restarts and are intended for immediate operational diagnostics, not durable accounting. Post Phase 17.3.3, the response also includes token-scoped counters under `tokens`; the special `default` token id represents requests that omitted `token_id` at the HTTP boundary and therefore used the configured default-token path.
 
 ```json
 {
@@ -330,7 +330,8 @@ Returns lightweight in-process runtime counters and build/runtime metadata. The 
     "rejected": 3,
     "rejected_by_risk": 1,
     "faucet_unavailable": 0,
-    "claim_unavailable": 0
+    "claim_unavailable": 0,
+    "invalid_token": 1
   },
   "captcha": {
     "failed": 1
@@ -340,9 +341,34 @@ Returns lightweight in-process runtime counters and build/runtime metadata. The 
   },
   "budgets": {
     "daily_exceeded": 1
-  }
+  },
+  "tokens": [
+    {
+      "token_id": "default",
+      "accepted": 8,
+      "rejected": 1,
+      "rate_limited": 0,
+      "daily_exceeded": 0,
+      "invalid_token": 0
+    },
+    {
+      "token_id": "scav",
+      "accepted": 4,
+      "rejected": 2,
+      "rate_limited": 1,
+      "daily_exceeded": 1,
+      "invalid_token": 0
+    }
+  ]
 }
 ```
+
+Operational notes:
+
+- `claims.*`, `captcha.*`, `rate_limits.*`, and `budgets.*` remain aggregate process-local counters.
+- `tokens[*]` is diagnostic only and is not a durable accounting ledger.
+- Token ids are configuration/public-catalog identifiers only; wallet addresses, raw fingerprints, request bodies, captcha tokens, and idempotency keys are not exposed.
+- Invalid token attempts are counted both in aggregate `claims.invalid_token` and in the token-scoped bucket matching the supplied `token_id`.
 
 ### `GET /api/v1/admin/dashboard`
 

@@ -295,3 +295,22 @@ Operational notes:
 - Submit one claim with the default token and one claim with a non-default token from the same test wallet to verify independent cooldown behavior.
 - Submit repeated claims for the same token, source IP, and wallet to verify the existing cooldown/rate-limit protections still apply per token.
 - Existing rejection contracts are unchanged: cooldown still returns `cooldown_active`, rate limiting still returns `rate_limited`, and daily budget exhaustion still returns `daily_budget_exceeded`.
+
+## Token-aware observability operations (Phase 17.3.3)
+
+`GET /api/v1/admin/metrics` now exposes token-scoped counters alongside the existing aggregate counters. Use this view when validating multi-token behavior after adding or changing `SCAVIUM_FAUCET_TOKENS_JSON`.
+
+Operational notes:
+
+- `tokens[*].token_id` matches the public catalog token id when a token was explicitly selected or resolved by the claim response.
+- The `default` bucket represents claims that omitted `token_id` at the HTTP boundary.
+- `tokens[*].invalid_token` helps identify typo, stale frontend, or hostile token selection attempts.
+- Token-scoped counters reset on process restart and are not a replacement for SQLite claim/abuse-signal inspection.
+- Structured logs may include safe token ids and event markers, but must not include wallet addresses, raw fingerprints, captcha tokens, request bodies, secrets, or idempotency-key values.
+
+Quick check:
+
+```bash
+curl -sS -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  http://127.0.0.1:18080/api/v1/admin/metrics
+```
