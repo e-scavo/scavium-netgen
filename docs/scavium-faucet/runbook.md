@@ -357,3 +357,15 @@ After deploying the frontend bundle, validate token selector behavior from a bro
 5. Submit a claim and confirm the browser request includes `token_id` only when a catalog token is selected.
 
 The fallback state is intentional: catalog discovery failure must not make legacy/default-token claims impossible. Operators should still inspect `/api/v1/tokens`, `/api/v1/status`, and `/api/v1/admin/metrics` when diagnosing token selector issues.
+
+## Frontend claim-result UX checks (Phase 17.4.3)
+
+After deploying the frontend bundle, validate the post-claim result panel with both default and non-default token claims:
+
+1. Submit a default/native claim and confirm the result panel still renders even when no explicit `token_id` is present.
+2. Submit a configured ERC20 claim and confirm the summary shows the selected token symbol/id, resolved amount, token type, and status.
+3. Confirm the detailed rows still include claim id, status, address, amount, transaction hash, and timestamps when returned by the backend.
+4. Confirm the explorer action appears only when both `tx_hash` and the configured explorer transaction URL are available.
+5. Confirm no address masking, token metadata, or explorer-copy changes alter the backend claim response contract.
+
+This is a presentation-layer alignment only. API validation, token-scoped enforcement, and token-aware metrics remain owned by the backend layers closed in Phase 17.3.

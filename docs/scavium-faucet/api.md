@@ -517,3 +517,10 @@ Phase 17.4.2 frontend UX note:
 - The selector now presents explicit loading and fallback states for catalog discovery.
 - Selected-token details are rendered from claim-safe catalog metadata only.
 - Fallback UX remains contract-preserving: when no catalog token is selected, the browser omits `token_id` and the backend resolves the configured default token.
+
+Phase 17.4.3 claim-result UX note:
+
+- Claim creation and claim polling responses keep the same response body shape.
+- The frontend now formats returned `amount_wei` with token decimals when token metadata is available, while preserving the raw base-unit value in the result details.
+- Explorer links continue to use the configured explorer URL and `tx_hash`; only the user-facing copy is clarified as a transaction action.
+- Native/default claims remain supported even when `token_id`, `token_symbol`, or `token_type` are absent from older/default responses.

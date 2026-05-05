@@ -134,3 +134,9 @@ The implementation remains backward-compatible and failure-safe: if the token ca
 Phase 17.4.2 hardens the browser-side token selector introduced in Phase 17.4.1 without changing any backend contract. The frontend now exposes explicit catalog loading and fallback states, keeps default-token claim behavior visible when catalog discovery fails, and renders selected-token details using claim-safe metadata from `GET /api/v1/tokens`.
 
 The UI remains dependency-free and CSP-compatible. Token labels and detail cards use only public metadata (`id`, `symbol`, `type`, `decimals`, and `amount_wei`), while the claim payload continues to send only the optional selected `token_id`. No token icons, balance checks, runtime admin mutation, or database-backed catalog behavior is introduced.
+
+## Phase 17.4.3 — Token Claim Result UX Alignment
+
+Phase 17.4.3 aligns the browser-side claim result panel with the token-aware claim pipeline already stabilized in Phase 17.3. Successful and polled claim responses now render a compact token-aware summary above the existing key/value details, using the returned token metadata to show the selected asset, resolved amount, status, token type, and explorer action more clearly.
+
+The change remains frontend-only and contract-preserving. It does not introduce new API fields, backend behavior, external JavaScript dependencies, token icons, or admin mutation. If a response represents the native/default path or lacks token metadata, the UI falls back to the existing default-token wording and still displays the raw claim details.

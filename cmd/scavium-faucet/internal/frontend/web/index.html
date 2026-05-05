@@ -338,6 +338,43 @@
       cursor: not-allowed;
     }
 
+    .claim-summary {
+      margin: 0 0 14px;
+      border: 1px solid rgba(249, 115, 22, 0.22);
+      border-radius: var(--scavo-radius-md);
+      background: rgba(249, 115, 22, 0.08);
+      padding: 14px;
+    }
+
+    .claim-summary-main {
+      display: grid;
+      gap: 6px;
+    }
+
+    .claim-summary-main strong {
+      font-size: 18px;
+      color: var(--scavo-text-primary);
+      word-break: break-word;
+    }
+
+    .claim-summary-main span {
+      color: var(--scavo-text-secondary);
+      font-size: 13px;
+    }
+
+    .claim-badge {
+      width: fit-content;
+      border-radius: 999px;
+      border: 1px solid rgba(34, 197, 94, 0.28);
+      background: rgba(34, 197, 94, 0.10);
+      color: #BBF7D0 !important;
+      padding: 4px 9px;
+      font-size: 11px !important;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
     .kv {
       display: grid;
       grid-template-columns: 140px 1fr;
@@ -482,6 +519,7 @@
 
     <section id="claim-result" class="card hidden">
       <h2>Claim Status</h2>
+      <div id="claim-summary" class="claim-summary hidden" aria-live="polite"></div>
       <div id="claim-kv"></div>
       <div id="explorer-link" class="status info hidden"></div>
     </section>

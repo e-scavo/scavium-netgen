@@ -183,4 +183,5 @@ Operational implications:
 - If no valid token catalog can be loaded by the browser, the selector remains hidden and legacy/default-token claim behavior is preserved.
 - Token labels are rendered from public metadata only: `id`, `symbol`, `type`, `decimals`, and `amount_wei`.
 - Phase 17.4.2 additionally renders loading/fallback states and selected-token detail cards from that same metadata.
-- The frontend does not require a separate token-selector configuration flag; catalog availability remains the source of truth.
+- Phase 17.4.3 additionally formats claim result summaries from returned claim metadata (`token_id`, `token_symbol`, `token_type`, `token_decimals`, and `amount_wei`) without introducing a frontend-specific configuration source.
+- The frontend does not require a separate token-selector or claim-result configuration flag; catalog availability and claim responses remain the source of truth.

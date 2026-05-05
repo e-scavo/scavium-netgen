@@ -431,12 +431,62 @@
     el("btn-send").disabled = disabled;
   }
 
+
+  function claimTokenLabel(data) {
+    if (!data) {
+      return "Default token";
+    }
+    var symbol = data.token_symbol || data.symbol || "";
+    var id = data.token_id || "";
+    if (symbol && id && symbol !== id) {
+      return symbol + " (" + id + ")";
+    }
+    return symbol || id || "Default token";
+  }
+
+  function claimAmountDisplay(data) {
+    if (!data || !data.amount_wei) {
+      return "";
+    }
+    var decimals = data.token_decimals;
+    var symbol = data.token_symbol || data.symbol || "";
+    var display = formatDecimalAmount(data.amount_wei, decimals);
+    if (!display) {
+      return data.amount_wei + " base units";
+    }
+    if (symbol) {
+      display += " " + symbol;
+    }
+    return display + " (" + data.amount_wei + " base units)";
+  }
+
+  function renderClaimSummary(data) {
+    var summary = el("claim-summary");
+    if (!summary || !data) {
+      return;
+    }
+    var status = String(data.status || "unknown");
+    var tokenLabel = claimTokenLabel(data);
+    var amount = claimAmountDisplay(data) || "Configured faucet amount";
+    var type = data.token_type ? String(data.token_type).toUpperCase() : "DEFAULT";
+    summary.innerHTML =
+      '<div class="claim-summary-main">' +
+        '<span class="claim-badge">' + esc(status) + '</span>' +
+        '<strong>' + esc(amount) + '</strong>' +
+        '<span>' + esc(tokenLabel + " · " + type) + '</span>' +
+      '</div>';
+    setHidden(summary, false);
+  }
+
   function renderClaim(data) {
+    renderClaimSummary(data);
     var rows = [];
     if (data.id) rows.push(["Claim ID", data.id]);
     if (data.status) rows.push(["Status", data.status]);
+    if (data.token_id || data.token_symbol) rows.push(["Token", claimTokenLabel(data)]);
+    if (data.token_type) rows.push(["Token Type", String(data.token_type).toUpperCase()]);
     if (data.address) rows.push(["Address", data.address]);
-    if (data.amount_wei) rows.push(["Amount", data.amount_wei + (data.symbol ? " base units of " + data.symbol : " base units")]);
+    if (data.amount_wei) rows.push(["Amount", claimAmountDisplay(data) || data.amount_wei + " base units"]);
     if (data.tx_hash) rows.push(["Tx Hash", data.tx_hash]);
     if (data.created_at) rows.push(["Created", data.created_at]);
     if (data.updated_at) rows.push(["Updated", data.updated_at]);
@@ -452,7 +502,7 @@
     if (data.tx_hash && state.explorerTxURL) {
       var href = state.explorerTxURL.replace("{txHash}", encodeURIComponent(data.tx_hash));
       link.className = "status visible info";
-      link.innerHTML = '<a href="' + esc(href) + '" target="_blank" rel="noopener">View on explorer</a>';
+      link.innerHTML = '<a href="' + esc(href) + '" target="_blank" rel="noopener">View transaction on explorer</a>';
       return;
     }
     link.className = "status hidden";
