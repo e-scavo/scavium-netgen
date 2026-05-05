@@ -17,6 +17,10 @@ This document describes the security posture of the faucet **as currently implem
 
 These are useful baseline protections against accidental exposure, oversized headers, slow requests, and oversized request bodies.
 
+### Runtime shutdown safety
+
+The process handles `SIGINT` and `SIGTERM` with a bounded graceful shutdown. During shutdown the HTTP server is asked to stop first, the application runtime context is cancelled, background worker/watcher loops exit through that context, and owned resources such as SQLite and the RPC client are closed once. If either HTTP shutdown or application cleanup fails, the process logs the failure and exits non-zero after both steps have been attempted.
+
 ### HTTP security headers
 
 The Go handler applies conservative browser hardening headers to every response, including API JSON, health/readiness responses, admin responses, frontend assets, and fallback frontend routes:

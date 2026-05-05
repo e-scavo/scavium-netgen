@@ -196,3 +196,13 @@ The HTTP surface keeps the existing public and admin route contracts while makin
 
 This is intentionally a defensive hardening pass only; bind address, routing, response envelopes, admin auth, CORS, request IDs, and security headers stay backward compatible.
 
+
+## Phase 19.4 — Operational Resilience / Graceful Shutdown & Runtime Safety
+
+The faucet keeps the same HTTP surface and deployment topology while making shutdown behavior more deterministic:
+
+1. `main.go` stops signal notification after registration and, on `SIGINT`/`SIGTERM`, attempts both HTTP server shutdown and application cleanup before deciding whether to exit with failure.
+2. `App.Close` is idempotent. Repeated close calls reuse the first close result and do not re-run database or chain-client closers.
+3. Background worker and watcher cancellation still flows through the application context, preserving the existing persistent queue and SQLite-backed claim behavior.
+
+This pass does not change routes, response envelopes, admin scope, SQLite schema, worker semantics, or runtime configuration names.

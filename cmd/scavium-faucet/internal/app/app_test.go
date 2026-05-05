@@ -236,3 +236,22 @@ func checkNames(result ready.Result) []string {
 	}
 	return names
 }
+
+func TestCloseIsIdempotent(t *testing.T) {
+	application := newTestApp(t, testConfig(t))
+	calls := 0
+	application.closeFuncs = append(application.closeFuncs, func(context.Context) error {
+		calls++
+		return nil
+	})
+
+	if err := application.Close(context.Background()); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err := application.Close(context.Background()); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("closer calls = %d, want 1", calls)
+	}
+}

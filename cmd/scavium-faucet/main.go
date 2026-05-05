@@ -55,6 +55,7 @@ func main() {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stop)
 
 	select {
 	case err := <-errs:
@@ -71,12 +72,15 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 		defer cancel()
 
-		if err := server.Shutdown(ctx); err != nil {
-			logger.Error("server shutdown failed", map[string]any{"error": err.Error()})
-			os.Exit(1)
+		shutdownErr := server.Shutdown(ctx)
+		closeErr := application.Close(ctx)
+		if shutdownErr != nil {
+			logger.Error("server shutdown failed", map[string]any{"error": shutdownErr.Error()})
 		}
-		if err := application.Close(ctx); err != nil {
-			logger.Error("application close failed", map[string]any{"error": err.Error()})
+		if closeErr != nil {
+			logger.Error("application close failed", map[string]any{"error": closeErr.Error()})
+		}
+		if shutdownErr != nil || closeErr != nil {
 			os.Exit(1)
 		}
 		logger.Info("server stopped", nil)

@@ -108,6 +108,7 @@ In dry-run mode the background worker picks up the queued claim and advances its
 - `/api/v1/admin/metrics` reports process-local runtime counters and resets on process restart.
 - In dry-run mode no on-chain transactions are submitted; the `DryRunSender` simulates success.
 - The watcher (on-chain confirmation poller) is only active when `DRY_RUN=false`.
+- On `SIGINT` or `SIGTERM`, the process stops accepting HTTP traffic, cancels background runtime work, waits up to the configured shutdown window, and closes owned resources once.
 
 ## CORS, daily budget, metrics, and logging
 

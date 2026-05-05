@@ -37,6 +37,8 @@ type App struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+	closeOnce  sync.Once
+	closeErr   error
 	closeFuncs []func(context.Context) error
 }
 
@@ -136,6 +138,13 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 
 // Close stops background work and releases resources owned by the app.
 func (a *App) Close(ctx context.Context) error {
+	a.closeOnce.Do(func() {
+		a.closeErr = a.close(ctx)
+	})
+	return a.closeErr
+}
+
+func (a *App) close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
