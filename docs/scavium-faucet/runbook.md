@@ -393,3 +393,15 @@ Phase 17 is the active operator baseline for multi-token faucet operation. After
 5. Check `/api/v1/admin/metrics` for aggregate and token-scoped counters without relying on them as durable accounting.
 
 This closure does not introduce runtime token mutation, database-backed token catalogs, durable per-token analytics, token icons, balance display, or a new admin-control surface. Those remain Phase 18+ concerns.
+
+## Post-audit token support checks (Phase 17.5 closed)
+
+Phase 17.5 is the post-audit fix baseline for the completed token-support layer. After deploying a Phase 17.5 build, operators should validate the specific audit corrections in addition to the broader Phase 17 checks:
+
+1. Confirm `/api/v1/status` drives the public frontend status banner from the `status` field, including paused, maintenance, and no-funds states.
+2. Trigger or simulate a cooldown rejection and confirm the frontend displays `retry_after_seconds` when returned in the error details.
+3. Submit accepted and rejected claims without `token_id` and confirm `/api/v1/admin/metrics` reports both paths under the same `default` token bucket.
+4. Submit a rejected claim with a malformed or control-character token id in a non-production test and confirm logs/metrics do not retain raw control characters.
+5. Re-run `go test ./...` before merging or deploying additional admin-control work.
+
+This closure does not introduce new operational endpoints, runtime token mutation, database-backed token catalogs, or durable analytics. It only records the post-audit corrections that keep the Phase 17 token-aware baseline production-safe before Phase 18.
