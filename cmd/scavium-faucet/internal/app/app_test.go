@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,6 +13,9 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
 	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/internal/ready"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 func TestCloseCancelsRuntimeContext(t *testing.T) {
@@ -253,5 +257,60 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("closer calls = %d, want 1", calls)
+	}
+}
+
+type walletRuntimeFakeClient struct {
+	pendingNonceCalls int
+	nonceCalls        int
+}
+
+func (f *walletRuntimeFakeClient) ChainID(context.Context) (*big.Int, error) {
+	return big.NewInt(31337), nil
+}
+func (f *walletRuntimeFakeClient) BalanceAt(context.Context, common.Address, *big.Int) (*big.Int, error) {
+	return big.NewInt(123), nil
+}
+func (f *walletRuntimeFakeClient) NonceAt(context.Context, common.Address, *big.Int) (uint64, error) {
+	f.nonceCalls++
+	return 4, nil
+}
+func (f *walletRuntimeFakeClient) PendingNonceAt(context.Context, common.Address) (uint64, error) {
+	f.pendingNonceCalls++
+	return 9, nil
+}
+func (f *walletRuntimeFakeClient) SuggestGasPrice(context.Context) (*big.Int, error) {
+	return big.NewInt(1), nil
+}
+func (f *walletRuntimeFakeClient) SendTransaction(context.Context, *types.Transaction) error {
+	return nil
+}
+func (f *walletRuntimeFakeClient) TransactionReceipt(context.Context, common.Hash) (*types.Receipt, error) {
+	return nil, nil
+}
+func (f *walletRuntimeFakeClient) BlockNumber(context.Context) (uint64, error) { return 1, nil }
+
+type walletRuntimeFakeSigner struct{ address common.Address }
+
+func (s walletRuntimeFakeSigner) Address() common.Address { return s.address }
+func (s walletRuntimeFakeSigner) Sign(tx *types.Transaction, _ int64) (*types.Transaction, error) {
+	return tx, nil
+}
+
+func TestWalletRuntimeUsesPendingNonceWhenAvailable(t *testing.T) {
+	client := &walletRuntimeFakeClient{}
+	provider := walletRuntimeProvider{
+		cfg:           config.Defaults(),
+		client:        client,
+		pendingNoncer: client,
+		signer:        walletRuntimeFakeSigner{address: common.HexToAddress("0x52908400098527886E0F7030069857D2E4169EE7")},
+	}
+
+	snapshot := provider.WalletRuntime(context.Background())
+	if snapshot.PendingNonce != 9 {
+		t.Fatalf("pending nonce = %d, want 9", snapshot.PendingNonce)
+	}
+	if client.pendingNonceCalls != 1 || client.nonceCalls != 0 {
+		t.Fatalf("pending calls=%d nonce calls=%d, want pending only", client.pendingNonceCalls, client.nonceCalls)
 	}
 }

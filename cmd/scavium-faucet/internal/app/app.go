@@ -51,10 +51,11 @@ type senderBundle struct {
 }
 
 type walletRuntimeProvider struct {
-	cfg    config.Config
-	client chain.ChainClient
-	caller chain.ContractCaller
-	signer chain.Signer
+	cfg           config.Config
+	client        chain.ChainClient
+	pendingNoncer chain.PendingNonceClient
+	caller        chain.ContractCaller
+	signer        chain.Signer
 }
 
 // New constructs the faucet application with its configured HTTP handler tree.
@@ -268,7 +269,8 @@ func newWalletRuntimeProvider(cfg config.Config, bundle senderBundle) httpapi.Wa
 		return walletRuntimeProvider{cfg: cfg}
 	}
 	caller, _ := bundle.chainClient.(chain.ContractCaller)
-	return walletRuntimeProvider{cfg: cfg, client: bundle.chainClient, caller: caller, signer: bundle.signer}
+	pendingNoncer, _ := bundle.chainClient.(chain.PendingNonceClient)
+	return walletRuntimeProvider{cfg: cfg, client: bundle.chainClient, pendingNoncer: pendingNoncer, caller: caller, signer: bundle.signer}
 }
 
 func (p walletRuntimeProvider) WalletRuntime(ctx context.Context) httpapi.AdminWalletRuntime {
@@ -288,7 +290,7 @@ func (p walletRuntimeProvider) WalletRuntime(ctx context.Context) httpapi.AdminW
 	} else if balance != nil {
 		snapshot.NativeBalanceWei = balance.String()
 	}
-	nonce, err := p.client.NonceAt(ctx, address, nil)
+	nonce, err := p.pendingNonce(ctx, address)
 	if err != nil {
 		snapshot.Status = "degraded"
 		if snapshot.Error == "" {
@@ -334,6 +336,16 @@ func (p walletRuntimeProvider) WalletRuntime(ctx context.Context) httpapi.AdminW
 		snapshot.Tokens = append(snapshot.Tokens, tr)
 	}
 	return snapshot
+}
+
+func (p walletRuntimeProvider) pendingNonce(ctx context.Context, address common.Address) (uint64, error) {
+	if p.pendingNoncer != nil {
+		return p.pendingNoncer.PendingNonceAt(ctx, address)
+	}
+	if p.client == nil {
+		return 0, errors.New("chain client is not configured")
+	}
+	return p.client.NonceAt(ctx, address, nil)
 }
 
 func runtimeChecks(cfg config.Config, store *sqlite.Store, chainClient chain.ChainClient, signer chain.Signer) []ready.Check {

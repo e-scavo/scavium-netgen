@@ -23,7 +23,7 @@ type ChainClient interface {
 	ChainID(ctx context.Context) (*big.Int, error)
 	// BalanceAt returns the wei balance of addr at the given block (nil = latest).
 	BalanceAt(ctx context.Context, addr common.Address, blockNumber *big.Int) (*big.Int, error)
-	// NonceAt returns the pending nonce for addr.
+	// NonceAt returns the account nonce for addr at blockNumber.
 	NonceAt(ctx context.Context, addr common.Address, blockNumber *big.Int) (uint64, error)
 	// SuggestGasPrice returns the recommended legacy gas price.
 	SuggestGasPrice(ctx context.Context) (*big.Int, error)
@@ -41,6 +41,11 @@ type ClosableChainClient interface {
 	Close()
 }
 
+// PendingNonceClient abstracts pending nonce visibility for operator runtime views.
+type PendingNonceClient interface {
+	PendingNonceAt(ctx context.Context, addr common.Address) (uint64, error)
+}
+
 // ContractCaller abstracts read-only eth_call access for optional ERC20 balance visibility.
 type ContractCaller interface {
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
@@ -52,6 +57,7 @@ type Client struct {
 }
 
 var _ ChainClient = (*Client)(nil)
+var _ PendingNonceClient = (*Client)(nil)
 var _ ContractCaller = (*Client)(nil)
 
 // NewClient dials an Ethereum JSON-RPC endpoint and returns a ready-to-use Client.
@@ -138,6 +144,10 @@ func (c *Client) BalanceAt(ctx context.Context, addr common.Address, blockNumber
 
 func (c *Client) NonceAt(ctx context.Context, addr common.Address, blockNumber *big.Int) (uint64, error) {
 	return c.ec.NonceAt(ctx, addr, blockNumber)
+}
+
+func (c *Client) PendingNonceAt(ctx context.Context, addr common.Address) (uint64, error) {
+	return c.ec.PendingNonceAt(ctx, addr)
 }
 
 func (c *Client) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
