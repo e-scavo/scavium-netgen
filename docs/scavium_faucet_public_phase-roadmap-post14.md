@@ -415,17 +415,17 @@ Required closure scope:
 
 ---
 
-## Phase 23 — Operational Runbooks, Backup/Restore, and Wallet Procedures (Planned)
+## Phase 23 — Operational Runbooks, Backup/Restore, and Wallet Procedures (Closed)
 
-Phase 23 must make production operation repeatable after the durable admin and observability layers are complete.
+Phase 23 makes production operation repeatable after the durable admin and observability layers are complete.
 
 Required closure scope:
 
-- SQLite backup/restore scripts or documented commands with dry-run validation.
-- Configuration backup checklist.
-- Wallet refill and wallet rotation runbooks.
-- Deployment rollback verification.
-- Production checklist update.
+- SQLite backup/restore scripts with plan, execute, and verification flows.
+- Configuration backup checklist and secret-handling guidance.
+- Wallet refill and wallet rotation runbooks with rollback and verification steps.
+- Deployment rollback verification commands.
+- Production checklist update covering health, readiness, admin runtime, wallet visibility, and operator smoke tests.
 
 ---
 

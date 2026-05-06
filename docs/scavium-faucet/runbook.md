@@ -518,3 +518,132 @@ Keep nginx access logs enabled at the reverse proxy and correlate them with appl
 ### Phase 21 implementation verification note
 
 The Phase 21 metrics instrumentation is expected to remain backward compatible with existing internal constructors used by tests and embedding code. `worker.New(...)` and `chain.NewWatcher(...)` still support nil metrics instrumentation; production wiring uses `NewWithMetrics(...)`, but legacy constructor paths must not panic when metrics are omitted.
+
+## Phase 23 backup, restore, refill, and rotation operations
+
+Phase 23 makes the manual production operations repeatable without adding automatic treasury movement or unsafe background restore behavior. The scripts are review-first and local-only; operators must still decide when to stop/start services, where to store encrypted backups, and when to move real funds.
+
+### SQLite and configuration backup
+
+Use the backup helper in plan mode first:
+
+```bash
+SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db \
+SCAVIUM_FAUCET_ENV_FILE=/etc/scavium-faucet/scavium-faucet.env \
+scripts/scavium-faucet-backup.sh --plan
+```
+
+Create a restricted local bundle only after reviewing the paths:
+
+```bash
+SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db \
+SCAVIUM_FAUCET_ENV_FILE=/etc/scavium-faucet/scavium-faucet.env \
+SCAVIUM_FAUCET_BACKUP_DIR=/secure/offline/scavium-faucet-backups \
+scripts/scavium-faucet-backup.sh --execute
+```
+
+Verify the bundle before relying on it:
+
+```bash
+SCAVIUM_FAUCET_BACKUP_FILE=/secure/offline/scavium-faucet-backups/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
+scripts/scavium-faucet-backup.sh --verify
+```
+
+The bundle can include the reviewed environment file, which may contain `SCAVIUM_FAUCET_PRIVATE_KEY`, `SCAVIUM_FAUCET_ADMIN_TOKEN`, captcha secrets, and RPC credentials. Treat backup archives as secret material: store them encrypted, restrict filesystem permissions, and never attach them to tickets, chats, or public artifacts.
+
+### Restore drill and production restore
+
+Always perform a dry-run restore plan first:
+
+```bash
+SCAVIUM_FAUCET_RESTORE_BUNDLE=/secure/offline/scavium-faucet-backups/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
+SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db \
+scripts/scavium-faucet-restore.sh --plan
+```
+
+For production restore, use an explicit maintenance window:
+
+1. Put the faucet in maintenance mode through the admin API when available.
+2. Stop the service: `sudo systemctl stop scavium-faucet`.
+3. Snapshot the current DB/env paths out-of-band if possible.
+4. Execute restore with an explicit confirmation flag:
+
+```bash
+SCAVIUM_FAUCET_RESTORE_BUNDLE=/secure/offline/scavium-faucet-backups/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
+SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db \
+SCAVIUM_FAUCET_RESTORE_CONFIRM=yes \
+scripts/scavium-faucet-restore.sh --execute
+```
+
+5. Restore configuration only when the env file itself is part of the recovery scope:
+
+```bash
+SCAVIUM_FAUCET_RESTORE_BUNDLE=/secure/offline/scavium-faucet-backups/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
+SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db \
+SCAVIUM_FAUCET_ENV_FILE=/etc/scavium-faucet/scavium-faucet.env \
+SCAVIUM_FAUCET_RESTORE_CONFIG=yes \
+SCAVIUM_FAUCET_RESTORE_CONFIRM=yes \
+scripts/scavium-faucet-restore.sh --execute
+```
+
+6. Start the service: `sudo systemctl start scavium-faucet`.
+7. Verify `systemctl status`, `/health`, `/ready`, `/api/v1/admin/runtime`, and `/api/v1/admin/wallet`.
+8. Review recent queue entries and audit logs before leaving maintenance mode.
+
+The restore helper refuses live restore when it can detect an active systemd service. Do not bypass that guard unless you intentionally accept SQLite consistency risk for a non-production drill.
+
+### Manual wallet refill
+
+There is no automatic treasury refill in Phase 23. Operators should refill only after confirming the signer address and balances through admin-only visibility:
+
+```bash
+curl -fsS http://127.0.0.1:18080/api/v1/admin/wallet \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+```
+
+Refill checklist:
+
+1. Confirm the reported signer address matches the intended faucet hot wallet.
+2. Confirm `native_balance_wei`, `pending_nonce`, and each ERC20 token balance/status.
+3. Confirm claim mode is appropriate. Use maintenance or pause mode if refill timing could confuse users.
+4. From a separate treasury wallet, send a small test amount first.
+5. Wait for confirmations and verify `/api/v1/admin/wallet` again.
+6. Send the remaining planned refill amount only after the test transaction is visible.
+7. Record the treasury transaction hash, amount, token, operator, and reason in the operational log.
+
+Never paste `SCAVIUM_FAUCET_PRIVATE_KEY` into a treasury tool. The faucet hot wallet receives funds; it should not be used as a treasury source.
+
+### Manual wallet rotation
+
+Wallet rotation is configuration-driven and intentionally manual. No Phase 23 script moves funds or rewrites secrets automatically.
+
+Safe rotation sequence:
+
+1. Schedule a maintenance window and announce it if public traffic is expected.
+2. Put the faucet into maintenance mode and let the worker drain safe in-flight claims.
+3. Back up SQLite and configuration with `scripts/scavium-faucet-backup.sh --execute`.
+4. Generate the new hot wallet outside the repository using the approved operator wallet tooling.
+5. Fund the new hot wallet with a small native amount and any required ERC20 balances.
+6. Update the real environment file outside Git with the new `SCAVIUM_FAUCET_PRIVATE_KEY`.
+7. Restart the service and verify `/ready` plus `/api/v1/admin/wallet` show the new signer address, expected chain, balance, and pending nonce.
+8. Submit one bounded test claim for the native token and, if configured, one ERC20 test claim per token.
+9. Move leftover funds from the old hot wallet only after the new wallet is proven healthy.
+10. Keep the old key material sealed until rollback is no longer needed, then retire it according to the operator key-retention policy.
+
+Rollback during rotation is also manual: restore the previous environment file or backup bundle, restart the service, verify the old signer address through `/api/v1/admin/wallet`, and only then re-enable public claims.
+
+### Deployment rollback verification checklist
+
+After every rollback or restore, verify the full operator loop before declaring recovery complete:
+
+```bash
+systemctl status scavium-faucet --no-pager
+journalctl -u scavium-faucet -n 100 --no-pager
+curl -fsS http://127.0.0.1:18080/health
+curl -fsS http://127.0.0.1:18080/ready
+curl -fsS http://127.0.0.1:18080/api/v1/admin/runtime -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+curl -fsS http://127.0.0.1:18080/api/v1/admin/wallet -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+scripts/scavium-faucet-operator-smoke.sh
+```
+
+If `/ready` is degraded, keep the faucet paused/maintenance and inspect DB, queue, RPC failover selection, wallet balance, and ERC20 contract reachability before accepting public claims.
