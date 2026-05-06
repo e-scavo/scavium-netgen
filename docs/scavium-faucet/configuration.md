@@ -231,7 +231,7 @@ Backup helper variables:
 | `SCAVIUM_FAUCET_ENV_FILE` | `/etc/scavium-faucet/scavium-faucet.env` | Reviewed runtime env file to include in the backup bundle when present. |
 | `SCAVIUM_FAUCET_BACKUP_DIR` | `./scavium-faucet-backups` | Local directory where backup bundles are written. |
 | `SCAVIUM_FAUCET_BACKUP_ID` | UTC timestamp | Optional stable id for repeatable backup naming. |
-| `SCAVIUM_FAUCET_BACKUP_FILE` | generated bundle path | Existing bundle to verify in `--verify` mode. |
+| `SCAVIUM_FAUCET_BACKUP_FILE` | generated bundle path | Existing bundle to verify in `--verify` mode. Verification requires `SHA256SUMS`, validates checksums, and rejects unsafe archive paths. |
 
 Restore helper variables:
 
@@ -245,4 +245,4 @@ Restore helper variables:
 | `SCAVIUM_FAUCET_RESTORE_CONFIRM` | `no` | Must be `yes` for `--execute`. |
 | `SCAVIUM_FAUCET_ALLOW_LIVE_RESTORE` | `no` | Emergency override for the live-service guard. Avoid in production. |
 
-These variables are script controls only. They do not change the faucet API, token catalog, signing behavior, or admin authorization contract. Backup bundles may contain secrets from the env file, so they must be handled like production credentials.
+These variables are script controls only. They do not change the faucet API, token catalog, signing behavior, or admin authorization contract. Backup bundles may contain secrets from the env file, so they must be handled like production credentials. Restore mode intentionally requires a checksum-bearing bundle produced by the backup helper.

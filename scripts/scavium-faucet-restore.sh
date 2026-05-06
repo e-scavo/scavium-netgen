@@ -25,6 +25,7 @@ Environment:
 Safety:
   - Default mode is --plan and performs no writes.
   - --execute requires SCAVIUM_FAUCET_RESTORE_CONFIRM=yes.
+  - Restore rejects unsafe archive paths and verifies SHA256SUMS before writing.
   - Restore should be performed while the service is stopped.
   - This script never starts, stops, or restarts systemd by itself.
 USAGE
@@ -64,6 +65,18 @@ ALLOW_LIVE_RESTORE="${SCAVIUM_FAUCET_ALLOW_LIVE_RESTORE:-no}"
 require_cmd tar
 require_cmd sha256sum
 
+validate_bundle_listing() {
+    local bundle="$1"
+    local entry
+    while IFS= read -r entry; do
+        case "$entry" in
+            /*|../*|*/../*|*"/.."|"..")
+                die "unsafe path in restore bundle: $entry"
+                ;;
+        esac
+    done < <(tar -tzf "$bundle")
+}
+
 cat <<SUMMARY
 [restore] mode:           $mode
 [restore] bundle:         $BUNDLE
@@ -79,12 +92,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+validate_bundle_listing "$BUNDLE"
 tar -C "$TMP_DIR" -xzf "$BUNDLE"
 [[ -f "$TMP_DIR/db/scavium-faucet.db" ]] || die "bundle does not contain db/scavium-faucet.db"
-
-if [[ -f "$TMP_DIR/SHA256SUMS" ]]; then
-    (cd "$TMP_DIR" && sha256sum -c SHA256SUMS >/dev/null)
-fi
+[[ -f "$TMP_DIR/SHA256SUMS" ]] || die "bundle does not contain SHA256SUMS"
+(cd "$TMP_DIR" && sha256sum -c SHA256SUMS >/dev/null)
 
 if [[ "$mode" == "--plan" ]]; then
     echo "[restore] plan only; no files will be written"
