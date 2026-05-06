@@ -245,4 +245,4 @@ Restore helper variables:
 | `SCAVIUM_FAUCET_RESTORE_CONFIRM` | `no` | Must be `yes` for `--execute`. |
 | `SCAVIUM_FAUCET_ALLOW_LIVE_RESTORE` | `no` | Emergency override for the live-service guard. Avoid in production. |
 
-These variables are script controls only. They do not change the faucet API, token catalog, signing behavior, or admin authorization contract. Backup bundles may contain secrets from the env file, so they must be handled like production credentials. Restore mode intentionally requires a checksum-bearing bundle produced by the backup helper.
+These variables are script controls only. They do not change the faucet API, token catalog, signing behavior, or admin authorization contract. Backup bundles may contain secrets from the env file, so they must be handled like production credentials. Restore mode intentionally requires a checksum-bearing bundle produced by the backup helper and restores optional SQLite WAL/SHM companions only when they are present in that verified bundle.

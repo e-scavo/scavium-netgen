@@ -590,7 +590,7 @@ scripts/scavium-faucet-restore.sh --execute
 7. Verify `systemctl status`, `/health`, `/ready`, `/api/v1/admin/runtime`, and `/api/v1/admin/wallet`.
 8. Review recent queue entries and audit logs before leaving maintenance mode.
 
-The restore helper refuses live restore when it can detect an active systemd service. Do not bypass that guard unless you intentionally accept SQLite consistency risk for a non-production drill.
+The restore helper refuses live restore when it can detect an active systemd service. Do not bypass that guard unless you intentionally accept SQLite consistency risk for a non-production drill. When a fallback backup contains SQLite `-wal` or `-shm` companion files, restore installs them next to the target database and removes stale target companions when they are absent from the verified bundle.
 
 ### Manual wallet refill
 

@@ -26,6 +26,7 @@ Safety:
   - Default mode is --plan and performs no writes.
   - --execute requires SCAVIUM_FAUCET_RESTORE_CONFIRM=yes.
   - Restore rejects unsafe archive paths and verifies SHA256SUMS before writing.
+  - Optional SQLite WAL/SHM companion files are restored when present in the bundle.
   - Restore should be performed while the service is stopped.
   - This script never starts, stops, or restarts systemd by itself.
 USAGE
@@ -108,6 +109,11 @@ tar -C "$TMP_DIR" -xzf "$BUNDLE"
 if [[ "$mode" == "--plan" ]]; then
     echo "[restore] plan only; no files will be written"
     echo "[restore] would install db/scavium-faucet.db to $DB_PATH"
+    for suffix in -wal -shm; do
+        if [[ -f "$TMP_DIR/db/scavium-faucet.db${suffix}" ]]; then
+            echo "[restore] would install db/scavium-faucet.db${suffix} to ${DB_PATH}${suffix}"
+        fi
+    done
     if [[ "$RESTORE_CONFIG" == "yes" && -f "$TMP_DIR/config/scavium-faucet.env" ]]; then
         echo "[restore] would install config/scavium-faucet.env to $ENV_FILE"
     fi
@@ -125,16 +131,27 @@ fi
 
 umask 077
 mkdir -p "$(dirname "$DB_PATH")"
+RESTORE_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 if [[ -f "$DB_PATH" ]]; then
-    cp -p "$DB_PATH" "${DB_PATH}.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -p "$DB_PATH" "${DB_PATH}.pre-restore.${RESTORE_STAMP}"
 fi
 install -m 0600 "$TMP_DIR/db/scavium-faucet.db" "$DB_PATH"
+for suffix in -wal -shm; do
+    if [[ -f "$TMP_DIR/db/scavium-faucet.db${suffix}" ]]; then
+        if [[ -f "${DB_PATH}${suffix}" ]]; then
+            cp -p "${DB_PATH}${suffix}" "${DB_PATH}${suffix}.pre-restore.${RESTORE_STAMP}"
+        fi
+        install -m 0600 "$TMP_DIR/db/scavium-faucet.db${suffix}" "${DB_PATH}${suffix}"
+    else
+        rm -f "${DB_PATH}${suffix}"
+    fi
+done
 
 if [[ "$RESTORE_CONFIG" == "yes" ]]; then
     [[ -f "$TMP_DIR/config/scavium-faucet.env" ]] || die "config restore requested but bundle has no config/scavium-faucet.env"
     mkdir -p "$(dirname "$ENV_FILE")"
     if [[ -f "$ENV_FILE" ]]; then
-        cp -p "$ENV_FILE" "${ENV_FILE}.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+        cp -p "$ENV_FILE" "${ENV_FILE}.pre-restore.${RESTORE_STAMP}"
     fi
     install -m 0600 "$TMP_DIR/config/scavium-faucet.env" "$ENV_FILE"
 fi
