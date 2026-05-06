@@ -134,7 +134,7 @@ Phase 19 closes the production-hardening pass without expanding the public API o
 - rate-limit scope construction is defensive against empty or inconsistently-cased inputs;
 - graceful shutdown and application cleanup are bounded and idempotent.
 
-The closure deliberately does not claim protections that remain outside this binary: HSTS is still configured at nginx, RPC/network exposure is controlled by firewall and deployment topology, and only part of Phase 20 admin persistence is in place. Phase 20.1 moved admin queue/claim read views to SQLite-backed state, while retry/cancel controls, blocklist controls, and audit history durability remain deferred to later Phase 20 steps.
+The closure deliberately does not claim protections that remain outside this binary: HSTS is still configured at nginx, RPC/network exposure is controlled by firewall and deployment topology, and admin persistence remains intentionally incremental. Phase 20.1 moved admin queue/claim read views to SQLite-backed state, Phase 20.2 moved retry/cancel controls to persisted claim transitions, and Phase 20.3 moved admin audit history to SQLite-backed durable storage. Admin blocklist controls and enforcement durability remain deferred to later Phase 20 steps.
 
 ## Deployment guidance
 

@@ -18,7 +18,7 @@ func TestMigrateCreatesRequiredTables(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "schema_migrations"} {
+	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "admin_audit_logs", "schema_migrations"} {
 		if !tableExists(t, store.db, table) {
 			t.Fatalf("table %s does not exist", table)
 		}
@@ -29,7 +29,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip"} {
+	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip", "idx_admin_audit_logs_created_at"} {
 		if !indexExists(t, store.db, index) {
 			t.Fatalf("index %s does not exist", index)
 		}
@@ -343,6 +343,42 @@ func TestAdminCancelClaimReturnsFalseWhenNotEligible(t *testing.T) {
 	}
 	if updated {
 		t.Fatal("updated = true, want false")
+	}
+}
+
+func TestAppendAndListAdminAudit(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	base := time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC)
+	for i, entry := range []struct {
+		action string
+		target string
+	}{
+		{action: "set_mode", target: "faucet"},
+		{action: "retry_claim", target: "claim_1"},
+		{action: "blocklist_add", target: "blocklist"},
+	} {
+		if err := store.AppendAdminAudit(context.Background(), domain.AdminAuditEntry{
+			Action:    entry.action,
+			Actor:     "127.0.0.1",
+			Target:    entry.target,
+			Detail:    "safe",
+			CreatedAt: formatTime(base.Add(time.Duration(i) * time.Minute)),
+		}); err != nil {
+			t.Fatalf("append admin audit: %v", err)
+		}
+	}
+
+	entries, err := store.ListAdminAudit(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("list admin audit: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries len = %d, want 2", len(entries))
+	}
+	if entries[0].Action != "retry_claim" || entries[1].Action != "blocklist_add" {
+		t.Fatalf("actions = %q, %q; want retry_claim, blocklist_add", entries[0].Action, entries[1].Action)
 	}
 }
 

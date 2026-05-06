@@ -429,7 +429,8 @@ Operational scope notes:
 - `POST /api/v1/admin/faucet/mode` is runtime-effective. Accepted values are `active`, `paused`, and `maintenance`; invalid modes return `400 invalid_mode`.
 - `GET /api/v1/admin/queue` and `GET /api/v1/admin/claims` read persisted SQLite claim/queue state (Phase 20.1).
 - Queue and claim retry/cancel commands update persisted SQLite claim state (Phase 20.2). Retry clears `next_attempt_at` and re-queues eligible `failed`/`rejected` claims for worker pickup; cancel rejects eligible not-yet-sent claims.
-- Admin blocklist values are visible through the admin blocklist/audit surface for operator traceability, but the Phase 18 in-memory blocklist is not a replacement for persisted abuse enforcement.
+- `GET /api/v1/admin/audit` reads persisted SQLite admin audit state (Phase 20.3).
+- Admin blocklist values are visible through the admin blocklist surface, while admin audit rows store only safe metadata (for example action, actor, key type, and timestamp) and do not persist raw blocklist values.
 - `key_type` for blocklist add/remove is restricted to `ip`, `address`, or `fingerprint`.
 - Admin list limits for queue, claims, and audit are capped at `500` even if a larger `limit` query value is supplied.
 

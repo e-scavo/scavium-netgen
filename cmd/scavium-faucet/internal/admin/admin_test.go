@@ -631,4 +631,15 @@ func TestSQLiteReadAdminServiceUsesPersistedRetryCancel(t *testing.T) {
 	if len(logs) < 4 {
 		t.Fatalf("audit entries = %d, want at least 4", len(logs))
 	}
+	for _, entry := range logs {
+		if entry.Action != "blocklist_add" {
+			continue
+		}
+		if entry.Target != "blocklist" {
+			t.Fatalf("blocklist audit target = %q, want blocklist", entry.Target)
+		}
+		if entry.Detail != string(abuse.KeyTypeIP) {
+			t.Fatalf("blocklist audit detail = %q, want %q", entry.Detail, abuse.KeyTypeIP)
+		}
+	}
 }

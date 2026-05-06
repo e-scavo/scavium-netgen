@@ -561,7 +561,11 @@ Success response:
 
 ### `GET /api/v1/admin/audit?limit=100`
 
-Returns recent in-memory audit entries. `limit` is capped at `500`.
+Returns recent persisted admin audit entries from SQLite. `limit` is capped at `500`.
+
+Sensitive material is excluded from durable audit rows. In particular, bearer tokens,
+raw blocklist values, captcha tokens, request bodies, idempotency keys, and secrets
+are not stored.
 
 ```json
 {

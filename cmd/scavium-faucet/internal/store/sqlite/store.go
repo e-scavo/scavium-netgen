@@ -752,6 +752,60 @@ func (s *Store) AdminCancelClaim(ctx context.Context, id, reason string) (bool, 
 	return rows > 0, nil
 }
 
+// AppendAdminAudit persists one admin audit entry.
+func (s *Store) AppendAdminAudit(ctx context.Context, entry domain.AdminAuditEntry) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO admin_audit_logs (action, actor, target, detail, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`,
+		strings.TrimSpace(entry.Action),
+		strings.TrimSpace(entry.Actor),
+		strings.TrimSpace(entry.Target),
+		strings.TrimSpace(entry.Detail),
+		strings.TrimSpace(entry.CreatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("append admin audit: %w", err)
+	}
+	return nil
+}
+
+// ListAdminAudit returns recent persisted admin audit entries in chronological
+// order up to limit items.
+func (s *Store) ListAdminAudit(ctx context.Context, limit int) ([]domain.AdminAuditEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT action, actor, target, detail, created_at
+		FROM (
+			SELECT id, action, actor, target, detail, created_at
+			FROM admin_audit_logs
+			ORDER BY created_at DESC, id DESC
+			LIMIT ?
+		)
+		ORDER BY created_at ASC, id ASC
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list admin audit: %w", err)
+	}
+	defer rows.Close()
+
+	entries := make([]domain.AdminAuditEntry, 0, limit)
+	for rows.Next() {
+		var entry domain.AdminAuditEntry
+		if err := rows.Scan(&entry.Action, &entry.Actor, &entry.Target, &entry.Detail, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 // LastClaimByAddressAndToken returns the latest persisted claim for one address and token_id.
 func (s *Store) LastClaimByAddressAndToken(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
