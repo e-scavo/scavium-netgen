@@ -695,16 +695,13 @@ func (s *SQLiteReadAdminService) BlocklistAdd(ctx context.Context, kt abuse.KeyT
 			if err := blocklist.AdminBlocklistAdd(ctx, kt, value, reason); err != nil {
 				return err
 			}
-			if audits, ok := s.reads.(AuditStore); ok {
-				return audits.AppendAdminAudit(ctx, domain.AdminAuditEntry{
-					Action:    "blocklist_add",
-					Actor:     actor,
-					Target:    "blocklist",
-					Detail:    string(kt),
-					CreatedAt: s.now().UTC().Format(time.RFC3339),
-				})
-			}
-			return nil
+			return s.appendAudit(ctx, AuditEntry{
+				Action:    "blocklist_add",
+				Actor:     actor,
+				Target:    "blocklist",
+				Detail:    string(kt),
+				CreatedAt: s.now().UTC().Format(time.RFC3339),
+			})
 		}
 	}
 	return s.fallback.BlocklistAdd(ctx, kt, value, reason, actor)
@@ -716,16 +713,13 @@ func (s *SQLiteReadAdminService) BlocklistRemove(ctx context.Context, kt abuse.K
 			if err := blocklist.AdminBlocklistRemove(ctx, kt, value); err != nil {
 				return err
 			}
-			if audits, ok := s.reads.(AuditStore); ok {
-				return audits.AppendAdminAudit(ctx, domain.AdminAuditEntry{
-					Action:    "blocklist_remove",
-					Actor:     actor,
-					Target:    "blocklist",
-					Detail:    string(kt),
-					CreatedAt: s.now().UTC().Format(time.RFC3339),
-				})
-			}
-			return nil
+			return s.appendAudit(ctx, AuditEntry{
+				Action:    "blocklist_remove",
+				Actor:     actor,
+				Target:    "blocklist",
+				Detail:    string(kt),
+				CreatedAt: s.now().UTC().Format(time.RFC3339),
+			})
 		}
 	}
 	return s.fallback.BlocklistRemove(ctx, kt, value, actor)

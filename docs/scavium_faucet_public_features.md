@@ -247,13 +247,13 @@ Phase 18 closes a production-safe subset of the broader admin feature list witho
 |---|---|---|
 | Runtime-effective faucet mode | Implemented | `active`, `paused`, and `maintenance` are validated and propagated to the live claim path. |
 | Runtime and metrics visibility | Implemented | `/api/v1/admin/runtime`, `/api/v1/admin/metrics`, and `/api/v1/admin/dashboard` remain admin-token protected. |
-| Queue visibility | Implemented with current scope | Admin-safe queue snapshots expose counts and limited items; the broader SQLite-backed admin service remains deferred. |
-| Queue/claim retry and cancel | Implemented with current scope | Control endpoints exist and keep existing error semantics; production SQLite hydration is deferred. |
-| Admin audit trail | Implemented | Structured audit logs and in-memory audit history avoid bearer-token and secret exposure. |
-| Blocklist management | Implemented with current scope | `key_type` is validated as `ip`, `address`, or `fingerprint`; persisted abuse-enforcement integration remains deferred. |
-| Dynamic budget/config editing | Deferred | Explicitly out of Phase 18 closure. |
-| Allowlist/campaign management | Deferred | Explicitly out of Phase 18 closure. |
-| CSV export and durable admin audit persistence | Deferred | Explicitly out of Phase 18 closure. |
+| Queue visibility | Implemented and durable after Phase 20 | Admin-safe queue snapshots expose counts and capped item lists from persisted SQLite claim/queue state. |
+| Queue/claim retry and cancel | Implemented and durable after Phase 20 | Eligible retry/cancel operations update persisted SQLite claim state while preserving existing admin error semantics. |
+| Admin audit trail | Implemented and durable after Phase 20 | Structured audit logs and persisted admin audit history avoid bearer-token, secret, raw blocklist value, and request-body exposure. |
+| Blocklist management | Implemented and enforced after Phase 20 | `key_type` is validated as `ip`, `address`, or `fingerprint`; entries are persisted in SQLite and enforced during public claim intake. |
+| Dynamic budget/config editing | Deferred | Explicitly outside the Phase 18-20 production-safe admin closure. |
+| Allowlist/campaign management | Deferred | Explicitly outside the Phase 18-20 production-safe admin closure. |
+| CSV export | Deferred | Explicitly outside the Phase 18-20 production-safe admin closure. |
 
 ---
 
