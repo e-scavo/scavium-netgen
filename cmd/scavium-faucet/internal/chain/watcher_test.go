@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+	"scavium-netgen/cmd/scavium-faucet/internal/observability"
+	"scavium-netgen/cmd/scavium-faucet/internal/version"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -286,5 +288,27 @@ func TestWatcherEmptyPendingDoesNothing(t *testing.T) {
 
 	if len(store.confirmed)+len(store.failed) != 0 {
 		t.Fatal("expected no side-effects on empty store")
+	}
+}
+
+func TestWatcherMetrics(t *testing.T) {
+	txHash := common.HexToHash("0xeeee")
+	store := &fakeWatcherStore{
+		pending: []domain.PendingTx{{ClaimID: "c1", TxHash: txHash}},
+		stuck:   []domain.Claim{{ID: "stuck1", Status: domain.ClaimStatusSending}},
+	}
+	chain := &fakeChainForWatcher{
+		blockNum: 101,
+		receipts: map[common.Hash]*types.Receipt{txHash: successReceipt(100, 21000)},
+	}
+	metrics := observability.NewRuntimeMetrics(version.Info{})
+	w := NewWatcherWithMetrics(store, chain, WatcherConfig{PollInterval: time.Minute, MinConfirmations: 1, StuckTimeout: time.Minute, BatchSize: 10}, nil, metrics)
+
+	w.watchReceipts(context.Background())
+	w.reconcileStuck(context.Background())
+
+	snapshot := metrics.Snapshot(time.Now())
+	if snapshot.Watcher.PendingListed != 1 || snapshot.Watcher.Confirmed != 1 || snapshot.Watcher.StuckFound != 1 {
+		t.Fatalf("watcher metrics = %#v", snapshot.Watcher)
 	}
 }

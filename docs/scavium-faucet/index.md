@@ -8,9 +8,9 @@ This directory documents the **implemented project surface**, not the full roadm
 
 `scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
 
-Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is now CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility.
+Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility.
 
-The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, and enriched health/readiness probes.
+The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin-protected Prometheus-compatible metrics text export, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, alerting guidance, local smoke tests, and enriched health/readiness probes.
 
 ## Documentation
 
@@ -43,6 +43,7 @@ The service is production-ready for the current testnet scope, including validat
 - `X-Request-ID` and `X-Correlation-ID` are echoed on responses; when no correlation ID is supplied, the request ID is used as the correlation ID.
 - The claim path emits safe structured events for accepted and rejected claims without logging addresses, raw fingerprints, captcha tokens, request bodies, secrets, or idempotency-key values.
 - `GET /api/v1/admin/metrics` exposes lightweight in-process runtime counters and process metrics when `SCAVIUM_FAUCET_ADMIN_TOKEN` is configured.
+- `GET /api/v1/admin/metrics/prometheus` exposes the same safe process-local metrics as Prometheus-compatible text behind the same admin bearer-token middleware.
 - `GET /api/v1/admin/runtime` aggregates dashboard, readiness, metrics, and timestamp data for operator inspection.
 - `GET /api/v1/admin/queue` exposes bounded queue visibility; admin queue retry/cancel endpoints provide limited operational control.
 - `POST /api/v1/admin/faucet/mode` accepts only `active`, `paused`, or `maintenance` and propagates the selected mode into the live faucet runtime.
@@ -173,3 +174,7 @@ The closure preserves the public contract for `POST /api/v1/claim`, error envelo
 
 With Phase 20 closed, the documentation is aligned to the current durable admin-state baseline while keeping later deferred items (dynamic config mutation, campaigns/allowlists, runtime token mutation, advanced resilience) explicit.
 
+
+## Phase 21 closure
+
+Phase 21 is closed as the operator observability and alerting baseline. The implementation keeps the existing production topology and dependency profile: metrics remain process-local, admin-protected, and safe for operator use; a bounded Prometheus-compatible text endpoint was added without exposing sensitive labels; worker and watcher runtime counters now cover queue and blockchain outcomes; and the runbook now includes alert thresholds plus a local non-mutating smoke-test script for deploy and rollback checks.

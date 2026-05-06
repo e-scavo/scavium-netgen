@@ -452,3 +452,51 @@ Use this checklist after deploying the Phase 19 hardened binary behind nginx:
 8. Submit a JSON write request with `Content-Type: text/plain` and confirm it is rejected as `415 unsupported_media_type`.
 
 Phase 19.6 closes the post-audit fixes for duplicate proxy headers, shutdown budgets, JSON content-type enforcement, and test timeout hygiene. If validation finds another runtime defect, fix it in a later implementation phase rather than widening this closure pass.
+
+## Phase 21 operator observability and alerting baseline
+
+Phase 21 keeps observability dependency-free and admin-protected. The JSON endpoint remains:
+
+```bash
+curl -s http://127.0.0.1:18080/api/v1/admin/metrics \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+```
+
+A Prometheus-compatible text export is now available at the protected endpoint below. It is intentionally served by the same admin bearer-token middleware as the JSON metrics endpoint and must not be exposed directly from nginx as a public route.
+
+```bash
+curl -s http://127.0.0.1:18080/api/v1/admin/metrics/prometheus \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+```
+
+The export uses only bounded labels. Token metrics are labeled by configured/requested token id after the existing sanitization path; wallet addresses, IP addresses, fingerprints, captcha tokens, idempotency keys, request bodies, private keys, admin tokens, and RPC credentials are never exported.
+
+Additional Phase 21 counters cover worker dequeue/send/ack outcomes and watcher pending/confirmed/reverted/stuck/RPC outcomes. These counters reset on process restart and are operational signals, not durable accounting. Durable claim, queue, abuse, admin audit, blocklist, and mode state remain SQLite-backed.
+
+### Local smoke test
+
+Run the local smoke script after deployment or rollback from the repository root on the VPS:
+
+```bash
+SCAVIUM_FAUCET_BASE_URL=http://127.0.0.1:18080 \
+SCAVIUM_FAUCET_ADMIN_TOKEN="$SCAVIUM_FAUCET_ADMIN_TOKEN" \
+bash scripts/scavium-faucet-operator-smoke.sh
+```
+
+Without `SCAVIUM_FAUCET_ADMIN_TOKEN`, the script still verifies public health, readiness, status, and token catalog endpoints and skips admin checks. It does not send claims, mutate queue state, touch wallets, or require secrets beyond the already-configured admin token for protected checks.
+
+### Alert threshold guidance
+
+Use these as initial operator thresholds and tune after observing real baseline traffic:
+
+- **Low balance:** alert when `/ready` reports the chain balance check degraded or when wallet balance is below the documented refill floor for the configured token set. Treat low native balance as urgent even for ERC20 payouts because gas is still required.
+- **RPC unavailable:** alert on `/ready` degraded for the chain check, repeated `scavium_faucet_watcher_rpc_failed_total` increases, or sustained worker send failures with RPC-related log messages.
+- **Stuck queue:** inspect `/api/v1/admin/queue` when queued ready items remain non-zero while `scavium_faucet_queue_dequeued_total` is flat for more than two worker poll intervals, or when `sending` claims repeatedly reappear through watcher stuck reconciliation.
+- **Failed transaction spike:** alert when `scavium_faucet_queue_send_failed_total` or `scavium_faucet_watcher_reverted_total` increases sharply compared with accepted claims. Correlate with Besu txpool, gas policy, nonce behavior, and wallet balance before retrying claims.
+- **Captcha spike:** alert when `scavium_faucet_captcha_failed_total` rises rapidly or dominates rejected claims. Check captcha provider status, frontend integration, and possible bot traffic before relaxing enforcement.
+- **Blocklist spike:** use `/api/v1/admin/blocklist` and audit logs to review recent operator blocklist changes. A sudden increase in claim rejections with matching abuse logs may indicate targeted abuse or an overly broad manual block.
+- **High rejection rate:** compare `scavium_faucet_claims_rejected_total` to `scavium_faucet_claims_accepted_total`. Sustained rejection dominance should trigger review of rate limits, cooldowns, captcha provider health, token configuration, and abuse signals.
+
+### nginx and journald correlation
+
+Keep nginx access logs enabled at the reverse proxy and correlate them with application JSON logs using `X-Request-ID`/`X-Correlation-ID`. For protected metrics collection, scrape through a private network path or localhost tunnel that supplies `Authorization: Bearer <admin-token>`; do not add a public unauthenticated nginx location for `/api/v1/admin/metrics/prometheus`.

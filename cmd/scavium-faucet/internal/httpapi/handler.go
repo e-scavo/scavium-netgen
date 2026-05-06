@@ -129,6 +129,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux.HandleFunc("/api/v1/admin/queue", handleAdminQueue(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/queue/", handleAdminQueueDispatch(deps.AdminService, deps.Logger, deps.TrustedProxy, "/api/v1/admin/queue/"))
 	adminMux.HandleFunc("/api/v1/admin/metrics", handleAdminMetrics(deps.Metrics))
+	adminMux.HandleFunc("/api/v1/admin/metrics/prometheus", handleAdminPrometheusMetrics(deps.Metrics))
 	adminMux.HandleFunc("/api/v1/admin/claims", handleAdminListClaims(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, deps.Logger, deps.TrustedProxy, "/api/v1/admin/claim/"))
 	adminMux.HandleFunc("/api/v1/admin/faucet/mode", handleAdminSetMode(deps.AdminService, deps.Logger, deps.TrustedProxy))
@@ -673,6 +674,20 @@ func handleAdminMetrics(metrics *observability.RuntimeMetrics) http.HandlerFunc 
 		}
 
 		WriteJSON(w, http.StatusOK, metrics.Snapshot(time.Now().UTC()))
+	}
+}
+
+func handleAdminPrometheusMetrics(metrics *observability.RuntimeMetrics) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, metrics.PrometheusText(time.Now().UTC()))
 	}
 }
 

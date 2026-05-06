@@ -387,7 +387,7 @@ Delivered closure scope:
 
 ---
 
-## Phase 21 — Operator Observability and Alerting Baseline (Planned)
+## Phase 21 — Operator Observability and Alerting Baseline (Closed)
 
 Phase 21 must turn the existing Phase 16/19 observability baseline into operator feedback loops suitable for public operation without requiring a heavy external stack.
 

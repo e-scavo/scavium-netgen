@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+	"scavium-netgen/cmd/scavium-faucet/internal/observability"
 )
 
 const (
@@ -38,18 +39,24 @@ func DefaultConfig() Config {
 // Sender, and acknowledges or retries/dead-letters based on the result.
 // It shuts down cleanly when the supplied context is cancelled.
 type Worker struct {
-	queue  domain.QueueStore
-	sender domain.Sender
-	cfg    Config
-	log    *slog.Logger
+	queue   domain.QueueStore
+	sender  domain.Sender
+	cfg     Config
+	log     *slog.Logger
+	metrics *observability.RuntimeMetrics
 }
 
 // New creates a Worker.  If log is nil, slog.Default() is used.
 func New(queue domain.QueueStore, sender domain.Sender, cfg Config, log *slog.Logger) *Worker {
+	return NewWithMetrics(queue, sender, cfg, log, nil)
+}
+
+// NewWithMetrics creates a Worker with optional runtime metrics instrumentation.
+func NewWithMetrics(queue domain.QueueStore, sender domain.Sender, cfg Config, log *slog.Logger, metrics *observability.RuntimeMetrics) *Worker {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Worker{queue: queue, sender: sender, cfg: cfg, log: log}
+	return &Worker{queue: queue, sender: sender, cfg: cfg, log: log, metrics: metrics}
 }
 
 // Run blocks until ctx is cancelled.  It processes one batch per PollInterval
@@ -74,12 +81,21 @@ func (w *Worker) Run(ctx context.Context) error {
 func (w *Worker) processBatch(ctx context.Context) error {
 	claims, err := w.queue.DequeueBatch(ctx, w.cfg.BatchSize)
 	if err != nil {
+		if w.metrics != nil {
+			w.metrics.IncWorkerBatchFailed()
+		}
 		return err
+	}
+	if w.metrics != nil {
+		w.metrics.IncQueueDequeued(len(claims))
 	}
 
 	for _, claim := range claims {
 		tx, sendErr := w.sender.Send(ctx, claim)
 		if sendErr != nil {
+			if w.metrics != nil {
+				w.metrics.IncQueueSendFailed()
+			}
 			w.log.Warn("worker: send failed", "claim_id", claim.ID, "error", sendErr)
 			if failErr := w.queue.Fail(ctx, claim.ID, sendErr.Error(), w.cfg.MaxRetries); failErr != nil {
 				w.log.Error("worker: fail claim", "claim_id", claim.ID, "error", failErr)
@@ -87,7 +103,13 @@ func (w *Worker) processBatch(ctx context.Context) error {
 			continue
 		}
 		if ackErr := w.queue.Ack(ctx, claim.ID, tx); ackErr != nil {
+			if w.metrics != nil {
+				w.metrics.IncQueueAckFailed()
+			}
 			w.log.Error("worker: ack claim", "claim_id", claim.ID, "error", ackErr)
+		}
+		if w.metrics != nil {
+			w.metrics.IncQueueSendSucceeded()
 		}
 	}
 	return nil

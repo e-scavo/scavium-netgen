@@ -84,15 +84,15 @@ Closure status:
 
 Phase 20 preserves existing public/admin HTTP contracts while moving operator state from in-memory behavior to durable SQLite-backed behavior for these surfaces.
 
-### Phase 21 — Operator Observability and Alerting Baseline
+### Phase 21 — Operator Observability and Alerting Baseline — CLOSED
 
 Goal: give operators production feedback loops without introducing a heavy monitoring stack requirement.
 
 Scope:
 
 - Add or document a Prometheus-compatible protected export surface if feasible without dependency bloat.
-- Expand metrics around queue states, worker outcomes, watcher outcomes, abuse signals, blocklist hits, token buckets, and RPC readiness.
-- Add alert threshold guidance for low balance, RPC unavailable, queue stuck, high failure rate, captcha spike, and blocklist spike.
+- Expanded metrics around token buckets, worker queue outcomes, watcher blockchain/reconciliation outcomes, plus runbook guidance for abuse/blocklist investigation and RPC readiness correlation.
+- Added alert threshold guidance for low balance, RPC unavailable, queue stuck, failed transaction spike, captcha spike, blocklist spike, and high rejection rate.
 - Add nginx/journald log-correlation guidance using `X-Request-ID` and `X-Correlation-ID`.
 - Add operational smoke-test commands.
 

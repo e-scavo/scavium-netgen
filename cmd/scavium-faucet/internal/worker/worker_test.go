@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+	"scavium-netgen/cmd/scavium-faucet/internal/observability"
+	"scavium-netgen/cmd/scavium-faucet/internal/version"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -195,5 +197,21 @@ func TestWorkerRunExitsOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not exit after context cancel")
+	}
+}
+
+func TestWorkerMetrics(t *testing.T) {
+	q := &fakeQueue{claims: []domain.Claim{fakeClaim("c1"), fakeClaim("c2")}}
+	s := &fakeSender{err: errors.New("rpc error")}
+	metrics := observability.NewRuntimeMetrics(version.Info{})
+	w := NewWithMetrics(q, s, DefaultConfig(), nil, metrics)
+
+	if err := w.processBatch(context.Background()); err != nil {
+		t.Fatalf("processBatch: %v", err)
+	}
+
+	snapshot := metrics.Snapshot(time.Now())
+	if snapshot.Queue.Dequeued != 2 || snapshot.Queue.SendFailed != 2 || snapshot.Queue.SendSucceeded != 0 {
+		t.Fatalf("queue metrics = %#v", snapshot.Queue)
 	}
 }

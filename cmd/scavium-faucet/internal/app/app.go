@@ -121,7 +121,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 	if cfg.WorkerEnabled {
 		workerCfg := worker.DefaultConfig()
 		workerCfg.PollInterval = time.Duration(cfg.WorkerPollSeconds) * time.Second
-		w := worker.New(store, senderBundle.sender, workerCfg, nil)
+		w := worker.NewWithMetrics(store, senderBundle.sender, workerCfg, nil, metrics)
 		app.start("worker", w.Run)
 	}
 
@@ -129,7 +129,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 		watcherCfg := chain.DefaultWatcherConfig()
 		watcherCfg.PollInterval = time.Duration(cfg.WatcherPollSeconds) * time.Second
 		watcherCfg.MinConfirmations = cfg.MinConfirmations
-		w := chain.NewWatcher(store, senderBundle.chainClient, watcherCfg, nil)
+		w := chain.NewWatcherWithMetrics(store, senderBundle.chainClient, watcherCfg, nil, metrics)
 		app.start("watcher", w.Run)
 	}
 

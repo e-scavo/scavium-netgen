@@ -214,3 +214,11 @@ Security-relevant closure decisions:
 - Queue item responses and structured audit logs avoid wallet addresses, idempotency keys, request bodies, captcha tokens, raw fingerprints, private keys, and admin tokens.
 
 The admin blocklist is now persisted in SQLite and enforced during claim intake for supported key types (`ip`, `address`, `fingerprint`) before expensive downstream claim processing. Claim denials from this control continue to use the existing `claim_rejected` envelope with a safe generic reason and do not expose raw blocklist keys. Persisted abuse signals, progressive enforcement, rate limits, cooldown, and daily-budget checks remain active alongside this control.
+
+## Phase 21 protected metrics export security
+
+Phase 21 adds `GET /api/v1/admin/metrics/prometheus` as a Prometheus-compatible text rendering of the existing in-process runtime metrics. The route is registered under `/api/v1/admin/` and therefore uses the same bearer-token admin middleware as the JSON admin metrics surface.
+
+The export deliberately avoids unbounded or sensitive labels. It never emits wallet addresses, raw IP addresses, fingerprints, request bodies, captcha tokens, idempotency keys, private keys, admin tokens, RPC credentials, or authorization headers. Token labels are limited to the sanitized token bucket already used by runtime metrics.
+
+Operators must keep this endpoint private. nginx should continue to proxy admin routes only to trusted operators or internal collection paths; no unauthenticated public metrics location should be added.

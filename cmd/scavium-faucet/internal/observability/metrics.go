@@ -1,6 +1,8 @@
 package observability
 
 import (
+	"bytes"
+	"fmt"
 	"runtime"
 	"sort"
 	"strings"
@@ -30,6 +32,19 @@ type RuntimeMetrics struct {
 	claimUnavailable    atomic.Uint64
 	claimRejectedByRisk atomic.Uint64
 	invalidToken        atomic.Uint64
+
+	queueDequeued      atomic.Uint64
+	queueSendSucceeded atomic.Uint64
+	queueSendFailed    atomic.Uint64
+	queueAckFailed     atomic.Uint64
+	workerBatchFailed  atomic.Uint64
+
+	watcherPendingListed atomic.Uint64
+	watcherRPCFailed     atomic.Uint64
+	watcherConfirmed     atomic.Uint64
+	watcherReverted      atomic.Uint64
+	watcherStuckFound    atomic.Uint64
+	watcherStuckFailed   atomic.Uint64
 }
 
 // RuntimeMetricsSnapshot is the JSON-safe representation returned by the metrics endpoint.
@@ -43,6 +58,9 @@ type RuntimeMetricsSnapshot struct {
 	RateLimits    RuntimeRateLimitMetrics `json:"rate_limits"`
 	Budgets       RuntimeBudgetMetrics    `json:"budgets"`
 	Tokens        []RuntimeTokenMetrics   `json:"tokens,omitempty"`
+	Queue         RuntimeQueueMetrics     `json:"queue"`
+	Worker        RuntimeWorkerMetrics    `json:"worker"`
+	Watcher       RuntimeWatcherMetrics   `json:"watcher"`
 }
 
 // RuntimeMetricsBuild exposes build metadata alongside runtime counters.
@@ -102,6 +120,29 @@ type RuntimeTokenMetrics struct {
 	RateLimited   uint64 `json:"rate_limited"`
 	DailyExceeded uint64 `json:"daily_exceeded"`
 	InvalidToken  uint64 `json:"invalid_token"`
+}
+
+// RuntimeQueueMetrics exposes safe queue/worker counters.
+type RuntimeQueueMetrics struct {
+	Dequeued      uint64 `json:"dequeued"`
+	SendSucceeded uint64 `json:"send_succeeded"`
+	SendFailed    uint64 `json:"send_failed"`
+	AckFailed     uint64 `json:"ack_failed"`
+}
+
+// RuntimeWorkerMetrics exposes worker poll-cycle health counters.
+type RuntimeWorkerMetrics struct {
+	BatchFailed uint64 `json:"batch_failed"`
+}
+
+// RuntimeWatcherMetrics exposes receipt watcher and reconciliation counters.
+type RuntimeWatcherMetrics struct {
+	PendingListed uint64 `json:"pending_listed"`
+	RPCFailed     uint64 `json:"rpc_failed"`
+	Confirmed     uint64 `json:"confirmed"`
+	Reverted      uint64 `json:"reverted"`
+	StuckFound    uint64 `json:"stuck_found"`
+	StuckFailed   uint64 `json:"stuck_failed"`
 }
 
 type runtimeTokenMetrics struct {
@@ -179,6 +220,65 @@ func (m *RuntimeMetrics) IncClaimRejectedForToken(tokenID, code string) {
 	}
 }
 
+// IncQueueDequeued records claims picked up by the worker.
+func (m *RuntimeMetrics) IncQueueDequeued(n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.queueDequeued.Add(uint64(n))
+}
+
+func (m *RuntimeMetrics) IncQueueSendSucceeded() {
+	if m != nil {
+		m.queueSendSucceeded.Add(1)
+	}
+}
+func (m *RuntimeMetrics) IncQueueSendFailed() {
+	if m != nil {
+		m.queueSendFailed.Add(1)
+	}
+}
+func (m *RuntimeMetrics) IncQueueAckFailed() {
+	if m != nil {
+		m.queueAckFailed.Add(1)
+	}
+}
+func (m *RuntimeMetrics) IncWorkerBatchFailed() {
+	if m != nil {
+		m.workerBatchFailed.Add(1)
+	}
+}
+func (m *RuntimeMetrics) IncWatcherPendingListed(n int) {
+	if m != nil && n > 0 {
+		m.watcherPendingListed.Add(uint64(n))
+	}
+}
+func (m *RuntimeMetrics) IncWatcherRPCFailed() {
+	if m != nil {
+		m.watcherRPCFailed.Add(1)
+	}
+}
+func (m *RuntimeMetrics) IncWatcherConfirmed() {
+	if m != nil {
+		m.watcherConfirmed.Add(1)
+	}
+}
+func (m *RuntimeMetrics) IncWatcherReverted() {
+	if m != nil {
+		m.watcherReverted.Add(1)
+	}
+}
+func (m *RuntimeMetrics) IncWatcherStuckFound(n int) {
+	if m != nil && n > 0 {
+		m.watcherStuckFound.Add(uint64(n))
+	}
+}
+func (m *RuntimeMetrics) IncWatcherStuckFailed() {
+	if m != nil {
+		m.watcherStuckFailed.Add(1)
+	}
+}
+
 // Snapshot returns a consistent point-in-time view of runtime counters.
 func (m *RuntimeMetrics) Snapshot(now time.Time) RuntimeMetricsSnapshot {
 	if m == nil {
@@ -220,7 +320,10 @@ func (m *RuntimeMetrics) Snapshot(now time.Time) RuntimeMetricsSnapshot {
 		Budgets: RuntimeBudgetMetrics{
 			DailyExceeded: m.dailyBudgetExceeded.Load(),
 		},
-		Tokens: m.tokenSnapshots(),
+		Tokens:  m.tokenSnapshots(),
+		Queue:   RuntimeQueueMetrics{Dequeued: m.queueDequeued.Load(), SendSucceeded: m.queueSendSucceeded.Load(), SendFailed: m.queueSendFailed.Load(), AckFailed: m.queueAckFailed.Load()},
+		Worker:  RuntimeWorkerMetrics{BatchFailed: m.workerBatchFailed.Load()},
+		Watcher: RuntimeWatcherMetrics{PendingListed: m.watcherPendingListed.Load(), RPCFailed: m.watcherRPCFailed.Load(), Confirmed: m.watcherConfirmed.Load(), Reverted: m.watcherReverted.Load(), StuckFound: m.watcherStuckFound.Load(), StuckFailed: m.watcherStuckFailed.Load()},
 	}
 }
 
@@ -291,4 +394,48 @@ func normalizeMetricsTokenID(tokenID string) string {
 		return "default"
 	}
 	return trimmed
+}
+
+// PrometheusText renders the metrics snapshot in a stable, dependency-free
+// Prometheus-compatible text format. It intentionally uses a bounded label set
+// and never includes addresses, IPs, fingerprints, idempotency keys, or secrets.
+func (m *RuntimeMetrics) PrometheusText(now time.Time) string {
+	s := m.Snapshot(now)
+	var b bytes.Buffer
+	metric := func(name, help, typ string, value any) {
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s %s\n%s %v\n", name, help, name, typ, name, value)
+	}
+	metric("scavium_faucet_uptime_seconds", "Runtime uptime in seconds.", "gauge", s.UptimeSeconds)
+	metric("scavium_faucet_process_goroutines", "Current goroutine count.", "gauge", s.Process.Goroutines)
+	metric("scavium_faucet_claims_accepted_total", "Accepted claim requests.", "counter", s.Claims.Accepted)
+	metric("scavium_faucet_claims_rejected_total", "Rejected claim requests.", "counter", s.Claims.Rejected)
+	metric("scavium_faucet_claims_rejected_by_risk_total", "Risk-engine claim rejections.", "counter", s.Claims.RejectedByRisk)
+	metric("scavium_faucet_captcha_failed_total", "Captcha failures.", "counter", s.Captcha.Failed)
+	metric("scavium_faucet_rate_limited_total", "Rate limited claim requests.", "counter", s.RateLimits.Limited)
+	metric("scavium_faucet_daily_budget_exceeded_total", "Daily budget rejections.", "counter", s.Budgets.DailyExceeded)
+	metric("scavium_faucet_invalid_token_total", "Invalid token rejections.", "counter", s.Claims.InvalidToken)
+	metric("scavium_faucet_queue_dequeued_total", "Claims dequeued by the worker.", "counter", s.Queue.Dequeued)
+	metric("scavium_faucet_queue_send_succeeded_total", "Worker send successes.", "counter", s.Queue.SendSucceeded)
+	metric("scavium_faucet_queue_send_failed_total", "Worker send failures.", "counter", s.Queue.SendFailed)
+	metric("scavium_faucet_queue_ack_failed_total", "Worker ack persistence failures.", "counter", s.Queue.AckFailed)
+	metric("scavium_faucet_worker_batch_failed_total", "Worker dequeue batch failures.", "counter", s.Worker.BatchFailed)
+	metric("scavium_faucet_watcher_pending_listed_total", "Pending transactions observed by watcher.", "counter", s.Watcher.PendingListed)
+	metric("scavium_faucet_watcher_rpc_failed_total", "Watcher RPC/list failures.", "counter", s.Watcher.RPCFailed)
+	metric("scavium_faucet_watcher_confirmed_total", "Transactions confirmed by watcher.", "counter", s.Watcher.Confirmed)
+	metric("scavium_faucet_watcher_reverted_total", "Reverted transactions found by watcher.", "counter", s.Watcher.Reverted)
+	metric("scavium_faucet_watcher_stuck_found_total", "Stuck sending claims found by watcher.", "counter", s.Watcher.StuckFound)
+	metric("scavium_faucet_watcher_stuck_failed_total", "Stuck claim reconciliation failures.", "counter", s.Watcher.StuckFailed)
+	for _, t := range s.Tokens {
+		label := prometheusLabelValue(t.TokenID)
+		fmt.Fprintf(&b, "scavium_faucet_token_claims_accepted_total{token_id=\"%s\"} %d\n", label, t.Accepted)
+		fmt.Fprintf(&b, "scavium_faucet_token_claims_rejected_total{token_id=\"%s\"} %d\n", label, t.Rejected)
+	}
+	return b.String()
+}
+
+func prometheusLabelValue(v string) string {
+	v = strings.ReplaceAll(v, "\\", "\\\\")
+	v = strings.ReplaceAll(v, "\n", "")
+	v = strings.ReplaceAll(v, "\"", "\\\"")
+	return v
 }

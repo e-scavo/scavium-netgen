@@ -232,3 +232,9 @@ Phase 19.6 applies the post-audit closure fixes without changing the route topol
 2. `main.go` separates the HTTP shutdown timeout from the application cleanup timeout so a slow HTTP drain cannot consume the entire cleanup budget.
 3. JSON write endpoints reject explicit non-`application/json` content types while preserving backward compatibility for clients that omit `Content-Type`.
 4. `make test` uses a default `300s` timeout to avoid false CI failures from SQLite-backed integration tests.
+
+## Phase 21 operator metrics architecture
+
+Phase 21 extends `internal/observability.RuntimeMetrics` without adding a new process, daemon, exporter, or third-party dependency. The same in-memory registry now records claim counters, token buckets, worker queue outcomes, and watcher blockchain/reconciliation outcomes.
+
+`GET /api/v1/admin/metrics` remains the JSON operator view. `GET /api/v1/admin/metrics/prometheus` renders the same safe snapshot as Prometheus-compatible text under the existing admin bearer-token middleware. Both views are process-local and reset on restart; SQLite remains the source of truth for durable claims, queue state, abuse signals, admin state, blocklist entries, and audit trail records.

@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -102,5 +103,46 @@ func TestRuntimeMetricsSnapshotIncludesProcessMetrics(t *testing.T) {
 	}
 	if snapshot.Process.Mallocs < snapshot.Process.Frees {
 		t.Fatalf("process malloc/free counters invalid: mallocs=%d frees=%d", snapshot.Process.Mallocs, snapshot.Process.Frees)
+	}
+}
+
+func TestRuntimeMetricsQueueWorkerWatcherCountersAndPrometheus(t *testing.T) {
+	startedAt := time.Date(2026, 5, 4, 10, 0, 0, 0, time.UTC)
+	metrics := NewRuntimeMetricsWithClock(version.Info{}, func() time.Time { return startedAt })
+
+	metrics.IncQueueDequeued(2)
+	metrics.IncQueueSendSucceeded()
+	metrics.IncQueueSendFailed()
+	metrics.IncQueueAckFailed()
+	metrics.IncWorkerBatchFailed()
+	metrics.IncWatcherPendingListed(3)
+	metrics.IncWatcherRPCFailed()
+	metrics.IncWatcherConfirmed()
+	metrics.IncWatcherReverted()
+	metrics.IncWatcherStuckFound(4)
+	metrics.IncWatcherStuckFailed()
+	metrics.IncClaimAcceptedForToken("native")
+
+	snapshot := metrics.Snapshot(startedAt.Add(time.Minute))
+	if snapshot.Queue.Dequeued != 2 || snapshot.Queue.SendSucceeded != 1 || snapshot.Queue.SendFailed != 1 || snapshot.Queue.AckFailed != 1 {
+		t.Fatalf("queue metrics = %#v", snapshot.Queue)
+	}
+	if snapshot.Worker.BatchFailed != 1 {
+		t.Fatalf("worker metrics = %#v", snapshot.Worker)
+	}
+	if snapshot.Watcher.PendingListed != 3 || snapshot.Watcher.RPCFailed != 1 || snapshot.Watcher.Confirmed != 1 || snapshot.Watcher.Reverted != 1 || snapshot.Watcher.StuckFound != 4 || snapshot.Watcher.StuckFailed != 1 {
+		t.Fatalf("watcher metrics = %#v", snapshot.Watcher)
+	}
+
+	text := metrics.PrometheusText(startedAt.Add(time.Minute))
+	for _, want := range []string{
+		"scavium_faucet_queue_dequeued_total 2\n",
+		"scavium_faucet_worker_batch_failed_total 1\n",
+		"scavium_faucet_watcher_confirmed_total 1\n",
+		"scavium_faucet_token_claims_accepted_total{token_id=\"native\"} 1\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("prometheus text missing %q in:\n%s", want, text)
+		}
 	}
 }

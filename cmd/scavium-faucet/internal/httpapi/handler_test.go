@@ -1181,6 +1181,47 @@ func TestAdminMetricsRequiresAdminToken(t *testing.T) {
 	}
 }
 
+func TestAdminPrometheusMetricsRequiresAdminToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/metrics/prometheus", nil)
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{AdminToken: testAdminToken}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAdminPrometheusMetricsReportsStableText(t *testing.T) {
+	metrics := observability.NewRuntimeMetrics(version.Info{})
+	metrics.IncClaimAcceptedForToken("native")
+	metrics.IncQueueDequeued(1)
+	handler := NewHandler(Dependencies{AdminToken: testAdminToken, Metrics: metrics})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/metrics/prometheus", nil)
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("content-type = %q", got)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"# HELP scavium_faucet_claims_accepted_total Accepted claim requests.",
+		"scavium_faucet_claims_accepted_total 1\n",
+		"scavium_faucet_queue_dequeued_total 1\n",
+		"scavium_faucet_token_claims_accepted_total{token_id=\"native\"} 1\n",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("prometheus body missing %q in:\n%s", want, body)
+		}
+	}
+}
+
 func TestAdminMetricsReportsRuntimeCounters(t *testing.T) {
 	metrics := observability.NewRuntimeMetricsWithClock(version.Info{
 		Version:   "v16.2-test",
