@@ -43,9 +43,18 @@ type App struct {
 }
 
 type senderBundle struct {
-	sender      domain.Sender
-	chainClient *chain.Client
-	signer      chain.Signer
+	sender       domain.Sender
+	chainClient  chain.ClosableChainClient
+	signer       chain.Signer
+	selectedRPC  string
+	selectedRPCN int
+}
+
+type walletRuntimeProvider struct {
+	cfg    config.Config
+	client chain.ChainClient
+	caller chain.ContractCaller
+	signer chain.Signer
 }
 
 // New constructs the faucet application with its configured HTTP handler tree.
@@ -95,14 +104,15 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 	app := &App{
 		Config: cfg,
 		Handler: httpapi.NewHandler(httpapi.Dependencies{
-			ReadinessChecks: readinessChecks,
-			ReadService:     readService,
-			AdminService:    adminService,
-			AdminToken:      cfg.AdminToken,
-			TrustedProxy:    cfg.TrustedProxy,
-			CORSOrigins:     cfg.CORSAllowedOrigins,
-			Logger:          logger,
-			Metrics:         metrics,
+			ReadinessChecks:       readinessChecks,
+			ReadService:           readService,
+			AdminService:          adminService,
+			AdminToken:            cfg.AdminToken,
+			TrustedProxy:          cfg.TrustedProxy,
+			CORSOrigins:           cfg.CORSAllowedOrigins,
+			Logger:                logger,
+			Metrics:               metrics,
+			WalletRuntimeProvider: newWalletRuntimeProvider(cfg, senderBundle),
 		}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -232,14 +242,11 @@ func newSender(ctx context.Context, cfg config.Config) (senderBundle, error) {
 	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	client, err := chain.NewClient(startupCtx, cfg.RPCURL)
+	selection, err := chain.NewValidatedClient(startupCtx, cfg.RPCURL, cfg.RPCSecondaryURLs, cfg.ChainID)
 	if err != nil {
-		return senderBundle{}, fmt.Errorf("create chain client: %w", err)
+		return senderBundle{}, fmt.Errorf("create validated chain client: %w", err)
 	}
-	if err := chain.ValidateChainID(startupCtx, client, cfg.ChainID); err != nil {
-		client.Close()
-		return senderBundle{}, fmt.Errorf("validate chain id: %w", err)
-	}
+	client := selection.Client
 
 	signer, err := chain.NewPrivateKeySigner(cfg.PrivateKeyHex)
 	if err != nil {
@@ -248,13 +255,88 @@ func newSender(ctx context.Context, cfg config.Config) (senderBundle, error) {
 	}
 
 	return senderBundle{
-		sender:      chain.NewEthSender(client, signer, cfg.ChainID, chain.GasPolicy{}),
-		chainClient: client,
-		signer:      signer,
+		sender:       chain.NewEthSender(client, signer, cfg.ChainID, chain.GasPolicy{}),
+		chainClient:  client,
+		signer:       signer,
+		selectedRPC:  selection.URL,
+		selectedRPCN: selection.Index,
 	}, nil
 }
 
-func runtimeChecks(cfg config.Config, store *sqlite.Store, chainClient *chain.Client, signer chain.Signer) []ready.Check {
+func newWalletRuntimeProvider(cfg config.Config, bundle senderBundle) httpapi.WalletRuntimeProvider {
+	if cfg.DryRun || bundle.chainClient == nil || bundle.signer == nil {
+		return walletRuntimeProvider{cfg: cfg}
+	}
+	caller, _ := bundle.chainClient.(chain.ContractCaller)
+	return walletRuntimeProvider{cfg: cfg, client: bundle.chainClient, caller: caller, signer: bundle.signer}
+}
+
+func (p walletRuntimeProvider) WalletRuntime(ctx context.Context) httpapi.AdminWalletRuntime {
+	if p.client == nil || p.signer == nil {
+		return httpapi.AdminWalletRuntime{Enabled: false, Status: "disabled"}
+	}
+	address := p.signer.Address()
+	snapshot := httpapi.AdminWalletRuntime{
+		Enabled: true,
+		Status:  "ok",
+		Address: address.Hex(),
+	}
+	balance, err := p.client.BalanceAt(ctx, address, nil)
+	if err != nil {
+		snapshot.Status = "degraded"
+		snapshot.Error = "native balance unavailable"
+	} else if balance != nil {
+		snapshot.NativeBalanceWei = balance.String()
+	}
+	nonce, err := p.client.NonceAt(ctx, address, nil)
+	if err != nil {
+		snapshot.Status = "degraded"
+		if snapshot.Error == "" {
+			snapshot.Error = "pending nonce unavailable"
+		}
+	} else {
+		snapshot.PendingNonce = nonce
+	}
+
+	tokens := p.cfg.NormalizedTokens()
+	snapshot.Tokens = make([]httpapi.AdminWalletTokenRuntime, 0, len(tokens))
+	for _, token := range tokens {
+		tr := httpapi.AdminWalletTokenRuntime{
+			TokenID: token.ID,
+			Symbol:  token.Symbol,
+			Type:    string(token.Type),
+			Status:  "ok",
+		}
+		switch token.Type {
+		case domain.TokenTypeNative:
+			tr.BalanceWei = snapshot.NativeBalanceWei
+			if snapshot.NativeBalanceWei == "" {
+				tr.Status = "degraded"
+				tr.Error = "native balance unavailable"
+			}
+		case domain.TokenTypeERC20:
+			tr.Address = token.Address.Hex()
+			balance, err := chain.ERC20BalanceOf(ctx, p.caller, token.Address, address)
+			if err != nil {
+				tr.Status = "degraded"
+				tr.Error = "token balance unavailable"
+				snapshot.Status = "degraded"
+				if snapshot.Error == "" {
+					snapshot.Error = "one or more token balances unavailable"
+				}
+			} else if balance != nil {
+				tr.BalanceWei = balance.String()
+			}
+		default:
+			tr.Status = "unsupported"
+			tr.Error = "unsupported token type"
+		}
+		snapshot.Tokens = append(snapshot.Tokens, tr)
+	}
+	return snapshot
+}
+
+func runtimeChecks(cfg config.Config, store *sqlite.Store, chainClient chain.ChainClient, signer chain.Signer) []ready.Check {
 	checks := []ready.Check{
 		ready.DBCheck(store),
 		ready.QueueCheck(store),

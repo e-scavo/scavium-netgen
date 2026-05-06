@@ -401,17 +401,17 @@ Required closure scope:
 
 ---
 
-## Phase 22 — Blockchain and Runtime Resilience (Planned)
+## Phase 22 — Blockchain and Runtime Resilience (Closed)
 
-Phase 22 must harden the transaction path and runtime blockchain dependencies for longer production operation.
+Phase 22 hardens the transaction path and runtime blockchain dependencies with conservative startup failover and operator-safe wallet visibility.
 
 Required closure scope:
 
-- Conservative RPC failover configuration and tests.
-- Wallet balance and nonce runtime visibility for operators.
-- Stuck transaction reconciliation controls where safe.
-- Reorg/min-confirmation and replacement-policy documentation.
-- No high-availability or distributed-lock redesign in this phase.
+- Conservative RPC failover configuration and tests: `SCAVIUM_FAUCET_RPC_SECONDARY_URLS` is optional, primary-first, startup-only, and every selected endpoint is chain-ID validated.
+- Wallet balance and nonce runtime visibility for operators: `/api/v1/admin/wallet` and `/api/v1/admin/runtime.wallet` expose signer address, native balance, pending nonce, and configured token balance status behind admin auth.
+- Stuck transaction reconciliation controls remain limited to the existing watcher and persisted admin retry/cancel controls; no unsafe replacement-policy automation was added.
+- Reorg/min-confirmation behavior remains governed by `SCAVIUM_FAUCET_MIN_CONFIRMATIONS` and watcher documentation; no chain reorg policy redesign was introduced.
+- No high-availability, multi-instance, load-balancing, distributed-lock, or hot/cold-wallet automation redesign was introduced in this phase.
 
 ---
 

@@ -2468,3 +2468,60 @@ func TestAdminJSONWriteRejectsUnsupportedContentType(t *testing.T) {
 		t.Fatalf("code = %q, want unsupported_media_type", body.Code)
 	}
 }
+
+type staticWalletRuntimeProvider struct {
+	wallet AdminWalletRuntime
+}
+
+func (p staticWalletRuntimeProvider) WalletRuntime(context.Context) AdminWalletRuntime {
+	return p.wallet
+}
+
+func TestAdminWalletRequiresAuth(t *testing.T) {
+	deps := testAdminDeps()
+	deps.WalletRuntimeProvider = staticWalletRuntimeProvider{wallet: AdminWalletRuntime{Enabled: true, Status: "ok"}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/wallet", nil)
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAdminWalletReturnsSafeRuntimeVisibility(t *testing.T) {
+	deps := testAdminDeps()
+	deps.WalletRuntimeProvider = staticWalletRuntimeProvider{wallet: AdminWalletRuntime{
+		Enabled:          true,
+		Status:           "ok",
+		Address:          "0x000000000000000000000000000000000000dEaD",
+		NativeBalanceWei: "123",
+		PendingNonce:     7,
+		Tokens: []AdminWalletTokenRuntime{{
+			TokenID:    "native",
+			Symbol:     "SCAV",
+			Type:       "native",
+			BalanceWei: "123",
+			Status:     "ok",
+		}},
+	}}
+
+	rec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/wallet", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+	raw := rec.Body.String()
+	var body AdminWalletRuntime
+	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.Enabled || body.Status != "ok" || body.NativeBalanceWei != "123" || body.PendingNonce != 7 {
+		t.Fatalf("wallet body = %#v", body)
+	}
+	if strings.Contains(raw, "private") || strings.Contains(raw, testAdminToken) {
+		t.Fatalf("wallet response contains sensitive material: %q", raw)
+	}
+}

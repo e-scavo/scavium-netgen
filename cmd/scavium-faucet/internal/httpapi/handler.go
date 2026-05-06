@@ -60,6 +60,34 @@ type adminRuntimeResponse struct {
 	Dashboard admin.DashboardResponse              `json:"dashboard"`
 	Readiness ready.Result                         `json:"readiness"`
 	Metrics   observability.RuntimeMetricsSnapshot `json:"metrics"`
+	Wallet    AdminWalletRuntime                   `json:"wallet"`
+}
+
+// AdminWalletRuntime exposes operator-safe wallet state behind admin auth only.
+type AdminWalletRuntime struct {
+	Enabled          bool                      `json:"enabled"`
+	Status           string                    `json:"status"`
+	Address          string                    `json:"address,omitempty"`
+	NativeBalanceWei string                    `json:"native_balance_wei,omitempty"`
+	PendingNonce     uint64                    `json:"pending_nonce,omitempty"`
+	Tokens           []AdminWalletTokenRuntime `json:"tokens,omitempty"`
+	Error            string                    `json:"error,omitempty"`
+}
+
+// AdminWalletTokenRuntime exposes configured token balances without secrets.
+type AdminWalletTokenRuntime struct {
+	TokenID    string `json:"token_id"`
+	Symbol     string `json:"symbol"`
+	Type       string `json:"type"`
+	Address    string `json:"address,omitempty"`
+	BalanceWei string `json:"balance_wei,omitempty"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+}
+
+// WalletRuntimeProvider returns admin-safe wallet visibility.
+type WalletRuntimeProvider interface {
+	WalletRuntime(context.Context) AdminWalletRuntime
 }
 
 // Dependencies groups the services and settings required to build the HTTP API.
@@ -82,6 +110,8 @@ type Dependencies struct {
 	Logger *observability.Logger
 	// Metrics receives lightweight in-process runtime counters when provided.
 	Metrics *observability.RuntimeMetrics
+	// WalletRuntimeProvider exposes wallet balance/nonce state behind admin auth.
+	WalletRuntimeProvider WalletRuntimeProvider
 }
 
 // NewHandler builds the public and admin HTTP routes for the faucet service.
@@ -125,7 +155,8 @@ func NewHandler(deps Dependencies) http.Handler {
 	// Admin routes — all protected by bearer-token auth.
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("/api/v1/admin/dashboard", handleAdminDashboard(deps.AdminService))
-	adminMux.HandleFunc("/api/v1/admin/runtime", handleAdminRuntime(deps.AdminService, deps.ReadinessChecks, deps.Metrics))
+	adminMux.HandleFunc("/api/v1/admin/runtime", handleAdminRuntime(deps.AdminService, deps.ReadinessChecks, deps.Metrics, deps.WalletRuntimeProvider))
+	adminMux.HandleFunc("/api/v1/admin/wallet", handleAdminWallet(deps.WalletRuntimeProvider))
 	adminMux.HandleFunc("/api/v1/admin/queue", handleAdminQueue(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/queue/", handleAdminQueueDispatch(deps.AdminService, deps.Logger, deps.TrustedProxy, "/api/v1/admin/queue/"))
 	adminMux.HandleFunc("/api/v1/admin/metrics", handleAdminMetrics(deps.Metrics))
@@ -623,7 +654,7 @@ func decodeNoTrailingTokens(decoder *json.Decoder, v any) error {
 
 // --- Admin handlers --------------------------------------------------------
 
-func handleAdminRuntime(svc admin.AdminService, checks []ready.Check, metrics *observability.RuntimeMetrics) http.HandlerFunc {
+func handleAdminRuntime(svc admin.AdminService, checks []ready.Check, metrics *observability.RuntimeMetrics, walletProvider WalletRuntimeProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
@@ -643,8 +674,27 @@ func handleAdminRuntime(svc admin.AdminService, checks []ready.Check, metrics *o
 			Dashboard: dashboard,
 			Readiness: ready.Evaluate(r.Context(), checks),
 			Metrics:   metrics.Snapshot(now),
+			Wallet:    walletRuntime(r.Context(), walletProvider),
 		})
 	}
+}
+
+func handleAdminWallet(provider WalletRuntimeProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+		WriteJSON(w, http.StatusOK, walletRuntime(r.Context(), provider))
+	}
+}
+
+func walletRuntime(ctx context.Context, provider WalletRuntimeProvider) AdminWalletRuntime {
+	if provider == nil {
+		return AdminWalletRuntime{Enabled: false, Status: "disabled"}
+	}
+	return provider.WalletRuntime(ctx)
 }
 
 func adminListLimitFromQuery(r *http.Request, fallback int) int {

@@ -55,6 +55,7 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvBindAddr:                             "127.0.0.1:19090",
 		EnvPublicBaseURL:                        "https://faucet.example.test",
 		EnvRPCURL:                               "http://127.0.0.1:28545",
+		EnvRPCSecondaryURLs:                     "http://127.0.0.1:28546, http://127.0.0.1:28547",
 		EnvChainID:                              "999",
 		EnvNetworkName:                          "scavium-test",
 		EnvSymbol:                               "tSCAV",
@@ -104,6 +105,9 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	}
 	if cfg.RPCURL != values[EnvRPCURL] {
 		t.Fatalf("rpc url = %q", cfg.RPCURL)
+	}
+	if len(cfg.RPCSecondaryURLs) != 2 || cfg.RPCSecondaryURLs[0] != "http://127.0.0.1:28546" || cfg.RPCSecondaryURLs[1] != "http://127.0.0.1:28547" {
+		t.Fatalf("secondary rpc urls = %#v", cfg.RPCSecondaryURLs)
 	}
 	if cfg.ChainID != 999 {
 		t.Fatalf("chain id = %d", cfg.ChainID)
@@ -295,6 +299,19 @@ func TestValidateRejectsCriticalEmptyValues(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want to contain %q", err.Error(), want)
 		}
+	}
+}
+
+func TestValidateRejectsDuplicateSecondaryRPCURL(t *testing.T) {
+	cfg := Defaults()
+	cfg.RPCSecondaryURLs = []string{cfg.RPCURL}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("validate returned nil")
+	}
+	if !strings.Contains(err.Error(), "secondary RPC URLs must not duplicate primary RPC URL") {
+		t.Fatalf("error = %q, want duplicate secondary RPC validation", err.Error())
 	}
 }
 

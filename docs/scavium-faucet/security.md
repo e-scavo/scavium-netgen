@@ -222,3 +222,10 @@ Phase 21 adds `GET /api/v1/admin/metrics/prometheus` as a Prometheus-compatible 
 The export deliberately avoids unbounded or sensitive labels. It never emits wallet addresses, raw IP addresses, fingerprints, request bodies, captcha tokens, idempotency keys, private keys, admin tokens, RPC credentials, or authorization headers. Token labels are limited to sanitized runtime buckets and a bounded in-process overflow bucket. The metrics registry itself enforces defensive token bucketing: rejections caused by invalid token IDs are aggregated into the `invalid` bucket, early service/unavailable errors are kept in `default`, empty/non-printable labels collapse to `default`, and long labels are truncated before export rather than preserving untrusted requested token IDs.
 
 Operators must keep this endpoint private. nginx should continue to proxy admin routes only to trusted operators or internal collection paths; no unauthenticated public metrics location should be added.
+
+
+## Phase 22 RPC failover and wallet visibility security
+
+Phase 22 keeps RPC failover conservative: fallback URLs are startup configuration only, are tried in deterministic order, and must pass configured chain-ID validation before use. The runtime does not load-balance, does not rotate endpoints during a transaction, and does not store RPC credentials in code or documentation. Operators must keep every configured RPC URL private, trusted, firewall-restricted where possible, and compatible with the same chain ID as the primary Besu endpoint.
+
+Admin wallet visibility is protected by the existing `/api/v1/admin/` bearer-token middleware. It exposes only operator-safe state: signer address, native balance, pending nonce, configured token ids/symbols/types, and balance status. It never returns private keys, admin tokens, authorization headers, RPC credentials, request bodies, captcha tokens, fingerprints, idempotency keys, or raw blocklist values.
