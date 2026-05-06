@@ -4,13 +4,14 @@
 
 Source of truth: the project ZIP provided after Phase 19 closure.
 
-The current production baseline is closed through Phase 19, including:
+The current production baseline is closed through Phase 20, including:
 
 - Phase 15: captcha, durable abuse signals, progressive enforcement, retention.
 - Phase 16: structured logs, request/correlation IDs, admin metrics, enriched health/readiness.
 - Phase 17: token support, public token catalog, token-aware claim validation, token-aware frontend, post-audit fixes.
-- Phase 18: production-safe admin control subset, with documented in-memory scope for queue/claim/blocklist/audit surfaces.
+- Phase 18: production-safe admin control subset.
 - Phase 19: production hardening plus post-audit fixes for HTTP headers, request limits, shutdown, content type validation, nginx duplicate header prevention, and test timeout guidance.
+- Phase 20: SQLite-backed admin claim/queue read+control, durable admin audit history, persisted admin blocklist, and persisted claim-path blocklist enforcement.
 
 This document exists to prevent scope drift after Phase 19. The roadmap below must be completed in order before moving into broader feature-list expansion from `docs/scavium_faucet_public_features.md`.
 
@@ -33,17 +34,12 @@ This document exists to prevent scope drift after Phase 19. The roadmap below mu
 
 ## Missing features from `docs/scavium_faucet_public_phase-roadmap-post14.md`
 
-The post-Phase-14 roadmap closes 15 through 19 but explicitly leaves the following items open or deferred:
+The post-Phase-14 roadmap closes 15 through 20 and explicitly leaves the following items open or deferred:
 
 ### Admin/control-plane maturation
 
 Still missing or intentionally limited:
 
-- SQLite-backed admin claim lookup/listing.
-- SQLite-backed admin queue visibility using production persisted queue state.
-- SQLite-backed retry/cancel control for persisted claims.
-- Durable admin audit persistence.
-- Persisted admin blocklist and claim-path enforcement integration.
 - Dynamic budget/config editing.
 - CSV/export workflows.
 - Allowlist/campaign management.
@@ -74,33 +70,19 @@ Still missing or partial:
 
 ## Ordered phases to finish the post-14 roadmap
 
-### Phase 20 — SQLite-backed Admin State and Enforcement
+### Phase 20 — SQLite-backed Admin State and Enforcement (Closed)
 
-Goal: remove the largest intentional Phase 18 limitation by moving admin queue/claim/control/audit/blocklist behavior from process memory to SQLite-backed production state.
+Goal achieved: the intentional Phase 18 durability limitation for queue/claim/control/audit/blocklist behavior is now closed with SQLite-backed production state.
 
-Current step status:
+Closure status:
 
-- 20.1 is in progress and establishes the SQLite admin read model foundation.
-- Dashboard claim counts, admin claim listing/detail, and admin queue snapshots now read persisted SQLite state.
-- Retry/cancel controls, blocklist durability, and durable admin audit persistence remain deferred to 20.2-20.4.
+- 20.1: SQLite admin read model foundation for dashboard claim counts, admin claim listing/detail, and admin queue snapshots.
+- 20.2: SQLite-backed retry/cancel control for eligible persisted claims.
+- 20.3: Durable admin audit log persisted and read from SQLite.
+- 20.4: Persisted admin blocklist and claim-path enforcement for `ip`, `address`, and `fingerprint`.
+- 20.5: closure audit and documentation alignment.
 
-Scope:
-
-- Introduce minimal SQLite tables for admin audit and persisted blocklist.
-- Add store methods for admin-safe claim listing, claim detail, queue snapshots, retry, and cancel.
-- Keep existing admin HTTP contracts stable.
-- Keep existing in-memory admin service available for tests or fallback only where needed.
-- Wire admin mode control to live runtime exactly as Phase 18.7 requires.
-- Integrate persisted blocklist enforcement into the claim path for IP, address, and fingerprint.
-- Document what becomes durable and what remains deferred.
-
-Suggested subphases:
-
-- 20.1: SQLite admin read model foundation. (started)
-- 20.2: SQLite queue/claim retry and cancel control.
-- 20.3: Durable admin audit log.
-- 20.4: Persisted blocklist and claim-path enforcement.
-- 20.5: Phase 20 audit and documentation closure.
+Phase 20 preserves existing public/admin HTTP contracts while moving operator state from in-memory behavior to durable SQLite-backed behavior for these surfaces.
 
 ### Phase 21 — Operator Observability and Alerting Baseline
 

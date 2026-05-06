@@ -1,4 +1,4 @@
-Execute cmd/scavium-faucet/.agent/step20.4.0.md following cmd/scavium-faucet/.agent/rules.md and cmd/scavium-faucet/.agent/commands.md.
+Execute cmd/scavium-faucet/.agent/step20.5.0.md following cmd/scavium-faucet/.agent/rules.md and cmd/scavium-faucet/.agent/commands.md.
 
 Hard requirements:
 - Treat the current repository as the only source of truth.
