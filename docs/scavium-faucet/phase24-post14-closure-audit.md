@@ -88,6 +88,7 @@ Run non-mutating operator checks when the local environment has shell access to 
 
 ```bash
 ./scripts/scavium-faucet-backup.sh --plan
+SCAVIUM_FAUCET_RESTORE_BUNDLE=/path/to/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
 ./scripts/scavium-faucet-restore.sh --plan
 ```
 

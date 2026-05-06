@@ -79,6 +79,7 @@ Also run non-mutating operational checks when environment allows:
 
 ```bash
 ./scripts/scavium-faucet-backup.sh --plan
+SCAVIUM_FAUCET_RESTORE_BUNDLE=/path/to/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
 ./scripts/scavium-faucet-restore.sh --plan
 ```
 
