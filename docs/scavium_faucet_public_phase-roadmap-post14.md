@@ -324,7 +324,7 @@ Implemented closure scope:
 
 ### 18.8 — Final Closure Notes/Fixes
 - Aligned admin API documentation with the real queue response shape
-- Documented the current in-memory scope for queue/claim control and blocklist surfaces
+- Documented the then-current in-memory scope for queue/claim control and blocklist surfaces (later closed in Phase 20)
 - Validated blocklist `key_type` against `ip`, `address`, and `fingerprint`
 - Capped admin claims and audit list limits at `500`
 
@@ -364,16 +364,19 @@ Phase 19 was completed as a conservative production-hardening pass rather than a
 
 ---
 
-## Phase 20 — SQLite-backed Admin State and Enforcement (Active)
+## Phase 20 — SQLite-backed Admin State and Enforcement (Closed)
 
 Phase 20 is the next required roadmap phase after Phase 19 closure. Its purpose is to remove the largest documented Phase 18 limitation: queue visibility/control, claim lookup/control, blocklist management, and admin audit history currently operate through the production-safe in-memory admin service. Phase 20 must move those operator surfaces onto SQLite-backed production state while preserving public contracts and existing admin endpoint shapes.
 
-Current step status:
+Closure status:
 
-- 20.1 foundation started: admin claim listing/detail and admin queue snapshots now read from persisted SQLite claim/queue state.
-- Remaining Phase 20 controls are still intentionally deferred: retry/cancel durability, durable audit persistence, and persisted blocklist enforcement.
+- 20.1: admin claim listing/detail and admin queue snapshots read persisted SQLite claim/queue state.
+- 20.2: retry/cancel controls persist eligible transitions in SQLite claim state.
+- 20.3: admin audit history is persisted and read from SQLite.
+- 20.4: admin blocklist entries are persisted and enforced in public claim intake for `ip`, `address`, and `fingerprint` scopes.
+- 20.5: documentation and roadmap alignment completed with deferred items explicitly carried forward.
 
-Required closure scope:
+Delivered closure scope:
 
 - SQLite-backed admin claim listing and detail lookup.
 - SQLite-backed queue snapshots derived from persisted claim/queue state.

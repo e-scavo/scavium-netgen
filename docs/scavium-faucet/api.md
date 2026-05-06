@@ -373,7 +373,7 @@ Operational notes:
 
 ### `GET /api/v1/admin/dashboard`
 
-Returns the admin summary. The faucet `mode` is runtime-effective for claim intake after the Phase 18.7 post-audit fix. Since Phase 20.1, `claim_counts` are derived from persisted SQLite claim rows while blocklist size remains in the current in-memory admin control scope.
+Returns the admin summary. The faucet `mode` is runtime-effective for claim intake after the Phase 18.7 post-audit fix. In Phase 20, `claim_counts` and `blocklist_size` are derived from persisted SQLite state.
 
 ```json
 {

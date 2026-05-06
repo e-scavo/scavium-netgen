@@ -169,7 +169,7 @@ The closure deliberately defers broader control-plane expansion. Dynamic budget/
 
 Phase 19 is closed as a conservative production-hardening pass over the already-stable faucet runtime. The implemented scope covers backend security headers, defensive rate-limit edge cases, explicit request/header/body/time limits, and deterministic graceful shutdown.
 
-The closure preserves the public contract for `POST /api/v1/claim`, error envelopes, request/correlation headers, token-aware behavior, admin bearer authentication, and the intentionally in-memory admin queue/claim/blocklist surfaces from Phase 18. It does not introduce new external dependencies, schema migrations, RPC failover, hot-wallet refill automation, SQLite-backed admin controls, dynamic config mutation, or durable admin audit persistence.
+The closure preserves the public contract for `POST /api/v1/claim`, error envelopes, request/correlation headers, token-aware behavior, and admin bearer authentication. Phase 20 subsequently completed the planned SQLite-backed admin claim/queue controls, durable audit persistence, and persisted blocklist enforcement without changing those public/admin endpoint contracts.
 
-With Phase 19.5, the documentation is aligned to the current production-hardening scope and Phase 20 can start from a deployable, backward-compatible baseline.
+With Phase 20 closed, the documentation is aligned to the current durable admin-state baseline while keeping later deferred items (dynamic config mutation, campaigns/allowlists, runtime token mutation, advanced resilience) explicit.
 

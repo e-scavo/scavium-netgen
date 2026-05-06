@@ -177,14 +177,15 @@ The claim handler logs safe structured events for accepted and rejected claims. 
 
 Phase 18 adds an admin-control plane inside the existing faucet binary. It does not introduce a second service, a new database schema, or a public control endpoint. All `/api/v1/admin/*` routes remain behind the existing bearer-token middleware and are excluded from CORS.
 
-The admin service currently has split runtime scopes:
+The admin service now runs with a durable SQLite-backed operator state for Phase 20 surfaces:
 
 - **Runtime-effective mode control:** `POST /api/v1/admin/faucet/mode` validates `active`, `paused`, and `maintenance`, records an audit entry, and propagates the accepted mode into the live `PersistentReadService` through the `ModeController` boundary added in Phase 18.7.
-- **SQLite-backed read surfaces (Phase 20.1):** dashboard claim counts, claim listing/detail, and queue snapshots now read from persisted SQLite claim/queue state.
-- **SQLite-backed control surfaces (Phase 20.2):** retry/cancel mutations now update persisted SQLite claim state.
-- **In-memory control surfaces (still deferred for durability):** blocklist management and the audit ring buffer still operate on the current in-memory admin service.
+- **SQLite-backed read surfaces (Phase 20.1):** dashboard claim counts, claim listing/detail, and queue snapshots read persisted SQLite claim/queue state.
+- **SQLite-backed control surfaces (Phase 20.2):** retry/cancel mutations update persisted SQLite claim state.
+- **SQLite-backed audit surface (Phase 20.3):** admin audit rows are persisted and served from SQLite.
+- **SQLite-backed blocklist + enforcement (Phase 20.4):** admin blocklist entries are persisted and claim intake enforces persisted `ip`, `address`, and `fingerprint` blocklist scopes before expensive downstream processing.
 
-This split is deliberate for the current Phase 20 progression. It keeps existing admin HTTP contracts stable while introducing persisted claim/queue reads and persisted retry/cancel transitions before later durable blocklist/audit substeps.
+This Phase 20 closure keeps existing public/admin HTTP contracts stable while removing the prior in-memory durability limits for queue/claim/audit/blocklist operator state.
 
 Phase 18.8 closes the final audit notes by aligning the documented queue response with the real `QueueResponse` structure, validating blocklist `key_type` values (`ip`, `address`, `fingerprint`), and applying a shared `500` item cap to admin queue, claims, and audit list endpoints.
 ## Phase 19.3 — Performance Safety / Request Body & Timeout Hardening
