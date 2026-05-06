@@ -322,15 +322,15 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 		}
 
 		claim, err := readService.CreateClaim(r.Context(), claimRequest)
-		observedTokenID := observedRequestTokenID(claimRequest.TokenID)
 		if err != nil {
-			metrics.IncClaimRejectedForToken(observedTokenID, claimErrorCode(err))
+			metricCode := claimMetricCode(err)
+			metrics.IncClaimRejectedForToken(observedMetricsTokenID(claimRequest.TokenID, metricCode), metricCode)
 			logClaimRejected(logger, r, claimRequest, err)
 			handleCreateClaimError(w, r, err)
 			return
 		}
 
-		metrics.IncClaimAcceptedForToken(observedTokenID)
+		metrics.IncClaimAcceptedForToken(observedRequestTokenID(claimRequest.TokenID))
 		logClaimAccepted(logger, r, claimRequest, claim)
 		WriteJSON(w, http.StatusAccepted, claim)
 	}
@@ -425,6 +425,17 @@ func observedRequestTokenID(tokenID string) string {
 	return sanitizeTokenID(trimmed)
 }
 
+func observedMetricsTokenID(tokenID, metricCode string) string {
+	switch metricCode {
+	case "invalid_token":
+		return "invalid"
+	case "faucet_unavailable", "claim_unavailable":
+		return "default"
+	default:
+		return observedRequestTokenID(tokenID)
+	}
+}
+
 // sanitizeTokenID strips non-printable ASCII characters and truncates to 64 bytes
 // to prevent log contamination from adversarial token_id values.
 func sanitizeTokenID(id string) string {
@@ -436,6 +447,20 @@ func sanitizeTokenID(id string) string {
 		}
 	}
 	return string(out)
+}
+
+func claimMetricCode(err error) string {
+	if errors.Is(err, faucet.ErrClaimRejected) {
+		if claimErr, ok := claimErrorAs(err); ok {
+			switch claimErr.Reason {
+			case "invalid_token":
+				return "invalid_token"
+			case "blocked by abuse policy":
+				return "blocklist_rejected"
+			}
+		}
+	}
+	return claimErrorCode(err)
 }
 
 func claimErrorCode(err error) string {

@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ func TestRuntimeMetricsSnapshot(t *testing.T) {
 	metrics.IncClaimAcceptedForToken("native")
 	metrics.IncClaimAccepted()
 	metrics.IncClaimRejected("claim_rejected")
+	metrics.IncClaimRejected("blocklist_rejected")
 	metrics.IncClaimRejected("captcha_failed")
 	metrics.IncClaimRejectedForToken("native", "rate_limited")
 	metrics.IncClaimRejectedForToken("erc20", "daily_budget_exceeded")
@@ -39,11 +41,14 @@ func TestRuntimeMetricsSnapshot(t *testing.T) {
 	if snapshot.Claims.Accepted != 2 {
 		t.Fatalf("claims.accepted = %d", snapshot.Claims.Accepted)
 	}
-	if snapshot.Claims.Rejected != 7 {
-		t.Fatalf("claims.rejected = %d", snapshot.Claims.Rejected)
+	if snapshot.Claims.Rejected != 8 {
+		t.Fatalf("claims.rejected = %d, want 8", snapshot.Claims.Rejected)
 	}
 	if snapshot.Claims.RejectedByRisk != 1 {
 		t.Fatalf("claims.rejected_by_risk = %d", snapshot.Claims.RejectedByRisk)
+	}
+	if snapshot.Abuse.BlocklistRejected != 1 {
+		t.Fatalf("abuse.blocklist_rejected = %d, want 1", snapshot.Abuse.BlocklistRejected)
 	}
 	if snapshot.Claims.FaucetUnavailable != 1 {
 		t.Fatalf("claims.faucet_unavailable = %d", snapshot.Claims.FaucetUnavailable)
@@ -66,10 +71,22 @@ func TestRuntimeMetricsSnapshot(t *testing.T) {
 	if len(snapshot.Tokens) != 4 {
 		t.Fatalf("tokens len = %d, want 4: %#v", len(snapshot.Tokens), snapshot.Tokens)
 	}
-	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "default", Accepted: 1, Rejected: 4})
+	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "default", Accepted: 1, Rejected: 5})
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "erc20", Rejected: 1, DailyExceeded: 1})
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "missing-token", Rejected: 1, InvalidToken: 1})
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "native", Accepted: 1, Rejected: 1, RateLimited: 1})
+}
+
+func TestRuntimeMetricsTokenBucketsAreBounded(t *testing.T) {
+	metrics := NewRuntimeMetrics(version.Info{})
+	for i := 0; i < maxRuntimeTokenMetricBuckets+10; i++ {
+		metrics.IncClaimRejectedForToken(fmt.Sprintf("untrusted-%d", i), "invalid_token")
+	}
+	snapshot := metrics.Snapshot(time.Now().UTC())
+	if len(snapshot.Tokens) != maxRuntimeTokenMetricBuckets+1 {
+		t.Fatalf("token buckets len = %d, want %d", len(snapshot.Tokens), maxRuntimeTokenMetricBuckets+1)
+	}
+	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "other", Rejected: 10, InvalidToken: 10})
 }
 
 func assertTokenMetrics(t *testing.T, tokens []RuntimeTokenMetrics, want RuntimeTokenMetrics) {
@@ -137,6 +154,7 @@ func TestRuntimeMetricsQueueWorkerWatcherCountersAndPrometheus(t *testing.T) {
 	text := metrics.PrometheusText(startedAt.Add(time.Minute))
 	for _, want := range []string{
 		"scavium_faucet_queue_dequeued_total 2\n",
+		"scavium_faucet_abuse_blocklist_rejected_total 0\n",
 		"scavium_faucet_worker_batch_failed_total 1\n",
 		"scavium_faucet_watcher_confirmed_total 1\n",
 		"scavium_faucet_token_claims_accepted_total{token_id=\"native\"} 1\n",

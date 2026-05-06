@@ -1341,7 +1341,50 @@ func TestAdminMetricsCountsInvalidTokenClaims(t *testing.T) {
 	if body.Claims.RejectedByRisk != 0 {
 		t.Fatalf("claims.rejected_by_risk = %d, want 0", body.Claims.RejectedByRisk)
 	}
-	assertHTTPTokenMetrics(t, body.Tokens, observability.RuntimeTokenMetrics{TokenID: "missing-token", Rejected: 1, InvalidToken: 1})
+	assertHTTPTokenMetrics(t, body.Tokens, observability.RuntimeTokenMetrics{TokenID: "invalid", Rejected: 1, InvalidToken: 1})
+	for _, tm := range body.Tokens {
+		if tm.TokenID == "missing-token" {
+			t.Fatalf("invalid token metrics must not preserve raw untrusted token_id: %+v", tm)
+		}
+	}
+}
+
+func TestAdminMetricsCountsBlocklistRejections(t *testing.T) {
+	metrics := observability.NewRuntimeMetrics(version.Info{})
+	handler := NewHandler(Dependencies{
+		ReadService: &failingClaimService{err: &faucet.ClaimError{Kind: faucet.ErrClaimRejected, Reason: "blocked by abuse policy"}},
+		AdminToken:  testAdminToken,
+		Metrics:     metrics,
+	})
+
+	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7","token_id":"native"}`))
+	claimReq.Header.Set("Content-Type", "application/json")
+	claimRec := httptest.NewRecorder()
+	handler.ServeHTTP(claimRec, claimReq)
+	if claimRec.Code != http.StatusForbidden {
+		t.Fatalf("claim status code = %d, want %d", claimRec.Code, http.StatusForbidden)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/metrics", nil)
+	metricsReq.Header.Set("Authorization", "Bearer "+testAdminToken)
+	metricsRec := httptest.NewRecorder()
+	handler.ServeHTTP(metricsRec, metricsReq)
+	if metricsRec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", metricsRec.Code, http.StatusOK)
+	}
+	var body observability.RuntimeMetricsSnapshot
+	if err := json.NewDecoder(metricsRec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Claims.Rejected != 1 {
+		t.Fatalf("claims.rejected = %d, want 1", body.Claims.Rejected)
+	}
+	if body.Claims.RejectedByRisk != 0 {
+		t.Fatalf("claims.rejected_by_risk = %d, want 0", body.Claims.RejectedByRisk)
+	}
+	if body.Abuse.BlocklistRejected != 1 {
+		t.Fatalf("abuse.blocklist_rejected = %d, want 1", body.Abuse.BlocklistRejected)
+	}
 }
 
 func assertHTTPTokenMetrics(t *testing.T, tokens []observability.RuntimeTokenMetrics, want observability.RuntimeTokenMetrics) {
