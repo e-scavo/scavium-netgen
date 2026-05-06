@@ -40,8 +40,12 @@ type Store struct {
 // Open opens a SQLite database file and applies embedded migrations.
 // WAL mode and a 5-second busy timeout are enabled to allow concurrent access
 // from the HTTP handler and the background worker without SQLITE_BUSY errors.
+//
+// The path argument may include SQLite URI query parameters. This is used by
+// tests to opt into faster temporary-database pragmas without weakening the
+// production default DSN.
 func Open(path string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	dsn := sqliteDSN(path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -53,6 +57,14 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func sqliteDSN(path string) string {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return "file:" + path + sep + "_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
 }
 
 // New wraps an existing sql.DB as a faucet Store.

@@ -546,7 +546,7 @@ func TestPersistentReadServiceProgressiveAbuseEnforcementRejects(t *testing.T) {
 func openPersistentTestStore(t *testing.T, path string) *sqlite.Store {
 	t.Helper()
 	if path == "" {
-		path = filepath.Join(t.TempDir(), "faucet.db")
+		path = filepath.Join(t.TempDir(), "faucet.db") + "?_pragma=synchronous(OFF)"
 	}
 	store, err := sqlite.Open(path)
 	if err != nil {

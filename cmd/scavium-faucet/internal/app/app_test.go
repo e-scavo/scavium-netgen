@@ -188,7 +188,7 @@ func newTestApp(t *testing.T, cfg config.Config) *App {
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	cfg := config.Defaults()
-	cfg.DatabasePath = filepath.Join(t.TempDir(), "faucet.db")
+	cfg.DatabasePath = filepath.Join(t.TempDir(), "faucet.db") + "?_pragma=synchronous(OFF)"
 	cfg.WorkerEnabled = false
 	cfg.WatcherEnabled = false
 	cfg.CooldownSeconds = 0

@@ -366,7 +366,7 @@ Phase 19 was completed as a conservative production-hardening pass rather than a
 
 ## Phase 20 — SQLite-backed Admin State and Enforcement (Closed)
 
-Phase 20 is the next required roadmap phase after Phase 19 closure. Its purpose is to remove the largest documented Phase 18 limitation: queue visibility/control, claim lookup/control, blocklist management, and admin audit history currently operate through the production-safe in-memory admin service. Phase 20 must move those operator surfaces onto SQLite-backed production state while preserving public contracts and existing admin endpoint shapes.
+Phase 20 is closed. It removed the largest documented Phase 18 limitation by moving queue visibility/control, claim lookup/control, blocklist management, and admin audit history from the production-safe in-memory admin service onto SQLite-backed production state while preserving public contracts and existing admin endpoint shapes.
 
 Closure status:
 

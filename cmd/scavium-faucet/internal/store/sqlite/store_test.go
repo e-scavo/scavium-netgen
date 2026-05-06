@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/big"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,19 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+func TestSQLiteDSNAppendsBasePragmasAfterCustomQuery(t *testing.T) {
+	dsn := sqliteDSN("/tmp/faucet.db?_pragma=synchronous(OFF)")
+	if !strings.HasPrefix(dsn, "file:/tmp/faucet.db?_pragma=synchronous(OFF)&") {
+		t.Fatalf("dsn = %q, want custom query preserved before base pragmas", dsn)
+	}
+	if !strings.Contains(dsn, "_pragma=journal_mode(WAL)") {
+		t.Fatalf("dsn = %q, want WAL pragma", dsn)
+	}
+	if !strings.Contains(dsn, "_pragma=busy_timeout(5000)") {
+		t.Fatalf("dsn = %q, want busy_timeout pragma", dsn)
+	}
+}
 
 func TestMigrateCreatesRequiredTables(t *testing.T) {
 	store := openTempStore(t)
@@ -967,12 +981,16 @@ func TestDequeueBatchSkipsFutureNextAttemptAt(t *testing.T) {
 func openTempStore(t *testing.T) *Store {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "faucet.db")
-	store, err := Open(path)
+	store, err := Open(testDatabasePath(t, "faucet.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
 	return store
+}
+
+func testDatabasePath(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), name) + "?_pragma=synchronous(OFF)"
 }
 
 func testClaim(id string) domain.Claim {

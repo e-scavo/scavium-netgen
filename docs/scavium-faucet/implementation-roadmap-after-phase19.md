@@ -66,7 +66,7 @@ Still missing or partial:
 - Wallet rotation procedure.
 - Backup/restore verification scripts and runbook closure.
 - Stuck transaction recovery/operator reconciliation surfaces.
-- Final production checklist after admin persistence and observability are complete.
+- Final production checklist after observability, blockchain resilience, and operational runbooks are complete.
 
 ## Ordered phases to finish the post-14 roadmap
 

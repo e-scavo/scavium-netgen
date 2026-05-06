@@ -459,7 +459,7 @@ func TestInMemoryAdminServiceSetModeDoesNotPropagateInvalidMode(t *testing.T) {
 }
 
 func TestSQLiteReadAdminServiceReadsPersistedClaimsAndQueue(t *testing.T) {
-	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin.db"))
+	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin.db") + "?_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestSQLiteReadAdminServiceReadsPersistedClaimsAndQueue(t *testing.T) {
 }
 
 func TestSQLiteReadAdminServiceUsesPersistedRetryCancel(t *testing.T) {
-	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin.db"))
+	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin.db") + "?_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
