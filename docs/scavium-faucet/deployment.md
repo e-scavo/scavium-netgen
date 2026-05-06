@@ -182,3 +182,23 @@ The checked-in example intentionally keeps secret values as placeholders.
 - [Certbot / ACME](deployment-certbot.md)
 - [Firewall](deployment-firewall.md)
 - [Rollback](deployment-rollback.md)
+
+## Phase 23 backup and restore deployment hooks
+
+Before each production deployment, rollback, or wallet-rotation maintenance window, create and verify a local backup bundle:
+
+```bash
+SCAVIUM_FAUCET_DATABASE_PATH=/var/lib/scavium-faucet/scavium-faucet.db \
+SCAVIUM_FAUCET_ENV_FILE=/etc/scavium-faucet/scavium-faucet.env \
+SCAVIUM_FAUCET_BACKUP_DIR=/secure/offline/scavium-faucet-backups \
+scripts/scavium-faucet-backup.sh --execute
+```
+
+Then verify it:
+
+```bash
+SCAVIUM_FAUCET_BACKUP_FILE=/secure/offline/scavium-faucet-backups/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
+scripts/scavium-faucet-backup.sh --verify
+```
+
+Rollback verification after switching `current` back to an older release must include `/health`, `/ready`, `/api/v1/admin/runtime`, `/api/v1/admin/wallet`, and `scripts/scavium-faucet-operator-smoke.sh`. Keep the service in paused or maintenance mode until DB, queue, RPC, and wallet state are all coherent.

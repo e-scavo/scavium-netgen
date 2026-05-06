@@ -218,3 +218,31 @@ Dynamic budget editing, token catalog mutation, role-based admin accounts, and d
 Phase 22 adds conservative startup-only RPC failover through `SCAVIUM_FAUCET_RPC_SECONDARY_URLS`. The primary URL remains the default and first candidate. If primary dialing or chain-ID validation fails, the app tries each secondary in order and only keeps a candidate after `ValidateChainID` succeeds. Once selected, that single client is used for the sender, watcher, readiness, and wallet visibility paths; the faucet does not load-balance, rotate per claim, or retry a transaction against another endpoint after signing/broadcast semantics begin.
 
 Phase 22 also adds admin-only wallet visibility under `/api/v1/admin/wallet` and as the `wallet` object in `/api/v1/admin/runtime`. The response exposes the signer address, native balance, pending nonce, and configured token balance status when safe. It never exposes private keys, admin tokens, RPC credentials, authorization headers, idempotency keys, or request bodies. In dry-run mode or when no real signer/client is configured, wallet visibility reports `enabled:false`.
+
+## Phase 23 backup, restore, and wallet-operation configuration
+
+Phase 23 does not add runtime environment variables to the faucet binary. It adds operator helper scripts that read explicit environment variables so production paths can be reviewed before any filesystem write.
+
+Backup helper variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SCAVIUM_FAUCET_DATABASE_PATH` | `/var/lib/scavium-faucet/scavium-faucet.db` | SQLite database to back up. This is the same variable used by the faucet runtime. |
+| `SCAVIUM_FAUCET_ENV_FILE` | `/etc/scavium-faucet/scavium-faucet.env` | Reviewed runtime env file to include in the backup bundle when present. |
+| `SCAVIUM_FAUCET_BACKUP_DIR` | `./scavium-faucet-backups` | Local directory where backup bundles are written. |
+| `SCAVIUM_FAUCET_BACKUP_ID` | UTC timestamp | Optional stable id for repeatable backup naming. |
+| `SCAVIUM_FAUCET_BACKUP_FILE` | generated bundle path | Existing bundle to verify in `--verify` mode. |
+
+Restore helper variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SCAVIUM_FAUCET_RESTORE_BUNDLE` | empty | Required `.tar.gz` backup bundle to restore. |
+| `SCAVIUM_FAUCET_DATABASE_PATH` | `/var/lib/scavium-faucet/scavium-faucet.db` | SQLite database restore target. |
+| `SCAVIUM_FAUCET_ENV_FILE` | `/etc/scavium-faucet/scavium-faucet.env` | Env restore target when config restore is explicitly enabled. |
+| `SCAVIUM_FAUCET_RESTORE_CONFIG` | `no` | Set to `yes` to restore the env file from the bundle. |
+| `SCAVIUM_FAUCET_SERVICE_NAME` | `scavium-faucet` | systemd service name used for the active-service safety guard. |
+| `SCAVIUM_FAUCET_RESTORE_CONFIRM` | `no` | Must be `yes` for `--execute`. |
+| `SCAVIUM_FAUCET_ALLOW_LIVE_RESTORE` | `no` | Emergency override for the live-service guard. Avoid in production. |
+
+These variables are script controls only. They do not change the faucet API, token catalog, signing behavior, or admin authorization contract. Backup bundles may contain secrets from the env file, so they must be handled like production credentials.

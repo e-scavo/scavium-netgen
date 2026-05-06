@@ -229,3 +229,11 @@ Operators must keep this endpoint private. nginx should continue to proxy admin 
 Phase 22 keeps RPC failover conservative: fallback URLs are startup configuration only, are tried in deterministic order, and must pass configured chain-ID validation before use. The runtime does not load-balance, does not rotate endpoints during a transaction, and does not store RPC credentials in code or documentation. Operators must keep every configured RPC URL private, trusted, firewall-restricted where possible, and compatible with the same chain ID as the primary Besu endpoint.
 
 Admin wallet visibility is protected by the existing `/api/v1/admin/` bearer-token middleware. It exposes only operator-safe state: signer address, native balance, pending nonce, configured token ids/symbols/types, and balance status. It never returns private keys, admin tokens, authorization headers, RPC credentials, request bodies, captcha tokens, fingerprints, idempotency keys, or raw blocklist values.
+
+## Phase 23 backup and wallet operation security
+
+Backup bundles created by `scripts/scavium-faucet-backup.sh` can contain durable SQLite state and a copy of the reviewed runtime environment file. The environment file may include private keys, admin bearer tokens, captcha secrets, and RPC credentials. Store backup bundles only in encrypted, access-controlled locations. Never attach them to public issues, chats, release artifacts, or support requests.
+
+Restore is intentionally operator-controlled. `scripts/scavium-faucet-restore.sh` defaults to plan mode, requires `SCAVIUM_FAUCET_RESTORE_CONFIRM=yes` for writes, and refuses a live systemd restore unless explicitly overridden. Production restore should be done during a maintenance window with the service stopped, followed by `/ready`, admin runtime, admin wallet, and queue verification.
+
+Wallet refill and rotation remain manual. Phase 23 does not add treasury automation, automatic hot-wallet refill, or scripts that transfer funds. Operators must verify the admin wallet endpoint, send small test transactions first, and keep hot-wallet private keys out of Git, tickets, shell history, and treasury tooling. Rotation is performed by changing the real environment file outside the repository and restarting the service after backup and maintenance-mode preparation.

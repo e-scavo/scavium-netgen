@@ -125,6 +125,8 @@ Suggested subphases:
 
 ### Phase 23 — Operational Runbooks, Backup/Restore, and Wallet Procedures
 
+Status: closed in Phase 23.
+
 Goal: make operations repeatable and auditable before broader feature expansion.
 
 Scope:
@@ -138,9 +140,9 @@ Scope:
 
 Suggested subphases:
 
-- 23.1: Backup/restore scripts and dry-run verification.
-- 23.2: Wallet refill and rotation runbooks.
-- 23.3: Deployment/rollback operational closure.
+- 23.1: Backup/restore scripts and dry-run verification — closed.
+- 23.2: Wallet refill and rotation runbooks — closed.
+- 23.3: Deployment/rollback operational closure — covered by the Phase 23 runbook/deployment checklist.
 
 ### Phase 24 — Post-14 Roadmap Closure Audit
 

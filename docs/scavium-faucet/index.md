@@ -10,7 +10,7 @@ This directory documents the **implemented project surface**, not the full roadm
 
 Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility.
 
-The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin-protected Prometheus-compatible metrics text export, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, alerting guidance, local smoke tests, and enriched health/readiness probes.
+The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin-protected Prometheus-compatible metrics text export, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, alerting guidance, local smoke tests, and enriched health/readiness probes, review-first SQLite/config backup and restore scripts, and wallet refill/rotation runbooks.
 
 ## Documentation
 
@@ -23,7 +23,7 @@ The service is production-ready for the current testnet scope, including validat
 | [deployment-certbot.md](deployment-certbot.md) | Manual ACME and certbot guide for TLS issuance and renewal |
 | [deployment-firewall.md](deployment-firewall.md) | Public exposure and firewall policy for VPS and cloud edge |
 | [deployment-rollback.md](deployment-rollback.md) | Rollback procedure for release symlinks and service recovery |
-| [runbook.md](runbook.md) | Build, run, health checks, and operational caveats |
+| [runbook.md](runbook.md) | Build, run, health checks, backup/restore, wallet refill/rotation, and operational caveats |
 | [security.md](security.md) | Current security properties, gaps, and deployment guidance |
 | [token-registration.md](token-registration.md) | Phase 17.2 testnet token registration guide for native and ERC20 faucet assets |
 
@@ -49,6 +49,8 @@ The service is production-ready for the current testnet scope, including validat
 - `POST /api/v1/admin/faucet/mode` accepts only `active`, `paused`, or `maintenance` and propagates the selected mode into the live faucet runtime.
 - Admin audit entries and structured admin-action logs avoid admin-token leakage; actor attribution uses trusted-proxy-aware real IP extraction.
 - `/health` includes uptime and build metadata; `/ready` includes per-check duration and aggregate readiness summary while keeping the real DB/queue/RPC/wallet probes.
+- `scripts/scavium-faucet-backup.sh` and `scripts/scavium-faucet-restore.sh` provide plan-first backup/restore flows for SQLite and reviewed configuration.
+- Wallet refill and rotation remain manual runbook operations; no automatic treasury refill or fund-transfer automation is introduced.
 
 ## Quick start
 
@@ -178,3 +180,11 @@ With Phase 20 closed, the documentation is aligned to the current durable admin-
 ## Phase 21 closure
 
 Phase 21 is closed as the operator observability and alerting baseline. The implementation keeps the existing production topology and dependency profile: metrics remain process-local, admin-protected, and safe for operator use; a bounded Prometheus-compatible text endpoint was added without exposing sensitive labels; worker and watcher runtime counters now cover queue and blockchain outcomes; and the runbook now includes alert thresholds plus a local non-mutating smoke-test script for deploy and rollback checks.
+
+## Phase 22 closure
+
+Phase 22 is closed as the conservative blockchain/runtime resilience layer. The faucet now supports startup-only RPC failover with chain-ID validation and exposes admin-protected wallet visibility for signer address, native balance, pending nonce, and configured token balances. It does not add load balancing, automatic endpoint rotation during transactions, or fund movement automation.
+
+## Phase 23 closure
+
+Phase 23 is closed as the operational runbook and backup/restore layer. Operators now have plan-first SQLite/config backup and restore helpers, documented restore drills, deployment rollback verification commands, and manual wallet refill/rotation procedures. The closure is intentionally non-automatic: no treasury refill, private-key rotation, or fund transfer script was added.
