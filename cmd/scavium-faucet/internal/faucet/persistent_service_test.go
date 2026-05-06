@@ -167,6 +167,59 @@ func TestPersistentReadServiceAddressStatusReflectsCooldown(t *testing.T) {
 	}
 }
 
+func TestPersistentReadServiceAddressStatusIncludesTokenAndBudgetState(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(1000)
+	cfg.Tokens = []config.TokenConfig{
+		{ID: "native", Symbol: "SCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42), DailyBudgetWei: big.NewInt(1000)},
+	}
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), TokenID: "native"}); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	status, err := service.AddressStatus(context.Background(), persistentTestAddress())
+	if err != nil {
+		t.Fatalf("address status: %v", err)
+	}
+	if status.DailyBudget == nil || status.DailyBudget.UsedWei != "42" || status.DailyBudget.RemainingWei != "958" {
+		t.Fatalf("daily budget = %#v", status.DailyBudget)
+	}
+	if len(status.Tokens) != 1 {
+		t.Fatalf("tokens len = %d, want 1", len(status.Tokens))
+	}
+	if status.Tokens[0].TokenID != "native" || status.Tokens[0].DailyBudget == nil || status.Tokens[0].DailyBudget.UsedWei != "42" {
+		t.Fatalf("token status = %#v", status.Tokens[0])
+	}
+}
+
+func TestPersistentReadServiceAddressHistoryReturnsBoundedPage(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress()}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+	later := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow().Add(time.Minute))
+	later.SetClaimIDGenerator(func() (string, error) { return "claim_test_b", nil })
+	if _, err := later.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress()}); err != nil {
+		t.Fatalf("create second claim: %v", err)
+	}
+
+	history, err := service.AddressHistory(context.Background(), persistentTestAddress(), 1, 0)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if history.Pagination.Limit != 1 || history.Pagination.Count != 1 || !history.Pagination.HasMore {
+		t.Fatalf("pagination = %#v", history.Pagination)
+	}
+	if len(history.Claims) != 1 || history.Claims[0].ID != "claim_test_b" {
+		t.Fatalf("claims = %#v", history.Claims)
+	}
+}
+
 func TestPersistentReadServiceRejectsInactiveMode(t *testing.T) {
 	cfg := persistentTestConfig()
 	cfg.FaucetMode = "paused"

@@ -140,13 +140,13 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.HandleFunc("/api/v1/tokens", handleFaucetTokens(deps.ReadService))
 	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger, deps.Metrics))
 	mux.HandleFunc("/api/v1/claim/", handleGetClaim(deps.ReadService, "/api/v1/claim/"))
-	mux.HandleFunc("/api/v1/address/", handleAddressStatus(deps.ReadService, "/api/v1/address/", "/status"))
+	mux.HandleFunc("/api/v1/address/", handleAddressDispatch(deps.ReadService, "/api/v1/address/", "/status"))
 	mux.HandleFunc("/api/v1/faucet/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/config", handleFaucetConfig(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/tokens", handleFaucetTokens(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger, deps.Metrics))
 	mux.HandleFunc("/api/v1/faucet/claim/", handleGetClaim(deps.ReadService, "/api/v1/faucet/claim/"))
-	mux.HandleFunc("/api/v1/faucet/address/", handleAddressStatus(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
+	mux.HandleFunc("/api/v1/faucet/address/", handleAddressDispatch(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
 	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
 	// Unknown /api/ paths get a JSON 404; everything else is served by the frontend.
 	mux.HandleFunc("/api/", handleNotFound)
@@ -279,6 +279,81 @@ func handleFaucetTokens(readService faucet.ReadService) http.HandlerFunc {
 			"tokens": tokens,
 		})
 	}
+}
+
+func handleAddressDispatch(readService faucet.ReadService, prefix, statusSuffix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/history") {
+			handleAddressHistory(readService, prefix, "/history").ServeHTTP(w, r)
+			return
+		}
+		handleAddressStatus(readService, prefix, statusSuffix).ServeHTTP(w, r)
+	}
+}
+
+func handleAddressHistory(readService faucet.ReadService, prefix, suffix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+
+		addressText, ok := pathMiddle(r.URL.Path, prefix, suffix)
+		if !ok {
+			handleNotFound(w, r)
+			return
+		}
+
+		address, err := domain.ValidateAddress(addressText)
+		if err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_address", "invalid address", map[string]any{
+				"reason": err.Error(),
+			})
+			return
+		}
+
+		limit, offset, ok := paginationParams(w, r)
+		if !ok {
+			return
+		}
+		history, err := readService.AddressHistory(r.Context(), address, limit, offset)
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "address_history_unavailable", "address history unavailable", nil)
+			return
+		}
+		WriteJSON(w, http.StatusOK, history)
+	}
+}
+
+func paginationParams(w http.ResponseWriter, r *http.Request) (int, int, bool) {
+	limit, err := intQueryParam(r, "limit", 25)
+	if err != nil {
+		WriteError(w, r, http.StatusBadRequest, "invalid_pagination", "invalid pagination", map[string]any{"field": "limit"})
+		return 0, 0, false
+	}
+	offset, err := intQueryParam(r, "offset", 0)
+	if err != nil {
+		WriteError(w, r, http.StatusBadRequest, "invalid_pagination", "invalid pagination", map[string]any{"field": "offset"})
+		return 0, 0, false
+	}
+	if limit < 0 || offset < 0 {
+		WriteError(w, r, http.StatusBadRequest, "invalid_pagination", "invalid pagination", nil)
+		return 0, 0, false
+	}
+	return limit, offset, true
+}
+
+func intQueryParam(r *http.Request, key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	return value, nil
 }
 
 func handleAddressStatus(readService faucet.ReadService, prefix, suffix string) http.HandlerFunc {

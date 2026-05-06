@@ -200,6 +200,56 @@ func TestRequestLoggingMiddlewareDoesNotLogClaimPayload(t *testing.T) {
 	}
 }
 
+func TestAddressHistoryReturnsPaginatedClaims(t *testing.T) {
+	service := testClaimService()
+	address := "0x52908400098527886E0F7030069857D2E4169EE7"
+	reqBody := `{"address":"` + address + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	NewHandler(Dependencies{ReadService: service}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("create status code = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/address/"+address+"/history?limit=1&offset=0", nil)
+	rec = httptest.NewRecorder()
+	NewHandler(Dependencies{ReadService: service}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("history status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var body faucet.AddressHistoryResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if body.Address != address {
+		t.Fatalf("address = %q, want %q", body.Address, address)
+	}
+	if body.Pagination.Limit != 1 || body.Pagination.Offset != 0 || body.Pagination.Count != 1 {
+		t.Fatalf("pagination = %#v", body.Pagination)
+	}
+	if len(body.Claims) != 1 || body.Claims[0].ID != "claim_test" {
+		t.Fatalf("claims = %#v", body.Claims)
+	}
+}
+
+func TestAddressHistoryRejectsInvalidAddressAndPagination(t *testing.T) {
+	handler := NewHandler(Dependencies{ReadService: testClaimService()})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/address/not-an-address/history", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid address status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/address/0x52908400098527886E0F7030069857D2E4169EE7/history?limit=abc", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid pagination status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestCreateClaimLogsAcceptedClaimFlowWithCorrelationID(t *testing.T) {
 	var logs bytes.Buffer
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{
@@ -1462,6 +1512,10 @@ func (s *recordingClaimService) AddressStatus(context.Context, common.Address) (
 	return faucet.AddressStatusResponse{}, nil
 }
 
+func (s *recordingClaimService) AddressHistory(context.Context, common.Address, int, int) (faucet.AddressHistoryResponse, error) {
+	return faucet.AddressHistoryResponse{}, nil
+}
+
 func (s *recordingClaimService) CreateClaim(_ context.Context, request faucet.ClaimRequest) (faucet.ClaimResponse, error) {
 	s.request = request
 	return faucet.ClaimResponse{
@@ -1496,6 +1550,10 @@ func (s *failingClaimService) Tokens(context.Context) ([]faucet.TokenResponse, e
 
 func (s *failingClaimService) AddressStatus(context.Context, common.Address) (faucet.AddressStatusResponse, error) {
 	return faucet.AddressStatusResponse{}, nil
+}
+
+func (s *failingClaimService) AddressHistory(context.Context, common.Address, int, int) (faucet.AddressHistoryResponse, error) {
+	return faucet.AddressHistoryResponse{}, nil
 }
 
 func (s *failingClaimService) CreateClaim(context.Context, faucet.ClaimRequest) (faucet.ClaimResponse, error) {

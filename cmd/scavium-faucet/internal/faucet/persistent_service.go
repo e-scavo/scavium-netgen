@@ -28,6 +28,14 @@ type dailyBudgetStore interface {
 	DailyClaimAmountWei(ctx context.Context, dayStart, dayEnd time.Time, statuses []domain.ClaimStatus) (*big.Int, error)
 }
 
+type tokenDailyBudgetStore interface {
+	DailyClaimAmountWeiForToken(ctx context.Context, tokenID string, dayStart, dayEnd time.Time, statuses []domain.ClaimStatus) (*big.Int, error)
+}
+
+type addressHistoryStore interface {
+	ListClaimsByAddressPage(ctx context.Context, address common.Address, limit, offset int) ([]domain.Claim, error)
+}
+
 type budgetedClaimStore interface {
 	CreateClaimWithIdempotencyAndDailyBudget(ctx context.Context, claim domain.Claim, idempotencyKey string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error)
 }
@@ -173,12 +181,145 @@ func (s *PersistentReadService) AddressStatus(ctx context.Context, address commo
 		CooldownRemainingSeconds: remaining,
 		RateLimitIPPerHour:       s.cfg.RateLimitIPPerHour,
 		RateLimitAddrPerDay:      s.cfg.RateLimitAddrPerDay,
+		DefaultTokenID:           s.cfg.DefaultTokenID,
 	}
 	if remaining > 0 {
 		response.Reason = "cooldown_active"
 		response.NextEligibleTime = nextEligible.UTC().Format(time.RFC3339)
 	}
+	budget, err := s.dailyBudgetStatus(ctx, "")
+	if err != nil {
+		return AddressStatusResponse{}, err
+	}
+	response.DailyBudget = budget
+
+	tokens, err := s.tokenStatuses(ctx, address)
+	if err != nil {
+		return AddressStatusResponse{}, err
+	}
+	response.Tokens = tokens
+	for _, token := range tokens {
+		if !token.Eligible {
+			response.Eligible = false
+			if response.Reason == "eligible" {
+				response.Reason = token.Reason
+			}
+			break
+		}
+	}
 	return response, nil
+}
+
+func (s *PersistentReadService) AddressHistory(ctx context.Context, address common.Address, limit, offset int) (AddressHistoryResponse, error) {
+	limit = normalizeHistoryLimit(limit)
+	offset = normalizeHistoryOffset(offset)
+	fetchLimit := limit + 1
+
+	var claims []domain.Claim
+	var err error
+	if s.claims == nil {
+		return AddressHistoryResponse{
+			Address:    address.Hex(),
+			Claims:     []ClaimResponse{},
+			Pagination: Pagination{Limit: limit, Offset: offset, Count: 0, HasMore: false},
+		}, nil
+	}
+	if store, ok := s.claims.(addressHistoryStore); ok {
+		claims, err = store.ListClaimsByAddressPage(ctx, address, fetchLimit, offset)
+	} else {
+		claims, err = s.claims.ListClaimsByAddress(ctx, address, offset+fetchLimit)
+		if err == nil {
+			if offset > len(claims) {
+				claims = nil
+			} else {
+				claims = claims[offset:]
+			}
+		}
+	}
+	if err != nil {
+		return AddressHistoryResponse{}, err
+	}
+
+	hasMore := len(claims) > limit
+	if hasMore {
+		claims = claims[:limit]
+	}
+	out := make([]ClaimResponse, 0, len(claims))
+	for _, claim := range claims {
+		out = append(out, claimResponse(claim, ""))
+	}
+	return AddressHistoryResponse{
+		Address: address.Hex(),
+		Claims:  out,
+		Pagination: Pagination{
+			Limit: limit, Offset: offset, Count: len(out), HasMore: hasMore,
+		},
+	}, nil
+}
+
+func (s *PersistentReadService) tokenStatuses(ctx context.Context, address common.Address) ([]TokenStatus, error) {
+	tokens := s.cfg.NormalizedTokens()
+	out := make([]TokenStatus, 0, len(tokens))
+	for _, token := range tokens {
+		remaining, nextEligible, err := s.cooldown(ctx, address, token.ID)
+		if err != nil {
+			return nil, err
+		}
+		budget, err := s.dailyBudgetStatus(ctx, token.ID)
+		if err != nil {
+			return nil, err
+		}
+		reason := "eligible"
+		eligible := remaining == 0
+		next := ""
+		if remaining > 0 {
+			reason = "cooldown_active"
+			next = nextEligible.UTC().Format(time.RFC3339)
+		}
+		amountWei := ""
+		if token.AmountWei != nil {
+			amountWei = token.AmountWei.String()
+		}
+		out = append(out, TokenStatus{
+			TokenID: token.ID, Symbol: token.Symbol, Type: string(token.Type),
+			Eligible: eligible, Reason: reason, AmountWei: amountWei, DailyBudget: budget,
+			CooldownRemainingSeconds: remaining, NextEligibleTime: next,
+		})
+	}
+	return out, nil
+}
+
+func (s *PersistentReadService) dailyBudgetStatus(ctx context.Context, tokenID string) (*BudgetStatus, error) {
+	if s.claims == nil {
+		return nil, nil
+	}
+	budget := s.dailyBudgetForTokenID(tokenID)
+	if budget == nil || budget.Sign() <= 0 {
+		return nil, nil
+	}
+	dayStart, dayEnd := utcDayWindow(s.now())
+	var used *big.Int
+	var err error
+	if tokenID != "" {
+		if store, ok := s.claims.(tokenDailyBudgetStore); ok {
+			used, err = store.DailyClaimAmountWeiForToken(ctx, tokenID, dayStart, dayEnd, dailyBudgetStatuses())
+		} else if store, ok := s.claims.(dailyBudgetStore); ok {
+			used, err = store.DailyClaimAmountWei(ctx, dayStart, dayEnd, dailyBudgetStatuses())
+		}
+	} else if store, ok := s.claims.(dailyBudgetStore); ok {
+		used, err = store.DailyClaimAmountWei(ctx, dayStart, dayEnd, dailyBudgetStatuses())
+	}
+	if err != nil {
+		return nil, err
+	}
+	if used == nil {
+		used = big.NewInt(0)
+	}
+	remaining := new(big.Int).Sub(copyBigInt(budget), used)
+	if remaining.Sign() < 0 {
+		remaining = big.NewInt(0)
+	}
+	return &BudgetStatus{BudgetWei: budget.String(), UsedWei: used.String(), RemainingWei: remaining.String()}, nil
 }
 
 func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRequest) (ClaimResponse, error) {

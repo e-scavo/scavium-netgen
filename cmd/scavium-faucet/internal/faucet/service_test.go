@@ -94,6 +94,37 @@ func TestInMemoryReadServiceAddressStatus(t *testing.T) {
 	}
 }
 
+func TestInMemoryReadServiceAddressHistoryPagination(t *testing.T) {
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	service := NewInMemoryReadServiceWithClock(testConfig(), func() time.Time { return now })
+	ids := []string{"claim_old", "claim_new"}
+	next := 0
+	service.SetClaimIDGenerator(func() (string, error) {
+		id := ids[next]
+		next++
+		return id, nil
+	})
+	address := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address}); err != nil {
+		t.Fatalf("create old claim: %v", err)
+	}
+	service.now = func() time.Time { return now.Add(time.Minute) }
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address}); err != nil {
+		t.Fatalf("create new claim: %v", err)
+	}
+
+	history, err := service.AddressHistory(context.Background(), address, 1, 0)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if history.Pagination.Limit != 1 || history.Pagination.Count != 1 || !history.Pagination.HasMore {
+		t.Fatalf("pagination = %#v", history.Pagination)
+	}
+	if len(history.Claims) != 1 || history.Claims[0].ID != "claim_new" {
+		t.Fatalf("claims = %#v", history.Claims)
+	}
+}
+
 func TestInMemoryReadServiceCreateAndGetClaim(t *testing.T) {
 	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 	service := NewInMemoryReadServiceWithClock(testConfig(), func() time.Time { return now })

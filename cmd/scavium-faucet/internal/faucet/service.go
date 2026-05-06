@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -41,14 +42,52 @@ type ConfigResponse struct {
 
 // AddressStatusResponse describes whether an address can request funds now.
 type AddressStatusResponse struct {
-	Address                  string `json:"address"`
-	Eligible                 bool   `json:"eligible"`
-	Reason                   string `json:"reason"`
-	CooldownSeconds          int    `json:"cooldown_seconds"`
-	CooldownRemainingSeconds int    `json:"cooldown_remaining_seconds"`
-	NextEligibleTime         string `json:"next_eligible_time,omitempty"`
-	RateLimitIPPerHour       int    `json:"rate_limit_ip_per_hour"`
-	RateLimitAddrPerDay      int    `json:"rate_limit_addr_per_day"`
+	Address                  string        `json:"address"`
+	Eligible                 bool          `json:"eligible"`
+	Reason                   string        `json:"reason"`
+	CooldownSeconds          int           `json:"cooldown_seconds"`
+	CooldownRemainingSeconds int           `json:"cooldown_remaining_seconds"`
+	NextEligibleTime         string        `json:"next_eligible_time,omitempty"`
+	RateLimitIPPerHour       int           `json:"rate_limit_ip_per_hour"`
+	RateLimitAddrPerDay      int           `json:"rate_limit_addr_per_day"`
+	DefaultTokenID           string        `json:"default_token_id,omitempty"`
+	Tokens                   []TokenStatus `json:"tokens,omitempty"`
+	DailyBudget              *BudgetStatus `json:"daily_budget,omitempty"`
+}
+
+// TokenStatus is a public-safe per-token eligibility view for an address.
+type TokenStatus struct {
+	TokenID                  string        `json:"token_id"`
+	Symbol                   string        `json:"symbol"`
+	Type                     string        `json:"type"`
+	Eligible                 bool          `json:"eligible"`
+	Reason                   string        `json:"reason"`
+	AmountWei                string        `json:"amount_wei"`
+	DailyBudget              *BudgetStatus `json:"daily_budget,omitempty"`
+	CooldownRemainingSeconds int           `json:"cooldown_remaining_seconds"`
+	NextEligibleTime         string        `json:"next_eligible_time,omitempty"`
+}
+
+// BudgetStatus is a bounded public view of configured daily faucet capacity.
+type BudgetStatus struct {
+	BudgetWei    string `json:"budget_wei"`
+	UsedWei      string `json:"used_wei"`
+	RemainingWei string `json:"remaining_wei"`
+}
+
+// AddressHistoryResponse returns deterministic, paginated public claim history.
+type AddressHistoryResponse struct {
+	Address    string          `json:"address"`
+	Claims     []ClaimResponse `json:"claims"`
+	Pagination Pagination      `json:"pagination"`
+}
+
+// Pagination describes offset pagination used by bounded public list endpoints.
+type Pagination struct {
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	Count   int  `json:"count"`
+	HasMore bool `json:"has_more"`
 }
 
 // ClaimRequest is the internal read-side input for claim creation.
@@ -97,6 +136,7 @@ type ReadService interface {
 	Config(context.Context) (ConfigResponse, error)
 	Tokens(context.Context) ([]TokenResponse, error)
 	AddressStatus(context.Context, common.Address) (AddressStatusResponse, error)
+	AddressHistory(context.Context, common.Address, int, int) (AddressHistoryResponse, error)
 	CreateClaim(context.Context, ClaimRequest) (ClaimResponse, error)
 	GetClaim(context.Context, string) (ClaimResponse, bool, error)
 }
@@ -193,6 +233,43 @@ func (s *InMemoryReadService) AddressStatus(_ context.Context, address common.Ad
 		CooldownRemainingSeconds: 0,
 		RateLimitIPPerHour:       s.cfg.RateLimitIPPerHour,
 		RateLimitAddrPerDay:      s.cfg.RateLimitAddrPerDay,
+	}, nil
+}
+
+func (s *InMemoryReadService) AddressHistory(_ context.Context, address common.Address, limit, offset int) (AddressHistoryResponse, error) {
+	limit = normalizeHistoryLimit(limit)
+	offset = normalizeHistoryOffset(offset)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	all := make([]domain.Claim, 0)
+	for _, claim := range s.claimsByID {
+		if claim.Address == address {
+			all = append(all, claim)
+		}
+	}
+	sortClaimsForHistory(all)
+
+	end := offset + limit
+	if offset > len(all) {
+		offset = len(all)
+	}
+	if end > len(all) {
+		end = len(all)
+	}
+	selected := all[offset:end]
+	claims := make([]ClaimResponse, 0, len(selected))
+	for _, claim := range selected {
+		claims = append(claims, claimResponse(claim, ""))
+	}
+
+	return AddressHistoryResponse{
+		Address: address.Hex(),
+		Claims:  claims,
+		Pagination: Pagination{
+			Limit: limit, Offset: offset, Count: len(claims), HasMore: end < len(all),
+		},
 	}, nil
 }
 
@@ -327,6 +404,34 @@ func tokenAddressHex(address common.Address) string {
 		return ""
 	}
 	return address.Hex()
+}
+
+func normalizeHistoryLimit(limit int) int {
+	const defaultLimit = 25
+	const maxLimit = 100
+	if limit <= 0 {
+		return defaultLimit
+	}
+	if limit > maxLimit {
+		return maxLimit
+	}
+	return limit
+}
+
+func normalizeHistoryOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+func sortClaimsForHistory(claims []domain.Claim) {
+	sort.SliceStable(claims, func(i, j int) bool {
+		if claims[i].CreatedAt.Equal(claims[j].CreatedAt) {
+			return claims[i].ID > claims[j].ID
+		}
+		return claims[i].CreatedAt.After(claims[j].CreatedAt)
+	})
 }
 
 func randomID(prefix string) (string, error) {
