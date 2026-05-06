@@ -81,7 +81,11 @@ Also run non-mutating operational checks when environment allows. Do not execute
 ./scripts/scavium-faucet-backup.sh --plan
 
 TMP_DIR="$(mktemp -d)"
-printf 'phase24 restore plan fixture\n' > "$TMP_DIR/scavium-faucet.db"
+if command -v sqlite3 >/dev/null 2>&1; then
+  sqlite3 "$TMP_DIR/scavium-faucet.db" 'VACUUM;'
+else
+  printf 'phase24 restore plan fixture\n' > "$TMP_DIR/scavium-faucet.db"
+fi
 SCAVIUM_FAUCET_DATABASE_PATH="$TMP_DIR/scavium-faucet.db" \
 SCAVIUM_FAUCET_BACKUP_DIR="$TMP_DIR/backups" \
 SCAVIUM_FAUCET_BACKUP_ID="phase24-restore-plan-check" \
