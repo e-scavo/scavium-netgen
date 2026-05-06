@@ -167,6 +167,29 @@ func TestPersistentReadServiceAddressStatusReflectsCooldown(t *testing.T) {
 	}
 }
 
+func TestPersistentReadServiceAddressStatusReflectsBlockedAddress(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	address := persistentTestAddress()
+	if err := store.AdminBlocklistAdd(context.Background(), abuse.KeyTypeAddress, address.Hex(), "manual review"); err != nil {
+		t.Fatalf("add blocklist: %v", err)
+	}
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+
+	status, err := service.AddressStatus(context.Background(), address)
+	if err != nil {
+		t.Fatalf("address status: %v", err)
+	}
+	if status.Eligible || status.Reason != "blocked" {
+		t.Fatalf("eligible/reason = %v/%q, want false/blocked", status.Eligible, status.Reason)
+	}
+	for _, token := range status.Tokens {
+		if token.Eligible || token.Reason != "blocked" {
+			t.Fatalf("token status = %#v, want blocked", token)
+		}
+	}
+}
+
 func TestPersistentReadServiceAddressStatusIncludesTokenAndBudgetState(t *testing.T) {
 	store := openPersistentTestStore(t, "")
 	defer store.Close()

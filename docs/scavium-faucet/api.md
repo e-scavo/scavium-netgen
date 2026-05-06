@@ -206,7 +206,7 @@ Alias routes for address eligibility.
 }
 ```
 
-Phase 25 extends this response only with backward-compatible optional fields. Older clients can ignore `default_token_id`, `daily_budget`, and `tokens`. The endpoint remains public and intentionally excludes raw abuse signals, fingerprints, captcha material, internal risk scores, blocklist reasons, and admin-only decisions. Per-token eligibility is derived from the configured token catalog and token-scoped cooldown/budget state when durable storage supports it; otherwise the legacy top-level fields remain the compatibility contract.
+Phase 25 extends this response only with backward-compatible optional fields. Older clients can ignore `default_token_id`, `daily_budget`, and `tokens`. The endpoint remains public and intentionally excludes raw abuse signals, fingerprints, captcha material, internal risk scores, blocklist reasons, and admin-only decisions. Per-token eligibility is derived from the configured token catalog and token-scoped cooldown/budget state when durable storage supports it; the in-memory fallback also emits the optional token/default-token fields for contract consistency. Persisted address blocklist state is reflected as `eligible: false` with public reason `blocked` only; private operator blocklist notes are never exposed.
 
 An invalid address returns `400` with `code: "invalid_address"`.
 

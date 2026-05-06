@@ -7,17 +7,17 @@ Phase 25 completes the scheduled public API work from `implementation-roadmap-af
 Closed items:
 
 - `GET /api/v1/address/{address}/history` and alias `GET /api/v1/faucet/address/{address}/history` return bounded, deterministic address claim history.
-- Address eligibility/status remains backward-compatible and now includes optional token-aware and daily-budget fields when durable runtime state can support them.
+- Address eligibility/status remains backward-compatible and now includes optional token-aware and daily-budget fields when durable runtime state can support them; the in-memory fallback reports the same optional shape for contract consistency.
 - Pagination conventions are documented as bounded offset pagination with `limit`, `offset`, `count`, and `has_more`.
 - `docs/scavium-faucet/openapi.yaml` records the lightweight manually maintained OpenAPI baseline for implemented public and admin-safe surfaces.
 
 ## Contract safety
 
-The existing `POST /api/v1/claim` contract, normalized error envelope, `Idempotency-Key`, `X-Request-ID`, and `X-Correlation-ID` behavior are preserved. New history/status data is additive only. Public responses still exclude secrets, captcha tokens, fingerprints, raw abuse signals, idempotency keys in history, admin audit data, and internal queue-control details.
+The existing `POST /api/v1/claim` contract, normalized error envelope, `Idempotency-Key`, `X-Request-ID`, and `X-Correlation-ID` behavior are preserved. New history/status data is additive only. Public responses still exclude secrets, captcha tokens, fingerprints, raw abuse signals, idempotency keys in history, admin audit data, internal queue-control details, and private blocklist notes. Blocked addresses are reflected only through public-safe `eligible: false` and `reason: "blocked"`.
 
 ## Runtime validation notes
 
-The implementation validates address input below route dispatch through the same domain address validation used by claim/status endpoints. History pagination is bounded in the service layer and rejected early for invalid query values. SQLite history ordering is deterministic by `created_at DESC, id DESC`, and the in-memory service applies the same public ordering model for tests and fallback usage.
+The implementation validates address input below route dispatch through the same domain address validation used by claim/status endpoints. History pagination is bounded in the service layer and rejected early for invalid query values. Address status also checks persisted address blocklist state below the HTTP handler instead of relying on route-layer assumptions. SQLite history ordering is deterministic by `created_at DESC, id DESC`, and the in-memory service applies the same public ordering model for tests and fallback usage.
 
 ## Deferred work
 

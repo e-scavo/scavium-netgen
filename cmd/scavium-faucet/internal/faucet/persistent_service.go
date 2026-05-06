@@ -183,9 +183,18 @@ func (s *PersistentReadService) AddressStatus(ctx context.Context, address commo
 		RateLimitAddrPerDay:      s.cfg.RateLimitAddrPerDay,
 		DefaultTokenID:           s.cfg.DefaultTokenID,
 	}
+	blocked, err := s.addressBlocked(ctx, address)
+	if err != nil {
+		return AddressStatusResponse{}, err
+	}
 	if remaining > 0 {
 		response.Reason = "cooldown_active"
 		response.NextEligibleTime = nextEligible.UTC().Format(time.RFC3339)
+	}
+	if blocked {
+		response.Eligible = false
+		response.Reason = "blocked"
+		response.NextEligibleTime = ""
 	}
 	budget, err := s.dailyBudgetStatus(ctx, "")
 	if err != nil {
@@ -196,6 +205,13 @@ func (s *PersistentReadService) AddressStatus(ctx context.Context, address commo
 	tokens, err := s.tokenStatuses(ctx, address)
 	if err != nil {
 		return AddressStatusResponse{}, err
+	}
+	if blocked {
+		for i := range tokens {
+			tokens[i].Eligible = false
+			tokens[i].Reason = "blocked"
+			tokens[i].NextEligibleTime = ""
+		}
 	}
 	response.Tokens = tokens
 	for _, token := range tokens {
@@ -208,6 +224,15 @@ func (s *PersistentReadService) AddressStatus(ctx context.Context, address commo
 		}
 	}
 	return response, nil
+}
+
+func (s *PersistentReadService) addressBlocked(ctx context.Context, address common.Address) (bool, error) {
+	checker, ok := s.claims.(blocklistChecker)
+	if !ok {
+		return false, nil
+	}
+	blocked, _, err := checker.IsBlocked(ctx, abuse.KeyTypeAddress, address.Hex())
+	return blocked, err
 }
 
 func (s *PersistentReadService) AddressHistory(ctx context.Context, address common.Address, limit, offset int) (AddressHistoryResponse, error) {

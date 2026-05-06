@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"sort"
 	"sync"
 	"time"
@@ -225,7 +226,8 @@ func (s *InMemoryReadService) Tokens(context.Context) ([]TokenResponse, error) {
 }
 
 func (s *InMemoryReadService) AddressStatus(_ context.Context, address common.Address) (AddressStatusResponse, error) {
-	return AddressStatusResponse{
+	tokens := s.cfg.NormalizedTokens()
+	response := AddressStatusResponse{
 		Address:                  address.Hex(),
 		Eligible:                 true,
 		Reason:                   "eligible",
@@ -233,7 +235,29 @@ func (s *InMemoryReadService) AddressStatus(_ context.Context, address common.Ad
 		CooldownRemainingSeconds: 0,
 		RateLimitIPPerHour:       s.cfg.RateLimitIPPerHour,
 		RateLimitAddrPerDay:      s.cfg.RateLimitAddrPerDay,
-	}, nil
+		DefaultTokenID:           s.cfg.DefaultTokenID,
+		Tokens:                   make([]TokenStatus, 0, len(tokens)),
+	}
+
+	s.mu.RLock()
+	claims := make([]domain.Claim, 0, len(s.claimsByID))
+	for _, claim := range s.claimsByID {
+		claims = append(claims, claim)
+	}
+	s.mu.RUnlock()
+
+	response.DailyBudget = inMemoryBudgetStatus(s.cfg.DailyBudgetWei, claims, "", s.now())
+	for _, token := range tokens {
+		amountWei := ""
+		if token.AmountWei != nil {
+			amountWei = token.AmountWei.String()
+		}
+		response.Tokens = append(response.Tokens, TokenStatus{
+			TokenID: token.ID, Symbol: token.Symbol, Type: string(token.Type), Eligible: true, Reason: "eligible",
+			AmountWei: amountWei, DailyBudget: inMemoryBudgetStatus(inMemoryDailyBudgetForTokenID(s.cfg, token.ID), claims, token.ID, s.now()),
+		})
+	}
+	return response, nil
 }
 
 func (s *InMemoryReadService) AddressHistory(_ context.Context, address common.Address, limit, offset int) (AddressHistoryResponse, error) {
@@ -356,6 +380,47 @@ func claimResponse(claim domain.Claim, idempotencyKey string) ClaimResponse {
 		CreatedAt:      claim.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:      claim.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+func inMemoryDailyBudgetForTokenID(cfg config.Config, tokenID string) *big.Int {
+	if token, ok := cfg.TokenByID(tokenID); ok && token.DailyBudgetWei != nil {
+		return copyBigInt(token.DailyBudgetWei)
+	}
+	return copyBigIntOrNil(cfg.DailyBudgetWei)
+}
+
+func inMemoryBudgetStatus(budget *big.Int, claims []domain.Claim, tokenID string, now time.Time) *BudgetStatus {
+	if budget == nil || budget.Sign() <= 0 {
+		return nil
+	}
+	dayStart, dayEnd := utcDayWindow(now)
+	used := big.NewInt(0)
+	for _, claim := range claims {
+		if tokenID != "" && claim.TokenID != tokenID {
+			continue
+		}
+		if claim.CreatedAt.Before(dayStart) || !claim.CreatedAt.Before(dayEnd) {
+			continue
+		}
+		if !claimStatusCountsForDailyBudget(claim.Status) || claim.AmountWei == nil {
+			continue
+		}
+		used.Add(used, claim.AmountWei)
+	}
+	remaining := new(big.Int).Sub(copyBigInt(budget), used)
+	if remaining.Sign() < 0 {
+		remaining = big.NewInt(0)
+	}
+	return &BudgetStatus{BudgetWei: budget.String(), UsedWei: used.String(), RemainingWei: remaining.String()}
+}
+
+func claimStatusCountsForDailyBudget(status domain.ClaimStatus) bool {
+	for _, counted := range dailyBudgetStatuses() {
+		if status == counted {
+			return true
+		}
+	}
+	return false
 }
 
 func validateClaimToken(cfg config.Config, tokenID string) (config.TokenConfig, error) {

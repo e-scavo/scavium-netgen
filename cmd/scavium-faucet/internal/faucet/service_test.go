@@ -92,6 +92,35 @@ func TestInMemoryReadServiceAddressStatus(t *testing.T) {
 	if status.RateLimitAddrPerDay != 3 {
 		t.Fatalf("rate_limit_addr_per_day = %d, want 3", status.RateLimitAddrPerDay)
 	}
+	if status.DefaultTokenID != "native" {
+		t.Fatalf("default_token_id = %q, want native", status.DefaultTokenID)
+	}
+	if len(status.Tokens) != 1 || status.Tokens[0].TokenID != "native" || !status.Tokens[0].Eligible {
+		t.Fatalf("tokens = %#v", status.Tokens)
+	}
+}
+
+func TestInMemoryReadServiceAddressStatusIncludesBudgetUse(t *testing.T) {
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	cfg := testConfig()
+	cfg.DailyBudgetWei = big.NewInt(1000)
+	cfg.Tokens = []config.TokenConfig{{ID: "native", Symbol: "tSCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42), DailyBudgetWei: big.NewInt(1000)}}
+	service := NewInMemoryReadServiceWithClock(cfg, func() time.Time { return now })
+	address := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address, TokenID: "native"}); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	status, err := service.AddressStatus(context.Background(), address)
+	if err != nil {
+		t.Fatalf("address status: %v", err)
+	}
+	if status.DailyBudget == nil || status.DailyBudget.UsedWei != "42" || status.DailyBudget.RemainingWei != "958" {
+		t.Fatalf("daily budget = %#v", status.DailyBudget)
+	}
+	if len(status.Tokens) != 1 || status.Tokens[0].DailyBudget == nil || status.Tokens[0].DailyBudget.UsedWei != "42" {
+		t.Fatalf("token status = %#v", status.Tokens)
+	}
 }
 
 func TestInMemoryReadServiceAddressHistoryPagination(t *testing.T) {
