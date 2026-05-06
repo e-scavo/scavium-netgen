@@ -808,3 +808,51 @@ func TestPersistentReadServiceRateLimitTrimsAndLowercasesFingerprint(t *testing.
 		t.Fatalf("error = %v, want ErrRateLimited", err)
 	}
 }
+
+func TestPersistentReadServiceRejectsPersistedBlocklistedAddress(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+	service.SetAbuseSignalRecorder(store)
+
+	if err := store.AdminBlocklistAdd(context.Background(), abuse.KeyTypeAddress, persistentTestAddress().Hex(), "operator block"); err != nil {
+		t.Fatalf("admin blocklist add: %v", err)
+	}
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress()})
+	if err == nil {
+		t.Fatal("create claim returned nil error")
+	}
+	if !errors.Is(err, ErrClaimRejected) {
+		t.Fatalf("error = %v, want ErrClaimRejected", err)
+	}
+	var claimErr *ClaimError
+	if !errors.As(err, &claimErr) {
+		t.Fatalf("error = %T, want ClaimError", err)
+	}
+	if claimErr.Reason != "blocked by abuse policy" {
+		t.Fatalf("reason = %q, want blocked by abuse policy", claimErr.Reason)
+	}
+
+	claims, err := store.ListClaimsByAddress(context.Background(), persistentTestAddress(), 10)
+	if err != nil {
+		t.Fatalf("list claims by address: %v", err)
+	}
+	if len(claims) != 0 {
+		t.Fatalf("claims len = %d, want 0", len(claims))
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Fatalf("signals len = %d, want 1", len(signals))
+	}
+	if signals[0].Kind != domain.AbuseSignalRiskRejected {
+		t.Fatalf("signal kind = %q, want %q", signals[0].Kind, domain.AbuseSignalRiskRejected)
+	}
+	if signals[0].Reason != "blocked by abuse policy" {
+		t.Fatalf("signal reason = %q, want blocked by abuse policy", signals[0].Reason)
+	}
+}

@@ -616,12 +616,23 @@ func TestSQLiteReadAdminServiceUsesPersistedRetryCancel(t *testing.T) {
 	if err := svc.BlocklistAdd(context.Background(), abuse.KeyTypeIP, "203.0.113.10", "spam", "operator"); err != nil {
 		t.Fatalf("blocklist add: %v", err)
 	}
+	persisted := NewSQLiteReadAdminService(store)
 	entries, err := svc.BlocklistList(context.Background())
 	if err != nil {
 		t.Fatalf("blocklist list: %v", err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("entries len = %d, want 1", len(entries))
+	}
+	persistedEntries, err := persisted.BlocklistList(context.Background())
+	if err != nil {
+		t.Fatalf("persisted blocklist list: %v", err)
+	}
+	if len(persistedEntries) != 1 {
+		t.Fatalf("persisted entries len = %d, want 1", len(persistedEntries))
+	}
+	if persistedEntries[0].Key != "203.0.113.10" {
+		t.Fatalf("persisted key = %q, want 203.0.113.10", persistedEntries[0].Key)
 	}
 
 	logs, err := svc.RecentAuditLog(context.Background(), 20)

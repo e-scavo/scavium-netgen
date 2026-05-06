@@ -431,10 +431,11 @@ Operational scope notes:
 - Queue and claim retry/cancel commands update persisted SQLite claim state (Phase 20.2). Retry clears `next_attempt_at` and re-queues eligible `failed`/`rejected` claims for worker pickup; cancel rejects eligible not-yet-sent claims.
 - `GET /api/v1/admin/audit` reads persisted SQLite admin audit state (Phase 20.3).
 - Admin blocklist values are visible through the admin blocklist surface, while admin audit rows store only safe metadata (for example action, actor, key type, and timestamp) and do not persist raw blocklist values.
+- Admin blocklist entries are persisted in SQLite and enforced during public claim intake for `ip`, `address`, and `fingerprint` scopes.
 - `key_type` for blocklist add/remove is restricted to `ip`, `address`, or `fingerprint`.
 - Admin list limits for queue, claims, and audit are capped at `500` even if a larger `limit` query value is supplied.
 
-This closure does not introduce dynamic budget editing, CSV exports, allowlist/campaign management, durable audit persistence, persisted blocklist enforcement, or runtime token mutation. Those remain explicitly deferred from the current production-safe admin-control baseline.
+This closure does not introduce dynamic budget editing, CSV exports, allowlist/campaign management, or runtime token mutation. Those remain explicitly deferred from the current production-safe admin-control baseline.
 
 
 ## Phase 19 hardening validation checklist

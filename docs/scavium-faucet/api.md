@@ -523,6 +523,8 @@ The admin service records an audit entry and, after Phase 18.7, propagates the a
 
 ### `GET /api/v1/admin/blocklist`
 
+Returns persisted admin blocklist entries from SQLite.
+
 ```json
 {
   "entries": []
@@ -548,6 +550,11 @@ Success response:
 ```json
 { "status": "blocked" }
 ```
+
+Notes:
+
+- Blocklist values are canonicalized before persistence using the existing abuse key normalization rules.
+- Adding the same `(key_type, value)` pair updates its reason/timestamp.
 
 ### `DELETE /api/v1/admin/blocklist?key_type=ip&value=1.2.3.4`
 
@@ -583,7 +590,7 @@ are not stored.
 
 ## Token-aware claim enforcement
 
-`POST /api/v1/claim` continues to accept an optional `token_id`. After token validation, cooldown and rate-limit enforcement are applied to the resolved token scope. The public response and error contracts do not change: invalid tokens still use `claim_rejected` with reason `invalid_token`, cooldown uses `cooldown_active`, rate limiting uses `rate_limited`, and daily budget exhaustion uses `daily_budget_exceeded`.
+`POST /api/v1/claim` continues to accept an optional `token_id`. After token validation, persisted blocklist enforcement runs before captcha/risk/cooldown/rate-limit work where applicable. Blocklisted requests keep the existing `claim_rejected` contract and return a safe generic reason. Cooldown and rate-limit enforcement are then applied to the resolved token scope. Invalid tokens still use `claim_rejected` with reason `invalid_token`, cooldown uses `cooldown_active`, rate limiting uses `rate_limited`, and daily budget exhaustion uses `daily_budget_exceeded`.
 
 
 Phase 17.3 closure note:

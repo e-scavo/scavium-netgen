@@ -25,7 +25,23 @@ type BlocklistEntry struct {
 
 // blocklistKey builds the canonical storage key for a (type, value) pair.
 func blocklistKey(kt KeyType, value string) string {
-	return string(kt) + ":" + strings.ToLower(strings.TrimSpace(value))
+	return string(kt) + ":" + CanonicalizeBlocklistValue(kt, value)
+}
+
+// ValidKeyType reports whether keyType is supported by blocklist operations.
+func ValidKeyType(keyType KeyType) bool {
+	switch keyType {
+	case KeyTypeIP, KeyTypeAddress, KeyTypeFingerprint:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanonicalizeBlocklistValue normalizes a blocklist value according to the
+// existing abuse key behavior.
+func CanonicalizeBlocklistValue(_ KeyType, value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 // Blocklist is a concurrent in-memory blocklist keyed by IP address,

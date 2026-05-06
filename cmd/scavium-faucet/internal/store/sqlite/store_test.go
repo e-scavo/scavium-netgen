@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -18,7 +19,7 @@ func TestMigrateCreatesRequiredTables(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "admin_audit_logs", "schema_migrations"} {
+	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "admin_audit_logs", "admin_blocklist", "schema_migrations"} {
 		if !tableExists(t, store.db, table) {
 			t.Fatalf("table %s does not exist", table)
 		}
@@ -29,7 +30,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip", "idx_admin_audit_logs_created_at"} {
+	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip", "idx_admin_audit_logs_created_at", "idx_admin_blocklist_type_value", "idx_admin_blocklist_blocked_at"} {
 		if !indexExists(t, store.db, index) {
 			t.Fatalf("index %s does not exist", index)
 		}
@@ -379,6 +380,65 @@ func TestAppendAndListAdminAudit(t *testing.T) {
 	}
 	if entries[0].Action != "retry_claim" || entries[1].Action != "blocklist_add" {
 		t.Fatalf("actions = %q, %q; want retry_claim, blocklist_add", entries[0].Action, entries[1].Action)
+	}
+}
+
+func TestAdminBlocklistAddListRemoveAndIsBlocked(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	if err := store.AdminBlocklistAdd(context.Background(), abuse.KeyTypeIP, " 203.0.113.10 ", " abuse "); err != nil {
+		t.Fatalf("admin blocklist add ip: %v", err)
+	}
+	if err := store.AdminBlocklistAdd(context.Background(), abuse.KeyTypeAddress, " 0x52908400098527886E0F7030069857D2E4169EE7 ", "spam"); err != nil {
+		t.Fatalf("admin blocklist add address: %v", err)
+	}
+	if err := store.AdminBlocklistAdd(context.Background(), abuse.KeyTypeFingerprint, " Browser-1 ", "bot"); err != nil {
+		t.Fatalf("admin blocklist add fingerprint: %v", err)
+	}
+
+	entries, err := store.ListAdminBlocklist(context.Background())
+	if err != nil {
+		t.Fatalf("list admin blocklist: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entries len = %d, want 3", len(entries))
+	}
+
+	ipBlocked, _, err := store.IsBlocked(context.Background(), abuse.KeyTypeIP, "203.0.113.10")
+	if err != nil {
+		t.Fatalf("is blocked ip: %v", err)
+	}
+	if !ipBlocked {
+		t.Fatal("expected IP to be blocked")
+	}
+
+	addressBlocked, _, err := store.IsBlocked(context.Background(), abuse.KeyTypeAddress, "0x52908400098527886e0f7030069857d2e4169ee7")
+	if err != nil {
+		t.Fatalf("is blocked address: %v", err)
+	}
+	if !addressBlocked {
+		t.Fatal("expected address to be blocked")
+	}
+
+	fingerprintBlocked, _, err := store.IsBlocked(context.Background(), abuse.KeyTypeFingerprint, "browser-1")
+	if err != nil {
+		t.Fatalf("is blocked fingerprint: %v", err)
+	}
+	if !fingerprintBlocked {
+		t.Fatal("expected fingerprint to be blocked")
+	}
+
+	if err := store.AdminBlocklistRemove(context.Background(), abuse.KeyTypeIP, "203.0.113.10"); err != nil {
+		t.Fatalf("admin blocklist remove ip: %v", err)
+	}
+
+	ipBlocked, _, err = store.IsBlocked(context.Background(), abuse.KeyTypeIP, "203.0.113.10")
+	if err != nil {
+		t.Fatalf("is blocked ip after remove: %v", err)
+	}
+	if ipBlocked {
+		t.Fatal("expected IP to be unblocked")
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 
@@ -37,6 +38,10 @@ type tokenBudgetedClaimStore interface {
 
 type tokenScopedClaimStore interface {
 	LastClaimByAddressAndToken(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error)
+}
+
+type blocklistChecker interface {
+	IsBlocked(ctx context.Context, keyType abuse.KeyType, value string) (bool, string, error)
 }
 
 // PersistentReadService implements ReadService using durable stores.
@@ -198,6 +203,9 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 	token, err := validateClaimToken(s.cfg, request.TokenID)
 	if err != nil {
 		s.recordAbuseSignal(ctx, request, domain.AbuseSignalInvalidToken, "", "invalid_token", 0)
+		return ClaimResponse{}, err
+	}
+	if err := s.enforceBlocklist(ctx, request); err != nil {
 		return ClaimResponse{}, err
 	}
 
@@ -459,6 +467,36 @@ func (s *PersistentReadService) evaluateRisk(ctx context.Context, request ClaimR
 	}
 	s.recordAbuseSignal(ctx, request, domain.AbuseSignalRiskRejected, "", reason, decision.Score)
 	return claimError(ErrClaimRejected, reason)
+}
+
+func (s *PersistentReadService) enforceBlocklist(ctx context.Context, request ClaimRequest) error {
+	checker, ok := s.claims.(blocklistChecker)
+	if !ok {
+		return nil
+	}
+
+	checks := []struct {
+		keyType abuse.KeyType
+		value   string
+	}{
+		{keyType: abuse.KeyTypeIP, value: request.RemoteIP},
+		{keyType: abuse.KeyTypeAddress, value: request.Address.Hex()},
+		{keyType: abuse.KeyTypeFingerprint, value: request.Fingerprint},
+	}
+
+	for _, check := range checks {
+		blocked, _, err := checker.IsBlocked(ctx, check.keyType, check.value)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			reason := "blocked by abuse policy"
+			s.recordAbuseSignal(ctx, request, domain.AbuseSignalRiskRejected, "", reason, 1)
+			return claimError(ErrClaimRejected, reason)
+		}
+	}
+
+	return nil
 }
 
 func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request ClaimRequest, tokenID string) error {

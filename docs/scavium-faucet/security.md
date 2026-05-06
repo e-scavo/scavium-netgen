@@ -134,7 +134,7 @@ Phase 19 closes the production-hardening pass without expanding the public API o
 - rate-limit scope construction is defensive against empty or inconsistently-cased inputs;
 - graceful shutdown and application cleanup are bounded and idempotent.
 
-The closure deliberately does not claim protections that remain outside this binary: HSTS is still configured at nginx, RPC/network exposure is controlled by firewall and deployment topology, and admin persistence remains intentionally incremental. Phase 20.1 moved admin queue/claim read views to SQLite-backed state, Phase 20.2 moved retry/cancel controls to persisted claim transitions, and Phase 20.3 moved admin audit history to SQLite-backed durable storage. Admin blocklist controls and enforcement durability remain deferred to later Phase 20 steps.
+The closure deliberately does not claim protections that remain outside this binary: HSTS is still configured at nginx, RPC/network exposure is controlled by firewall and deployment topology, and admin persistence remains intentionally incremental. Phase 20.1 moved admin queue/claim read views to SQLite-backed state, Phase 20.2 moved retry/cancel controls to persisted claim transitions, Phase 20.3 moved admin audit history to SQLite-backed durable storage, and Phase 20.4 moved admin blocklist controls plus claim-intake enforcement to persisted SQLite state.
 
 ## Deployment guidance
 
@@ -213,4 +213,4 @@ Security-relevant closure decisions:
 - Blocklist `key_type` values are restricted to `ip`, `address`, or `fingerprint`; invalid values return `400 invalid_key_type`.
 - Queue item responses and structured audit logs avoid wallet addresses, idempotency keys, request bodies, captcha tokens, raw fingerprints, private keys, and admin tokens.
 
-The current in-memory admin blocklist is an operator-control surface, not a replacement for persisted abuse enforcement. Persisted abuse signals, progressive enforcement, rate limits, cooldown, and daily-budget checks remain the production claim-protection layers until a SQLite-backed admin blocklist/enforcement integration is explicitly implemented.
+The admin blocklist is now persisted in SQLite and enforced during claim intake for supported key types (`ip`, `address`, `fingerprint`) before expensive downstream claim processing. Claim denials from this control continue to use the existing `claim_rejected` envelope with a safe generic reason and do not expose raw blocklist keys. Persisted abuse signals, progressive enforcement, rate limits, cooldown, and daily-budget checks remain active alongside this control.

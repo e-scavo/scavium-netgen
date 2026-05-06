@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 	"scavium-netgen/cmd/scavium-faucet/migrations"
 
@@ -804,6 +805,100 @@ func (s *Store) ListAdminAudit(ctx context.Context, limit int) ([]domain.AdminAu
 		return nil, err
 	}
 	return entries, nil
+}
+
+// ListAdminBlocklist returns persisted admin blocklist entries ordered by most
+// recently blocked first.
+func (s *Store) ListAdminBlocklist(ctx context.Context) ([]abuse.BlocklistEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT key_type, key_value, reason, blocked_at
+		FROM admin_blocklist
+		ORDER BY blocked_at DESC, id DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list admin blocklist: %w", err)
+	}
+	defer rows.Close()
+
+	entries := make([]abuse.BlocklistEntry, 0)
+	for rows.Next() {
+		var (
+			entry   abuse.BlocklistEntry
+			keyType string
+			atText  string
+		)
+		if err := rows.Scan(&keyType, &entry.Key, &entry.Reason, &atText); err != nil {
+			return nil, err
+		}
+		entry.KeyType = abuse.KeyType(keyType)
+		blockedAt, err := parseTime(atText)
+		if err != nil {
+			return nil, fmt.Errorf("invalid admin blocklist blocked_at: %w", err)
+		}
+		entry.BlockedAt = blockedAt
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// AdminBlocklistAdd inserts or updates a persisted blocklist entry.
+func (s *Store) AdminBlocklistAdd(ctx context.Context, keyType abuse.KeyType, value, reason string) error {
+	if !abuse.ValidKeyType(keyType) {
+		return errors.New("invalid blocklist key type")
+	}
+	canonical := abuse.CanonicalizeBlocklistValue(keyType, value)
+	if canonical == "" {
+		return errors.New("empty blocklist value")
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO admin_blocklist (key_type, key_value, reason, blocked_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(key_type, key_value)
+		DO UPDATE SET reason = excluded.reason, blocked_at = excluded.blocked_at
+	`, string(keyType), canonical, strings.TrimSpace(reason), formatTime(time.Now().UTC()))
+	if err != nil {
+		return fmt.Errorf("add admin blocklist entry: %w", err)
+	}
+	return nil
+}
+
+// AdminBlocklistRemove removes a persisted blocklist entry. Missing entries are
+// ignored to preserve existing admin API semantics.
+func (s *Store) AdminBlocklistRemove(ctx context.Context, keyType abuse.KeyType, value string) error {
+	if !abuse.ValidKeyType(keyType) {
+		return errors.New("invalid blocklist key type")
+	}
+	canonical := abuse.CanonicalizeBlocklistValue(keyType, value)
+	if canonical == "" {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM admin_blocklist WHERE key_type = ? AND key_value = ?`, string(keyType), canonical); err != nil {
+		return fmt.Errorf("remove admin blocklist entry: %w", err)
+	}
+	return nil
+}
+
+// IsBlocked checks whether a persisted blocklist entry exists for keyType and value.
+func (s *Store) IsBlocked(ctx context.Context, keyType abuse.KeyType, value string) (bool, string, error) {
+	if !abuse.ValidKeyType(keyType) {
+		return false, "", errors.New("invalid blocklist key type")
+	}
+	canonical := abuse.CanonicalizeBlocklistValue(keyType, value)
+	if canonical == "" {
+		return false, "", nil
+	}
+	var reason string
+	err := s.db.QueryRowContext(ctx, `SELECT reason FROM admin_blocklist WHERE key_type = ? AND key_value = ? LIMIT 1`, string(keyType), canonical).Scan(&reason)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, "", nil
+		}
+		return false, "", fmt.Errorf("check admin blocklist: %w", err)
+	}
+	return true, reason, nil
 }
 
 // LastClaimByAddressAndToken returns the latest persisted claim for one address and token_id.
