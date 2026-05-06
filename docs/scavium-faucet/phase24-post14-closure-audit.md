@@ -84,13 +84,24 @@ make build -B
 bash -n scripts/*.sh
 ```
 
-Run non-mutating operator checks when the local environment has shell access to the repository:
+Run non-mutating operator checks when the local environment has shell access to the repository. The restore plan check requires a real backup bundle; do not execute it with a placeholder path. For a self-contained closure check, create a disposable bundle first:
 
 ```bash
 ./scripts/scavium-faucet-backup.sh --plan
-SCAVIUM_FAUCET_RESTORE_BUNDLE=/path/to/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
+
+TMP_DIR="$(mktemp -d)"
+printf 'phase24 restore plan fixture\n' > "$TMP_DIR/scavium-faucet.db"
+SCAVIUM_FAUCET_DATABASE_PATH="$TMP_DIR/scavium-faucet.db" \
+SCAVIUM_FAUCET_BACKUP_DIR="$TMP_DIR/backups" \
+SCAVIUM_FAUCET_BACKUP_ID="phase24-restore-plan-check" \
+./scripts/scavium-faucet-backup.sh --execute
+
+SCAVIUM_FAUCET_RESTORE_BUNDLE="$TMP_DIR/backups/scavium-faucet-backup-phase24-restore-plan-check.tar.gz" \
 ./scripts/scavium-faucet-restore.sh --plan
+rm -rf "$TMP_DIR"
 ```
+
+Alternatively, set `SCAVIUM_FAUCET_RESTORE_BUNDLE` to an existing verified production backup bundle. A missing bundle path is classified as environment-specific operator input, not a closure defect.
 
 For a deployed node, validate without sending funds:
 

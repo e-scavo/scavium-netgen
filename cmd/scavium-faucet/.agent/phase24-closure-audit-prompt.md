@@ -75,13 +75,24 @@ make build -B
 bash -n scripts/*.sh
 ```
 
-Also run non-mutating operational checks when environment allows:
+Also run non-mutating operational checks when environment allows. Do not execute restore plan with a placeholder path; it requires a real backup bundle. For a self-contained local closure check, create a disposable bundle first:
 
 ```bash
 ./scripts/scavium-faucet-backup.sh --plan
-SCAVIUM_FAUCET_RESTORE_BUNDLE=/path/to/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
+
+TMP_DIR="$(mktemp -d)"
+printf 'phase24 restore plan fixture\n' > "$TMP_DIR/scavium-faucet.db"
+SCAVIUM_FAUCET_DATABASE_PATH="$TMP_DIR/scavium-faucet.db" \
+SCAVIUM_FAUCET_BACKUP_DIR="$TMP_DIR/backups" \
+SCAVIUM_FAUCET_BACKUP_ID="phase24-restore-plan-check" \
+./scripts/scavium-faucet-backup.sh --execute
+
+SCAVIUM_FAUCET_RESTORE_BUNDLE="$TMP_DIR/backups/scavium-faucet-backup-phase24-restore-plan-check.tar.gz" \
 ./scripts/scavium-faucet-restore.sh --plan
+rm -rf "$TMP_DIR"
 ```
+
+If an operator uses an existing production backup instead, set `SCAVIUM_FAUCET_RESTORE_BUNDLE` to that actual `.tar.gz` file. A missing bundle path is an environment-input failure, not evidence of an unimplemented Phase 23/24 feature.
 
 If validation fails, classify the failure as one of:
 
