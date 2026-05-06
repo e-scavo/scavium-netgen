@@ -462,6 +462,46 @@ func TestRequestLoggingMiddlewareRedactsAddressStatusPath(t *testing.T) {
 	}
 }
 
+func TestRequestLoggingMiddlewareRedactsAddressHistoryPath(t *testing.T) {
+	var logs bytes.Buffer
+	logger := observability.NewLogger(&logs)
+	addr := "0x52908400098527886E0F7030069857D2E4169EE7"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/address/"+addr+"/history", nil)
+	rec := httptest.NewRecorder()
+
+	RequestLoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), logger, "").ServeHTTP(rec, req)
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) != 1 {
+		t.Fatalf("entries len = %d, want 1", len(entries))
+	}
+	if got := entries[0]["path"]; got != "/api/v1/address/:address/history" {
+		t.Fatalf("path = %q, want /api/v1/address/:address/history", got)
+	}
+}
+
+func TestRequestLoggingMiddlewareRedactsFaucetAddressHistoryPath(t *testing.T) {
+	var logs bytes.Buffer
+	logger := observability.NewLogger(&logs)
+	addr := "0x52908400098527886E0F7030069857D2E4169EE7"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/faucet/address/"+addr+"/history", nil)
+	rec := httptest.NewRecorder()
+
+	RequestLoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), logger, "").ServeHTTP(rec, req)
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	if len(entries) != 1 {
+		t.Fatalf("entries len = %d, want 1", len(entries))
+	}
+	if got := entries[0]["path"]; got != "/api/v1/faucet/address/:address/history" {
+		t.Fatalf("path = %q, want /api/v1/faucet/address/:address/history", got)
+	}
+}
+
 func TestRequestLoggingMiddlewareRedactsFaucetEligibilityPath(t *testing.T) {
 	const addr = "0x1111111111111111111111111111111111111111"
 	var logs bytes.Buffer

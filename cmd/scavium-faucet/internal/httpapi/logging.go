@@ -41,8 +41,14 @@ func redactAccessLogPath(path string) string {
 	if _, ok := pathMiddle(path, "/api/v1/address/", "/status"); ok {
 		return "/api/v1/address/:address/status"
 	}
+	if _, ok := pathMiddle(path, "/api/v1/address/", "/history"); ok {
+		return "/api/v1/address/:address/history"
+	}
 	if _, ok := pathMiddle(path, "/api/v1/faucet/address/", "/eligibility"); ok {
 		return "/api/v1/faucet/address/:address/eligibility"
+	}
+	if _, ok := pathMiddle(path, "/api/v1/faucet/address/", "/history"); ok {
+		return "/api/v1/faucet/address/:address/history"
 	}
 	return path
 }

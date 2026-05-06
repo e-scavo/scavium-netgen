@@ -24,16 +24,22 @@ paths:
       summary: Faucet status
       responses:
         '200': { description: Current faucet status }
+  /api/v1/faucet/status:
+    $ref: '#/paths/~1api~1v1~1status'
   /api/v1/config:
     get:
       summary: Public faucet configuration
       responses:
         '200': { description: Claim-safe public configuration }
+  /api/v1/faucet/config:
+    $ref: '#/paths/~1api~1v1~1config'
   /api/v1/tokens:
     get:
       summary: Public token catalog
       responses:
         '200': { description: Claim-safe configured token list }
+  /api/v1/faucet/tokens:
+    $ref: '#/paths/~1api~1v1~1tokens'
   /api/v1/address/{address}/status:
     get:
       summary: Address eligibility status
@@ -46,6 +52,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AddressStatus' }
         '400': { $ref: '#/components/responses/InvalidAddress' }
+  /api/v1/faucet/address/{address}/eligibility:
+    $ref: '#/paths/~1api~1v1~1address~1{address}~1status'
   /api/v1/address/{address}/history:
     get:
       summary: Address claim history
@@ -60,6 +68,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AddressHistory' }
         '400': { description: Invalid address or pagination }
+  /api/v1/faucet/address/{address}/history:
+    $ref: '#/paths/~1api~1v1~1address~1{address}~1history'
   /api/v1/claim:
     post:
       summary: Create a faucet claim
@@ -84,6 +94,8 @@ paths:
         '422': { description: Captcha failed }
         '429': { description: Rate limited or daily budget exceeded }
         '503': { description: Faucet unavailable }
+  /api/v1/faucet/claim:
+    $ref: '#/paths/~1api~1v1~1claim'
   /api/v1/claim/{id}:
     get:
       summary: Claim lookup
@@ -99,6 +111,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Claim' }
         '404': { description: Claim not found }
+  /api/v1/faucet/claim/{id}:
+    $ref: '#/paths/~1api~1v1~1claim~1{id}'
   /api/v1/version:
     get:
       summary: Build metadata
