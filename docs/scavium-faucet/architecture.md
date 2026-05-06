@@ -222,7 +222,7 @@ The closed Phase 19 production-hardening baseline is:
 3. **Performance safety:** the server has explicit timeout/header caps and write JSON request bodies are limited to `1 MiB` both before routing when `Content-Length` is oversized and during decoding for streaming or unknown-length requests.
 4. **Operational resilience:** `SIGINT`/`SIGTERM` use bounded graceful shutdown with separate HTTP and application cleanup budgets, and application cleanup is idempotent so owned runtime resources are closed once.
 
-Phase 19 remains intentionally conservative. It does not introduce RPC failover, wallet refills, new dependencies, durable admin audit persistence, SQLite-backed admin claim control, or runtime configuration mutation. Those are deferred to later phases so the production binary remains deployable and backward compatible after hardening.
+Phase 19 remains intentionally conservative. It did not introduce RPC failover, wallet refills, new dependencies, durable admin persistence, SQLite-backed admin claim control, or runtime configuration mutation. Phase 20 subsequently closed the durable admin persistence and SQLite-backed claim-control gaps while RPC failover, wallet refills, and runtime configuration mutation remain deferred to later phases.
 
 ## Phase 19.6 — Post-Audit Hardening Fixes
 

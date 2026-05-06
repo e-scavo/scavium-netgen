@@ -143,9 +143,10 @@ var (
 // --- AdminService interface ---------------------------------------------
 
 // AdminService provides admin-plane operations on the faucet.
-// The InMemoryAdminService is the default implementation (suitable for tests
-// and standalone mode). A SQLite-backed read model is introduced in Phase 20.1
-// without yet making the control plane itself durable.
+// InMemoryAdminService remains available for tests and standalone use.
+// The production wiring uses SQLiteReadAdminService, which reads and mutates
+// the Phase 20 durable admin surfaces through SQLite where the backing store
+// implements the corresponding read/control/audit/blocklist interfaces.
 type AdminService interface {
 	Dashboard(ctx context.Context) (DashboardResponse, error)
 	Queue(ctx context.Context, limit int) (QueueResponse, error)
@@ -221,9 +222,9 @@ type InMemoryAdminService struct {
 	now       func() time.Time
 }
 
-// SQLiteReadAdminService uses SQLite for admin reads while delegating the
-// existing non-durable control surfaces to the in-memory admin service until
-// later Phase 20 steps make them persistent.
+// SQLiteReadAdminService uses SQLite-backed admin read/control/audit/blocklist
+// interfaces when available, while retaining an in-memory fallback for tests
+// and configurations that only provide a partial admin store.
 type SQLiteReadAdminService struct {
 	reads    ReadStore
 	fallback *InMemoryAdminService
@@ -241,9 +242,9 @@ func NewInMemoryAdminService() *InMemoryAdminService {
 	}
 }
 
-// NewSQLiteReadAdminService creates a hybrid admin service whose read surfaces
-// reflect persisted SQLite state while keeping the existing in-memory control
-// behavior intact.
+// NewSQLiteReadAdminService creates a hybrid admin service whose Phase 20
+// read/control/audit/blocklist surfaces reflect persisted SQLite state whenever
+// the provided store implements those capabilities.
 func NewSQLiteReadAdminService(reads ReadStore) *SQLiteReadAdminService {
 	return &SQLiteReadAdminService{
 		reads:    reads,
