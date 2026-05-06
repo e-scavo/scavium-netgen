@@ -429,16 +429,24 @@ Required closure scope:
 
 ---
 
-## Phase 24 — Post-14 Roadmap Closure Audit (Planned)
+## Phase 24 — Post-14 Roadmap Closure Audit (Closed)
 
-Phase 24 must close the post-Phase-14 roadmap before any broader feature-list expansion begins.
+Phase 24 closes the post-Phase-14 roadmap. It is an audit/documentation closure phase and does not add runtime functionality, public API changes, schema changes, or deployment topology changes.
 
-Required closure scope:
+Closure status:
 
-- Audit Phases 15 through 23 against code, tests, docs, scripts, and deployment templates.
-- Confirm all post-14 deferred items are implemented or explicitly moved into the broader feature backlog.
-- Update this roadmap with closure status.
-- Produce a Copilot audit prompt and manual validation checklist.
+- Phases 15 through 23 were audited against code, tests, docs, scripts, and deployment templates.
+- Previously deferred post-14 items are either closed by Phases 20 through 23 or explicitly moved into the broader feature backlog governed by `docs/scavium_faucet_public_features.md`.
+- `docs/scavium-faucet/phase24-post14-closure-audit.md` records the closure findings and manual validation checklist.
+- `cmd/scavium-faucet/.agent/phase24-closure-audit-prompt.md` provides the Copilot/manual re-audit prompt.
+
+Closed post-14 outcomes:
+
+- Durable admin state and persisted enforcement are closed by Phase 20.
+- Operator observability and alert guidance are closed by Phase 21.
+- Conservative RPC failover and admin wallet visibility are closed by Phase 22.
+- Backup/restore, refill, wallet rotation, and rollback runbooks are closed by Phase 23.
+- The remaining broader product items begin at Phase 25 and beyond.
 
 ---
 
@@ -446,9 +454,5 @@ Required closure scope:
 
 The faucet has reached a stable production baseline.
 
-Remaining phases focus on:
-- Observability and operator feedback loops
-- Feature expansion
-- Admin/control-plane maturation
-- Mainnet readiness
+The post-Phase-14 production-baseline roadmap is closed. Future work starts from the broader feature backlog in `docs/scavium_faucet_public_features.md`, beginning with Phase 25 unless explicitly rescheduled. Stage 4 / professional-scale items remain deferred until intentionally planned.
 

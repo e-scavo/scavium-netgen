@@ -4,7 +4,7 @@
 
 Source of truth: the project ZIP provided after Phase 19 closure.
 
-The current production baseline is closed through Phase 20, including:
+The current production baseline is closed through Phase 24, including:
 
 - Phase 15: captcha, durable abuse signals, progressive enforcement, retention.
 - Phase 16: structured logs, request/correlation IDs, admin metrics, enriched health/readiness.
@@ -12,8 +12,12 @@ The current production baseline is closed through Phase 20, including:
 - Phase 18: production-safe admin control subset.
 - Phase 19: production hardening plus post-audit fixes for HTTP headers, request limits, shutdown, content type validation, nginx duplicate header prevention, and test timeout guidance.
 - Phase 20: SQLite-backed admin claim/queue read+control, durable admin audit history, persisted admin blocklist, and persisted claim-path blocklist enforcement.
+- Phase 21: operator observability, protected Prometheus-compatible metrics, alerting guidance, and smoke checks.
+- Phase 22: conservative startup RPC failover and admin-protected wallet/nonce visibility.
+- Phase 23: backup/restore scripts, WAL/SHM restore handling, refill/rotation runbooks, and rollback checks.
+- Phase 24: post-14 roadmap closure audit and backlog handoff.
 
-This document exists to prevent scope drift after Phase 19. The roadmap below must be completed in order before moving into broader feature-list expansion from `docs/scavium_faucet_public_features.md`.
+This document exists to prevent scope drift after Phase 19. As of Phase 24, the post-Phase-14 production-baseline roadmap is complete; broader feature-list expansion now resumes from `docs/scavium_faucet_public_features.md`.
 
 ## Non-negotiable project rules
 
@@ -32,43 +36,32 @@ This document exists to prevent scope drift after Phase 19. The roadmap below mu
     - `make build -B` or, at minimum, `go build ./cmd/scavium-faucet` if unrelated tools fail.
 12. The previous 24-hour coding window was exhausted. From this point forward, every phase must be split into steps small enough to finish safely inside a renewed 24-hour coding budget. If a step cannot be completed safely within that window, it must be split before coding.
 
-## Missing features from `docs/scavium_faucet_public_phase-roadmap-post14.md`
+## Post-14 closure and backlog handoff
 
-The post-Phase-14 roadmap closes 15 through 20 and explicitly leaves the following items open or deferred:
+The post-Phase-14 roadmap no longer has open production-baseline gaps. Phases 20 through 23 closed the durable admin-state, observability, blockchain-resilience, and operations/runbook items that were still open after Phase 19.
 
-### Admin/control-plane maturation
+The following topics are not closure gaps. They are broader product/backlog items that must be scheduled explicitly after Phase 24:
 
-Still missing or intentionally limited:
+### Admin/control-plane maturation backlog
 
-- Dynamic budget/config editing.
+- Dynamic durable budget/config editing.
 - CSV/export workflows.
 - Allowlist/campaign management.
 - Runtime token mutation and database-backed token catalogs.
 
-### Observability and operator feedback loops
+### Advanced observability backlog
 
-Still missing or partial:
+- External monitoring stack integration, if needed by operators.
+- Slow-request analytics beyond the current structured logs and metrics.
+- Log rotation and retention templates tailored to the final production host policy.
 
-- Prometheus-style scrape surface or equivalent export format.
-- Queue/blockchain/abuse metrics beyond current process-local JSON counters.
-- Alerting guidance for balance, RPC, stuck queue, abnormal drain, and abuse spikes.
-- Slow request logging and operational threshold documentation.
-- Nginx/journald correlation guidance with request IDs.
-- Log rotation and retention operational templates.
+### Production/mainnet scale backlog
 
-### Production/mainnet readiness
+- Hot/cold-wallet automation and automatic treasury refill.
+- More advanced stuck transaction replacement policy, if the chain and gas model support it safely.
+- Multi-instance/high-availability control, distributed locks, PostgreSQL migration, and broader professional-scale architecture.
 
-Still missing or partial:
-
-- RPC failover.
-- Wallet balance/nonce operator visibility beyond readiness probes.
-- Hot/cold-wallet refill workflow.
-- Wallet rotation procedure.
-- Backup/restore verification scripts and runbook closure.
-- Stuck transaction recovery/operator reconciliation surfaces.
-- Final production checklist after observability, blockchain resilience, and operational runbooks are complete.
-
-## Ordered phases to finish the post-14 roadmap
+## Closed phases from the post-14 roadmap
 
 ### Phase 20 — SQLite-backed Admin State and Enforcement (Closed)
 
@@ -103,25 +96,18 @@ Suggested subphases:
 - 21.3: Alerting runbook and smoke tests.
 - 21.4: Observability closure audit.
 
-### Phase 22 — Blockchain and Runtime Resilience
+### Phase 22 — Blockchain and Runtime Resilience — CLOSED
 
 Goal: harden the RPC/transaction path for long-running production operation.
 
-Scope:
+Closure scope:
 
-- RPC failover with conservative configuration.
-- Wallet balance and nonce operator visibility.
-- Stuck transaction reconciliation/admin trigger if safe.
-- Replacement transaction policy only if supported and carefully bounded.
-- Reorg/min-confirmation behavior documentation.
-- No multi-instance/distributed lock yet.
-
-Suggested subphases:
-
-- 22.1: RPC failover foundation.
-- 22.2: Wallet/nonce runtime visibility.
-- 22.3: Stuck transaction reconciliation controls.
-- 22.4: Blockchain resilience closure audit.
+- RPC failover is implemented as optional, primary-first, startup-only endpoint selection through `SCAVIUM_FAUCET_RPC_SECONDARY_URLS`.
+- Every selected RPC endpoint must pass configured chain-ID validation before runtime use.
+- `/api/v1/admin/wallet` and `/api/v1/admin/runtime.wallet` expose admin-protected signer address, native balance, pending nonce, and configured token balance status.
+- Stuck transaction handling remains bounded to the existing watcher plus persisted admin retry/cancel controls; no unsafe replacement automation was introduced.
+- Reorg/min-confirmation behavior remains governed by `SCAVIUM_FAUCET_MIN_CONFIRMATIONS` and documented watcher behavior.
+- No multi-instance, distributed lock, load-balancing, or hot/cold-wallet automation redesign was introduced.
 
 ### Phase 23 — Operational Runbooks, Backup/Restore, and Wallet Procedures
 
@@ -144,20 +130,23 @@ Suggested subphases:
 - 23.2: Wallet refill and rotation runbooks — closed.
 - 23.3: Deployment/rollback operational closure — covered by the Phase 23 runbook/deployment checklist.
 
-### Phase 24 — Post-14 Roadmap Closure Audit
+### Phase 24 — Post-14 Roadmap Closure Audit — CLOSED
 
-Goal: close the post-14 roadmap before starting broader backlog from the public features file.
+Goal achieved: the post-Phase-14 roadmap is closed before starting broader backlog work from the public features file.
 
-Scope:
+Closure scope:
 
-- Audit Phases 15 through 23 against code, tests, docs, and deployment templates.
-- Confirm all deferred post-14 items are either implemented or explicitly moved to the broader feature backlog.
-- Update `docs/scavium_faucet_public_phase-roadmap-post14.md` with final closure notes.
-- Produce Copilot audit prompt and manual validation checklist.
+- Phases 15 through 23 audited against code, tests, docs, scripts, and deployment templates.
+- Deferred post-14 items classified as either closed by Phases 20 through 23 or intentionally moved to the broader feature backlog.
+- `docs/scavium_faucet_public_phase-roadmap-post14.md` updated with final closure notes.
+- `docs/scavium-faucet/phase24-post14-closure-audit.md` added as the manual closure record and validation checklist.
+- `cmd/scavium-faucet/.agent/phase24-closure-audit-prompt.md` added for Copilot/manual re-audit.
+
+Next backlog entry point: Phase 25, unless the operator explicitly schedules a different item from `docs/scavium_faucet_public_features.md`.
 
 ## Broader feature phases after the post-14 roadmap is satisfied
 
-After Phase 24 closes, continue with the remaining features from `docs/scavium_faucet_public_features.md`. Stage 4 remains deferred temporarily and partially as already agreed.
+Phase 24 is closed. Continue with the remaining features from `docs/scavium_faucet_public_features.md`. Stage 4 remains deferred temporarily and partially as already agreed.
 
 ### Phase 25 — Public API Completion and OpenAPI
 
@@ -239,3 +228,8 @@ Every Copilot step must:
 7. Provide a partial ZIP containing only changed/created files.
 8. Provide complete Git commands.
 9. Stop if the step is too large for the renewed 24-hour budget and split it before implementation.
+
+
+## Phase 24 closure
+
+Phase 24 closes the post-Phase-14 roadmap. The production baseline now includes security hardening, token support, durable admin state, operator observability, conservative blockchain resilience, and operational backup/restore/refill/rotation runbooks. Future work belongs to the broader feature backlog and must continue to preserve public contracts, production safety, and partial-ZIP delivery discipline.
