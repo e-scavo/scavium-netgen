@@ -360,7 +360,7 @@ Phase 19 was completed as a conservative production-hardening pass rather than a
 
 ### 19.5 — Final Production Hardening Audit / Documentation Closure
 - Documentation is aligned with the actual implemented Phase 19 scope.
-- Deferred items remain explicit: RPC failover, hot/cold-wallet automation, funding refill workflows, durable admin audit persistence, and SQLite-backed admin claim/control surfaces.
+- Deferred items remained explicit at Phase 19 closure: RPC failover, hot/cold-wallet automation, and funding refill workflows stayed outside the hardening scope; durable admin audit persistence and SQLite-backed admin claim/control surfaces were subsequently closed in Phase 20.
 
 ---
 
