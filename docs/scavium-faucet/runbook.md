@@ -469,9 +469,9 @@ curl -s http://127.0.0.1:18080/api/v1/admin/metrics/prometheus \
   -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
 ```
 
-The export uses only bounded labels. Token metrics are labeled by configured/requested token id after the existing sanitization path; wallet addresses, IP addresses, fingerprints, captcha tokens, idempotency keys, request bodies, private keys, admin tokens, and RPC credentials are never exported.
+The export uses only bounded labels; token-scoped metrics have an in-process overflow bucket to prevent unbounded series growth. Token metrics are labeled by configured/requested token id after the existing sanitization path when the token is trusted by the claim flow; invalid token rejections use `invalid`, early unavailable errors use `default`, and overflow uses `other`; wallet addresses, IP addresses, fingerprints, captcha tokens, idempotency keys, request bodies, private keys, admin tokens, and RPC credentials are never exported.
 
-Additional Phase 21 counters cover worker dequeue/send/ack outcomes and watcher pending/confirmed/reverted/stuck/RPC outcomes. These counters reset on process restart and are operational signals, not durable accounting. Durable claim, queue, abuse, admin audit, blocklist, and mode state remain SQLite-backed.
+Additional Phase 21 counters cover worker dequeue/send/ack outcomes, watcher pending/confirmed/reverted/stuck/RPC outcomes, and an aggregate blocklist-rejection signal for blocklist-spike alerting. These counters reset on process restart and are operational signals, not durable accounting. Durable claim, queue, abuse, admin audit, blocklist, and mode state remain SQLite-backed.
 
 ### Local smoke test
 
@@ -494,7 +494,7 @@ Use these as initial operator thresholds and tune after observing real baseline 
 - **Stuck queue:** inspect `/api/v1/admin/queue` when queued ready items remain non-zero while `scavium_faucet_queue_dequeued_total` is flat for more than two worker poll intervals, or when `sending` claims repeatedly reappear through watcher stuck reconciliation.
 - **Failed transaction spike:** alert when `scavium_faucet_queue_send_failed_total` or `scavium_faucet_watcher_reverted_total` increases sharply compared with accepted claims. Correlate with Besu txpool, gas policy, nonce behavior, and wallet balance before retrying claims.
 - **Captcha spike:** alert when `scavium_faucet_captcha_failed_total` rises rapidly or dominates rejected claims. Check captcha provider status, frontend integration, and possible bot traffic before relaxing enforcement.
-- **Blocklist spike:** use `/api/v1/admin/blocklist` and audit logs to review recent operator blocklist changes. A sudden increase in claim rejections with matching abuse logs may indicate targeted abuse or an overly broad manual block.
+- **Blocklist spike:** alert when `scavium_faucet_abuse_blocklist_rejected_total` rises quickly. Use `/api/v1/admin/blocklist` and audit logs to review recent operator blocklist changes. A sudden increase in this counter with matching abuse logs may indicate targeted abuse or an overly broad manual block.
 - **High rejection rate:** compare `scavium_faucet_claims_rejected_total` to `scavium_faucet_claims_accepted_total`. Sustained rejection dominance should trigger review of rate limits, cooldowns, captcha provider health, token configuration, and abuse signals.
 
 ### nginx and journald correlation

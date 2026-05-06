@@ -13,6 +13,8 @@ import (
 	"scavium-netgen/cmd/scavium-faucet/internal/version"
 )
 
+const maxRuntimeTokenMetricBuckets = 64
+
 // RuntimeMetrics holds in-process counters for lightweight operational diagnostics.
 // It intentionally avoids external dependencies and process-global state so tests and
 // embedded handlers can keep isolated metric sets.
@@ -31,6 +33,7 @@ type RuntimeMetrics struct {
 	faucetUnavailable   atomic.Uint64
 	claimUnavailable    atomic.Uint64
 	claimRejectedByRisk atomic.Uint64
+	blocklistRejected   atomic.Uint64
 	invalidToken        atomic.Uint64
 
 	queueDequeued      atomic.Uint64
@@ -54,6 +57,7 @@ type RuntimeMetricsSnapshot struct {
 	Build         RuntimeMetricsBuild     `json:"build"`
 	Process       RuntimeProcessMetrics   `json:"process"`
 	Claims        RuntimeClaimMetrics     `json:"claims"`
+	Abuse         RuntimeAbuseMetrics     `json:"abuse"`
 	Captcha       RuntimeCaptchaMetrics   `json:"captcha"`
 	RateLimits    RuntimeRateLimitMetrics `json:"rate_limits"`
 	Budgets       RuntimeBudgetMetrics    `json:"budgets"`
@@ -94,6 +98,12 @@ type RuntimeClaimMetrics struct {
 	FaucetUnavailable uint64 `json:"faucet_unavailable"`
 	ClaimUnavailable  uint64 `json:"claim_unavailable"`
 	InvalidToken      uint64 `json:"invalid_token"`
+}
+
+// RuntimeAbuseMetrics exposes abuse-specific counters that must remain free of
+// raw IP addresses, wallet addresses, fingerprints, and blocklist values.
+type RuntimeAbuseMetrics struct {
+	BlocklistRejected uint64 `json:"blocklist_rejected"`
 }
 
 // RuntimeCaptchaMetrics exposes captcha-related claim counters.
@@ -197,7 +207,7 @@ func (m *RuntimeMetrics) IncClaimRejectedForToken(tokenID, code string) {
 		return
 	}
 	m.claimsRejected.Add(1)
-	tokenMetrics := m.tokenMetrics(tokenID)
+	tokenMetrics := m.tokenMetrics(tokenIDForMetricCode(tokenID, code))
 	tokenMetrics.rejected.Add(1)
 	switch code {
 	case "captcha_failed":
@@ -213,6 +223,8 @@ func (m *RuntimeMetrics) IncClaimRejectedForToken(tokenID, code string) {
 	case "invalid_token":
 		m.invalidToken.Add(1)
 		tokenMetrics.invalidToken.Add(1)
+	case "blocklist_rejected":
+		m.blocklistRejected.Add(1)
 	case "claim_rejected":
 		m.claimRejectedByRisk.Add(1)
 	default:
@@ -311,6 +323,9 @@ func (m *RuntimeMetrics) Snapshot(now time.Time) RuntimeMetricsSnapshot {
 			ClaimUnavailable:  m.claimUnavailable.Load(),
 			InvalidToken:      m.invalidToken.Load(),
 		},
+		Abuse: RuntimeAbuseMetrics{
+			BlocklistRejected: m.blocklistRejected.Load(),
+		},
 		Captcha: RuntimeCaptchaMetrics{
 			Failed: m.captchaFailed.Load(),
 		},
@@ -360,6 +375,12 @@ func (m *RuntimeMetrics) tokenMetrics(tokenID string) *runtimeTokenMetrics {
 	if existing = m.tokens[key]; existing != nil {
 		return existing
 	}
+	if len(m.tokens) >= maxRuntimeTokenMetricBuckets {
+		key = "other"
+		if existing = m.tokens[key]; existing != nil {
+			return existing
+		}
+	}
 	created := &runtimeTokenMetrics{}
 	m.tokens[key] = created
 	return created
@@ -388,12 +409,37 @@ func (m *RuntimeMetrics) tokenSnapshots() []RuntimeTokenMetrics {
 	return out
 }
 
+func tokenIDForMetricCode(tokenID, code string) string {
+	switch code {
+	case "invalid_token":
+		return "invalid"
+	case "faucet_unavailable", "claim_unavailable":
+		return "default"
+	default:
+		return tokenID
+	}
+}
+
 func normalizeMetricsTokenID(tokenID string) string {
 	trimmed := strings.TrimSpace(tokenID)
 	if trimmed == "" {
 		return "default"
 	}
-	return trimmed
+	return sanitizeMetricsTokenID(trimmed)
+}
+
+func sanitizeMetricsTokenID(tokenID string) string {
+	const maxLen = 64
+	out := make([]byte, 0, len(tokenID))
+	for i := 0; i < len(tokenID) && len(out) < maxLen; i++ {
+		if tokenID[i] >= 0x20 && tokenID[i] < 0x7f {
+			out = append(out, tokenID[i])
+		}
+	}
+	if len(out) == 0 {
+		return "default"
+	}
+	return string(out)
 }
 
 // PrometheusText renders the metrics snapshot in a stable, dependency-free
@@ -410,6 +456,7 @@ func (m *RuntimeMetrics) PrometheusText(now time.Time) string {
 	metric("scavium_faucet_claims_accepted_total", "Accepted claim requests.", "counter", s.Claims.Accepted)
 	metric("scavium_faucet_claims_rejected_total", "Rejected claim requests.", "counter", s.Claims.Rejected)
 	metric("scavium_faucet_claims_rejected_by_risk_total", "Risk-engine claim rejections.", "counter", s.Claims.RejectedByRisk)
+	metric("scavium_faucet_abuse_blocklist_rejected_total", "Claims rejected by blocklist policy without exposing blocked values.", "counter", s.Abuse.BlocklistRejected)
 	metric("scavium_faucet_captcha_failed_total", "Captcha failures.", "counter", s.Captcha.Failed)
 	metric("scavium_faucet_rate_limited_total", "Rate limited claim requests.", "counter", s.RateLimits.Limited)
 	metric("scavium_faucet_daily_budget_exceeded_total", "Daily budget rejections.", "counter", s.Budgets.DailyExceeded)

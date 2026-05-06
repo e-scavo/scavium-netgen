@@ -235,6 +235,6 @@ Phase 19.6 applies the post-audit closure fixes without changing the route topol
 
 ## Phase 21 operator metrics architecture
 
-Phase 21 extends `internal/observability.RuntimeMetrics` without adding a new process, daemon, exporter, or third-party dependency. The same in-memory registry now records claim counters, token buckets, worker queue outcomes, and watcher blockchain/reconciliation outcomes.
+Phase 21 extends `internal/observability.RuntimeMetrics` without adding a new process, daemon, exporter, or third-party dependency. The same in-memory registry now records claim counters, bounded token buckets with overflow protection, aggregate blocklist rejections, worker queue outcomes, and watcher blockchain/reconciliation outcomes. Token bucketing is defensive inside the registry, so callers cannot accidentally export raw invalid token IDs through JSON or Prometheus metrics.
 
 `GET /api/v1/admin/metrics` remains the JSON operator view. `GET /api/v1/admin/metrics/prometheus` renders the same safe snapshot as Prometheus-compatible text under the existing admin bearer-token middleware. Both views are process-local and reset on restart; SQLite remains the source of truth for durable claims, queue state, abuse signals, admin state, blocklist entries, and audit trail records.

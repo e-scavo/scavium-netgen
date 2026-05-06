@@ -394,7 +394,7 @@ Phase 21 must turn the existing Phase 16/19 observability baseline into operator
 Required closure scope:
 
 - Stable protected metrics export plan, preferably Prometheus-compatible without dependency bloat.
-- Queue, worker, watcher, blockchain, abuse, blocklist, and token metrics aligned with real behavior.
+- Queue, worker, watcher, blockchain, abuse, blocklist, and bounded token metrics aligned with real behavior.
 - Alert threshold documentation for low balance, RPC failure, stuck queue, high failure rate, captcha spike, and blocklist spike.
 - Nginx, journald, request ID, and correlation ID operational guidance.
 - Smoke-test commands for operators.
