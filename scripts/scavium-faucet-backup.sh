@@ -67,6 +67,13 @@ validate_bundle_listing() {
                 ;;
         esac
     done < <(tar -tzf "$bundle")
+
+    # Reject link entries before extraction. A backup bundle produced by this
+    # helper only contains regular files/directories, so symlinks and hardlinks
+    # are unnecessary and unsafe for restore/verify workflows.
+    if tar -tvf "$bundle" | awk '{ if (substr($1,1,1) == "l" || substr($1,1,1) == "h") found=1 } END { exit found ? 0 : 1 }'; then
+        die "unsafe link entry in backup bundle"
+    fi
 }
 
 verify_bundle() {

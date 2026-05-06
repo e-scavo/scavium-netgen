@@ -542,7 +542,7 @@ SCAVIUM_FAUCET_BACKUP_DIR=/secure/offline/scavium-faucet-backups \
 scripts/scavium-faucet-backup.sh --execute
 ```
 
-Verify the bundle before relying on it. Verification now checks archive readability, rejects unsafe archive paths, requires `db/scavium-faucet.db` and `SHA256SUMS`, and validates the recorded checksums before printing the bundle entries:
+Verify the bundle before relying on it. Verification checks archive readability, rejects unsafe archive paths and link entries, requires `db/scavium-faucet.db` and `SHA256SUMS`, and validates the recorded checksums before printing the bundle entries:
 
 ```bash
 SCAVIUM_FAUCET_BACKUP_FILE=/secure/offline/scavium-faucet-backups/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
@@ -553,7 +553,7 @@ The bundle can include the reviewed environment file, which may contain `SCAVIUM
 
 ### Restore drill and production restore
 
-Always perform a dry-run restore plan first. The restore helper validates the tar listing, rejects absolute or parent-directory paths, and verifies `SHA256SUMS` before any execute-mode write:
+Always perform a dry-run restore plan first. The restore helper validates the tar listing, rejects absolute paths, parent-directory paths, symlinks, and hardlinks, and verifies `SHA256SUMS` before any execute-mode write:
 
 ```bash
 SCAVIUM_FAUCET_RESTORE_BUNDLE=/secure/offline/scavium-faucet-backups/scavium-faucet-backup-YYYYMMDDTHHMMSSZ.tar.gz \
