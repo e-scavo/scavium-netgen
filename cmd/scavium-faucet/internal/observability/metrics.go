@@ -207,7 +207,7 @@ func (m *RuntimeMetrics) IncClaimRejectedForToken(tokenID, code string) {
 		return
 	}
 	m.claimsRejected.Add(1)
-	tokenMetrics := m.tokenMetrics(tokenID)
+	tokenMetrics := m.tokenMetrics(tokenIDForMetricCode(tokenID, code))
 	tokenMetrics.rejected.Add(1)
 	switch code {
 	case "captcha_failed":
@@ -409,12 +409,37 @@ func (m *RuntimeMetrics) tokenSnapshots() []RuntimeTokenMetrics {
 	return out
 }
 
+func tokenIDForMetricCode(tokenID, code string) string {
+	switch code {
+	case "invalid_token":
+		return "invalid"
+	case "faucet_unavailable", "claim_unavailable":
+		return "default"
+	default:
+		return tokenID
+	}
+}
+
 func normalizeMetricsTokenID(tokenID string) string {
 	trimmed := strings.TrimSpace(tokenID)
 	if trimmed == "" {
 		return "default"
 	}
-	return trimmed
+	return sanitizeMetricsTokenID(trimmed)
+}
+
+func sanitizeMetricsTokenID(tokenID string) string {
+	const maxLen = 64
+	out := make([]byte, 0, len(tokenID))
+	for i := 0; i < len(tokenID) && len(out) < maxLen; i++ {
+		if tokenID[i] >= 0x20 && tokenID[i] < 0x7f {
+			out = append(out, tokenID[i])
+		}
+	}
+	if len(out) == 0 {
+		return "default"
+	}
+	return string(out)
 }
 
 // PrometheusText renders the metrics snapshot in a stable, dependency-free

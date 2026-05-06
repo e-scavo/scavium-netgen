@@ -73,20 +73,32 @@ func TestRuntimeMetricsSnapshot(t *testing.T) {
 	}
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "default", Accepted: 1, Rejected: 5})
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "erc20", Rejected: 1, DailyExceeded: 1})
-	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "missing-token", Rejected: 1, InvalidToken: 1})
+	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "invalid", Rejected: 1, InvalidToken: 1})
 	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "native", Accepted: 1, Rejected: 1, RateLimited: 1})
 }
 
-func TestRuntimeMetricsTokenBucketsAreBounded(t *testing.T) {
+func TestRuntimeMetricsInvalidTokenBucketIsCollapsed(t *testing.T) {
 	metrics := NewRuntimeMetrics(version.Info{})
 	for i := 0; i < maxRuntimeTokenMetricBuckets+10; i++ {
 		metrics.IncClaimRejectedForToken(fmt.Sprintf("untrusted-%d", i), "invalid_token")
 	}
 	snapshot := metrics.Snapshot(time.Now().UTC())
+	if len(snapshot.Tokens) != 1 {
+		t.Fatalf("token buckets len = %d, want 1: %#v", len(snapshot.Tokens), snapshot.Tokens)
+	}
+	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "invalid", Rejected: uint64(maxRuntimeTokenMetricBuckets + 10), InvalidToken: uint64(maxRuntimeTokenMetricBuckets + 10)})
+}
+
+func TestRuntimeMetricsTokenBucketsAreBounded(t *testing.T) {
+	metrics := NewRuntimeMetrics(version.Info{})
+	for i := 0; i < maxRuntimeTokenMetricBuckets+10; i++ {
+		metrics.IncClaimAcceptedForToken(fmt.Sprintf("untrusted-%d", i))
+	}
+	snapshot := metrics.Snapshot(time.Now().UTC())
 	if len(snapshot.Tokens) != maxRuntimeTokenMetricBuckets+1 {
 		t.Fatalf("token buckets len = %d, want %d", len(snapshot.Tokens), maxRuntimeTokenMetricBuckets+1)
 	}
-	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "other", Rejected: 10, InvalidToken: 10})
+	assertTokenMetrics(t, snapshot.Tokens, RuntimeTokenMetrics{TokenID: "other", Accepted: 10})
 }
 
 func assertTokenMetrics(t *testing.T, tokens []RuntimeTokenMetrics, want RuntimeTokenMetrics) {
