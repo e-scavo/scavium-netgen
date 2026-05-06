@@ -500,3 +500,7 @@ Use these as initial operator thresholds and tune after observing real baseline 
 ### nginx and journald correlation
 
 Keep nginx access logs enabled at the reverse proxy and correlate them with application JSON logs using `X-Request-ID`/`X-Correlation-ID`. For protected metrics collection, scrape through a private network path or localhost tunnel that supplies `Authorization: Bearer <admin-token>`; do not add a public unauthenticated nginx location for `/api/v1/admin/metrics/prometheus`.
+
+### Phase 21 implementation verification note
+
+The Phase 21 metrics instrumentation is expected to remain backward compatible with existing internal constructors used by tests and embedding code. `worker.New(...)` and `chain.NewWatcher(...)` still support nil metrics instrumentation; production wiring uses `NewWithMetrics(...)`, but legacy constructor paths must not panic when metrics are omitted.
