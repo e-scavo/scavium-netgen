@@ -25,6 +25,8 @@ Environment:
 Safety:
   - Default mode is --plan and performs no writes.
   - --execute requires SCAVIUM_FAUCET_RESTORE_CONFIRM=yes.
+  - Restore rejects unsafe archive paths and verifies SHA256SUMS before writing.
+  - Optional SQLite WAL/SHM companion files are restored when present in the bundle.
   - Restore should be performed while the service is stopped.
   - This script never starts, stops, or restarts systemd by itself.
 USAGE
@@ -64,6 +66,25 @@ ALLOW_LIVE_RESTORE="${SCAVIUM_FAUCET_ALLOW_LIVE_RESTORE:-no}"
 require_cmd tar
 require_cmd sha256sum
 
+validate_bundle_listing() {
+    local bundle="$1"
+    local entry
+    while IFS= read -r entry; do
+        case "$entry" in
+            /*|../*|*/../*|*"/.."|"..")
+                die "unsafe path in restore bundle: $entry"
+                ;;
+        esac
+    done < <(tar -tzf "$bundle")
+
+    # Reject link entries before extraction. A restore bundle produced by this
+    # helper only contains regular files/directories, so symlinks and hardlinks
+    # are unnecessary and unsafe for restore/verify workflows.
+    if tar -tvf "$bundle" | awk '{ if (substr($1,1,1) == "l" || substr($1,1,1) == "h") found=1 } END { exit found ? 0 : 1 }'; then
+        die "unsafe link entry in restore bundle"
+    fi
+}
+
 cat <<SUMMARY
 [restore] mode:           $mode
 [restore] bundle:         $BUNDLE
@@ -79,16 +100,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
+validate_bundle_listing "$BUNDLE"
 tar -C "$TMP_DIR" -xzf "$BUNDLE"
 [[ -f "$TMP_DIR/db/scavium-faucet.db" ]] || die "bundle does not contain db/scavium-faucet.db"
-
-if [[ -f "$TMP_DIR/SHA256SUMS" ]]; then
-    (cd "$TMP_DIR" && sha256sum -c SHA256SUMS >/dev/null)
-fi
+[[ -f "$TMP_DIR/SHA256SUMS" ]] || die "bundle does not contain SHA256SUMS"
+(cd "$TMP_DIR" && sha256sum -c SHA256SUMS >/dev/null)
 
 if [[ "$mode" == "--plan" ]]; then
     echo "[restore] plan only; no files will be written"
     echo "[restore] would install db/scavium-faucet.db to $DB_PATH"
+    for suffix in -wal -shm; do
+        if [[ -f "$TMP_DIR/db/scavium-faucet.db${suffix}" ]]; then
+            echo "[restore] would install db/scavium-faucet.db${suffix} to ${DB_PATH}${suffix}"
+        fi
+    done
     if [[ "$RESTORE_CONFIG" == "yes" && -f "$TMP_DIR/config/scavium-faucet.env" ]]; then
         echo "[restore] would install config/scavium-faucet.env to $ENV_FILE"
     fi
@@ -106,16 +131,27 @@ fi
 
 umask 077
 mkdir -p "$(dirname "$DB_PATH")"
+RESTORE_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 if [[ -f "$DB_PATH" ]]; then
-    cp -p "$DB_PATH" "${DB_PATH}.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -p "$DB_PATH" "${DB_PATH}.pre-restore.${RESTORE_STAMP}"
 fi
 install -m 0600 "$TMP_DIR/db/scavium-faucet.db" "$DB_PATH"
+for suffix in -wal -shm; do
+    if [[ -f "$TMP_DIR/db/scavium-faucet.db${suffix}" ]]; then
+        if [[ -f "${DB_PATH}${suffix}" ]]; then
+            cp -p "${DB_PATH}${suffix}" "${DB_PATH}${suffix}.pre-restore.${RESTORE_STAMP}"
+        fi
+        install -m 0600 "$TMP_DIR/db/scavium-faucet.db${suffix}" "${DB_PATH}${suffix}"
+    else
+        rm -f "${DB_PATH}${suffix}"
+    fi
+done
 
 if [[ "$RESTORE_CONFIG" == "yes" ]]; then
     [[ -f "$TMP_DIR/config/scavium-faucet.env" ]] || die "config restore requested but bundle has no config/scavium-faucet.env"
     mkdir -p "$(dirname "$ENV_FILE")"
     if [[ -f "$ENV_FILE" ]]; then
-        cp -p "$ENV_FILE" "${ENV_FILE}.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+        cp -p "$ENV_FILE" "${ENV_FILE}.pre-restore.${RESTORE_STAMP}"
     fi
     install -m 0600 "$TMP_DIR/config/scavium-faucet.env" "$ENV_FILE"
 fi

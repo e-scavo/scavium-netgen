@@ -421,7 +421,7 @@ Phase 23 makes production operation repeatable after the durable admin and obser
 
 Required closure scope:
 
-- SQLite backup/restore scripts with plan, execute, and verification flows.
+- SQLite backup/restore scripts with plan, execute, verification flows, and optional WAL/SHM companion restoration.
 - Configuration backup checklist and secret-handling guidance.
 - Wallet refill and wallet rotation runbooks with rollback and verification steps.
 - Deployment rollback verification commands.

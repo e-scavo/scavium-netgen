@@ -22,7 +22,7 @@ Environment:
 Safety:
   - --plan prints what would happen.
   - --execute creates a local tar.gz bundle and never uploads it.
-  - --verify lists and integrity-checks an existing bundle.
+  - --verify lists entries, rejects unsafe archive paths, and validates SHA256SUMS.
   - Secrets may exist in the copied env file; store bundles in restricted storage.
 USAGE
 }
@@ -57,13 +57,45 @@ BUNDLE_PATH="${BACKUP_DIR}/scavium-faucet-backup-${BACKUP_ID}.tar.gz"
 WORK_DIR="${BACKUP_DIR}/.work-${BACKUP_ID}"
 VERIFY_FILE="${SCAVIUM_FAUCET_BACKUP_FILE:-$BUNDLE_PATH}"
 
-if [[ "$mode" == "--verify" ]]; then
+validate_bundle_listing() {
+    local bundle="$1"
+    local entry
+    while IFS= read -r entry; do
+        case "$entry" in
+            /*|../*|*/../*|*"/.."|"..")
+                die "unsafe path in backup bundle: $entry"
+                ;;
+        esac
+    done < <(tar -tzf "$bundle")
+
+    # Reject link entries before extraction. A backup bundle produced by this
+    # helper only contains regular files/directories, so symlinks and hardlinks
+    # are unnecessary and unsafe for restore/verify workflows.
+    if tar -tvf "$bundle" | awk '{ if (substr($1,1,1) == "l" || substr($1,1,1) == "h") found=1 } END { exit found ? 0 : 1 }'; then
+        die "unsafe link entry in backup bundle"
+    fi
+}
+
+verify_bundle() {
+    local bundle="$1"
+    local tmp_dir
     require_cmd tar
-    [[ -f "$VERIFY_FILE" ]] || die "backup bundle not found: $VERIFY_FILE"
-    echo "[backup] verifying bundle: $VERIFY_FILE"
-    tar -tzf "$VERIFY_FILE" >/dev/null
-    tar -tzf "$VERIFY_FILE" | sed 's/^/[backup] contains: /'
-    echo "[backup] verification completed"
+    require_cmd sha256sum
+    [[ -f "$bundle" ]] || die "backup bundle not found: $bundle"
+    echo "[backup] verifying bundle: $bundle"
+    validate_bundle_listing "$bundle"
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' RETURN
+    tar -C "$tmp_dir" -xzf "$bundle"
+    [[ -f "$tmp_dir/db/scavium-faucet.db" ]] || die "bundle missing db/scavium-faucet.db"
+    [[ -f "$tmp_dir/SHA256SUMS" ]] || die "bundle missing SHA256SUMS"
+    (cd "$tmp_dir" && sha256sum -c SHA256SUMS >/dev/null)
+    tar -tzf "$bundle" | sed 's/^/[backup] contains: /'
+    echo "[backup] checksum verification completed"
+}
+
+if [[ "$mode" == "--verify" ]]; then
+    verify_bundle "$VERIFY_FILE"
     exit 0
 fi
 
