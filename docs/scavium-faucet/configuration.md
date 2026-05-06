@@ -8,7 +8,8 @@ Configuration is loaded from environment variables at startup via `internal/conf
 |---|---|---|
 | `SCAVIUM_FAUCET_BIND_ADDR` | `127.0.0.1:18080` | HTTP listen address used by `main.go` |
 | `SCAVIUM_FAUCET_PUBLIC_BASE_URL` | `http://127.0.0.1:18080` | Loaded and validated; not currently surfaced by the handler |
-| `SCAVIUM_FAUCET_RPC_URL` | `http://127.0.0.1:18545` | Ethereum JSON-RPC endpoint; used to create `chain.Client` at startup (non-dry-run); drives `RPCCheck` and `WalletCheck` in `/ready` |
+| `SCAVIUM_FAUCET_RPC_URL` | `http://127.0.0.1:18545` | Primary Ethereum JSON-RPC endpoint; used first at startup in non-dry-run mode; the selected endpoint drives `RPCCheck`, `WalletCheck`, sender, watcher, and admin wallet visibility |
+| `SCAVIUM_FAUCET_RPC_SECONDARY_URLS` | empty | Optional comma-separated fallback RPC URLs. They are tried only at startup if earlier candidates fail dialing or chain-ID validation. There is no load balancing or per-transaction rotation. |
 | `SCAVIUM_FAUCET_CHAIN_ID` | `31337` | Validated against the RPC node at startup (non-dry-run); exposed by `/api/v1/config` |
 | `SCAVIUM_FAUCET_NETWORK_NAME` | `scavium-dev` | Exposed by `/api/v1/status` and `/api/v1/config` |
 | `SCAVIUM_FAUCET_SYMBOL` | `SCAV` | Exposed by `/api/v1/status` and `/api/v1/config` |
@@ -50,6 +51,7 @@ Configuration is loaded from environment variables at startup via `internal/conf
 - bind address must be non-empty
 - public base URL must be non-empty
 - RPC URL must be non-empty
+- secondary RPC URLs must not duplicate the primary RPC URL
 - chain ID must be positive
 - network name must be non-empty
 - symbol must be non-empty
@@ -70,6 +72,8 @@ Private key and admin token are not validated by `Config.Validate()`. A missing 
 SCAVIUM_FAUCET_BIND_ADDR=127.0.0.1:18080
 SCAVIUM_FAUCET_PUBLIC_BASE_URL=https://faucet.example.test
 SCAVIUM_FAUCET_RPC_URL=http://127.0.0.1:18545
+# Optional startup-only failover list; omit to keep primary-only behavior.
+# SCAVIUM_FAUCET_RPC_SECONDARY_URLS=http://127.0.0.1:28545,https://rpc-backup.example.test
 SCAVIUM_FAUCET_CHAIN_ID=1337
 SCAVIUM_FAUCET_NETWORK_NAME=scavium-testnet
 SCAVIUM_FAUCET_SYMBOL=SCAV
@@ -208,3 +212,9 @@ Phase 18 does not add new environment variables. The admin control plane continu
 - `SCAVIUM_FAUCET_TRUSTED_PROXY` should match the reverse proxy address so admin audit actor attribution and public claim IP extraction use the real client IP.
 
 Dynamic budget editing, token catalog mutation, role-based admin accounts, and durable admin/audit storage are not configuration features in the closed Phase 18 baseline.
+
+## Phase 22 RPC failover and wallet visibility
+
+Phase 22 adds conservative startup-only RPC failover through `SCAVIUM_FAUCET_RPC_SECONDARY_URLS`. The primary URL remains the default and first candidate. If primary dialing or chain-ID validation fails, the app tries each secondary in order and only keeps a candidate after `ValidateChainID` succeeds. Once selected, that single client is used for the sender, watcher, readiness, and wallet visibility paths; the faucet does not load-balance, rotate per claim, or retry a transaction against another endpoint after signing/broadcast semantics begin.
+
+Phase 22 also adds admin-only wallet visibility under `/api/v1/admin/wallet` and as the `wallet` object in `/api/v1/admin/runtime`. The response exposes the signer address, native balance, pending nonce, and configured token balance status when safe. It never exposes private keys, admin tokens, RPC credentials, authorization headers, idempotency keys, or request bodies. In dry-run mode or when no real signer/client is configured, wallet visibility reports `enabled:false`.

@@ -21,6 +21,7 @@ const (
 	EnvBindAddr                             = "SCAVIUM_FAUCET_BIND_ADDR"
 	EnvPublicBaseURL                        = "SCAVIUM_FAUCET_PUBLIC_BASE_URL"
 	EnvRPCURL                               = "SCAVIUM_FAUCET_RPC_URL"
+	EnvRPCSecondaryURLs                     = "SCAVIUM_FAUCET_RPC_SECONDARY_URLS"
 	EnvChainID                              = "SCAVIUM_FAUCET_CHAIN_ID"
 	EnvNetworkName                          = "SCAVIUM_FAUCET_NETWORK_NAME"
 	EnvSymbol                               = "SCAVIUM_FAUCET_SYMBOL"
@@ -94,6 +95,7 @@ type Config struct {
 	BindAddr                             string
 	PublicBaseURL                        string
 	RPCURL                               string
+	RPCSecondaryURLs                     []string
 	ChainID                              int64
 	NetworkName                          string
 	Symbol                               string
@@ -159,6 +161,7 @@ func FromEnv(lookup func(string) string) (Config, error) {
 	cfg.BindAddr = envOrDefault(lookup, EnvBindAddr, cfg.BindAddr)
 	cfg.PublicBaseURL = envOrDefault(lookup, EnvPublicBaseURL, cfg.PublicBaseURL)
 	cfg.RPCURL = envOrDefault(lookup, EnvRPCURL, cfg.RPCURL)
+	cfg.RPCSecondaryURLs = splitCommaList(lookup(EnvRPCSecondaryURLs))
 	cfg.NetworkName = envOrDefault(lookup, EnvNetworkName, cfg.NetworkName)
 	cfg.Symbol = envOrDefault(lookup, EnvSymbol, cfg.Symbol)
 	cfg.ExplorerTxURL = envOrDefault(lookup, EnvExplorerTxURL, cfg.ExplorerTxURL)
@@ -376,6 +379,14 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.RPCURL) == "" {
 		errs = append(errs, errors.New("RPC URL is required"))
+	}
+	for _, rpcURL := range c.RPCSecondaryURLs {
+		if strings.TrimSpace(rpcURL) == "" {
+			errs = append(errs, errors.New("secondary RPC URLs must not be empty"))
+		}
+		if strings.TrimSpace(rpcURL) == strings.TrimSpace(c.RPCURL) {
+			errs = append(errs, errors.New("secondary RPC URLs must not duplicate primary RPC URL"))
+		}
 	}
 	if c.ChainID <= 0 {
 		errs = append(errs, errors.New("chain ID must be positive"))

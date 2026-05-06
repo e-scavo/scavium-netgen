@@ -369,7 +369,44 @@ Operational notes:
 - `claims.*`, `captcha.*`, `rate_limits.*`, and `budgets.*` remain aggregate process-local counters.
 - `tokens[*]` is diagnostic only and is not a durable accounting ledger.
 - Token ids are configuration/public-catalog identifiers only; wallet addresses, raw fingerprints, request bodies, captcha tokens, and idempotency keys are not exposed.
-- Invalid token attempts are counted both in aggregate `claims.invalid_token` and in the token-scoped bucket matching the supplied `token_id`.
+- Invalid token attempts are counted both in aggregate `claims.invalid_token` and in the bounded token-scoped `invalid` bucket; the supplied untrusted `token_id` is not exported as a label.
+
+### `GET /api/v1/admin/wallet`
+
+Returns operator-safe wallet runtime visibility. The route is protected by the existing admin bearer-token middleware and is disabled with `503` when `SCAVIUM_FAUCET_ADMIN_TOKEN` is empty. The response never exposes private keys, admin tokens, authorization headers, RPC credentials, request bodies, captcha tokens, fingerprints, or idempotency keys.
+
+```json
+{
+  "enabled": true,
+  "status": "ok",
+  "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+  "native_balance_wei": "1000000000000000000",
+  "pending_nonce": 42,
+  "tokens": [
+    {
+      "token_id": "native",
+      "symbol": "SCAV",
+      "type": "native",
+      "balance_wei": "1000000000000000000",
+      "status": "ok"
+    },
+    {
+      "token_id": "erc20-demo",
+      "symbol": "DEMO",
+      "type": "erc20",
+      "address": "0x0000000000000000000000000000000000000001",
+      "balance_wei": "250000000000000000000",
+      "status": "ok"
+    }
+  ]
+}
+```
+
+`pending_nonce` uses the selected RPC client's pending nonce API when available, so it includes mempool-visible transactions rather than only confirmed chain state. If a balance or token read fails, the endpoint remains available with `status: "degraded"` and a safe error string. In dry-run mode, or when no real signer/client exists, it returns `enabled:false` and `status:"disabled"`.
+
+### `GET /api/v1/admin/runtime`
+
+Returns dashboard, readiness, runtime metrics, and the same wallet object returned by `/api/v1/admin/wallet` under `wallet`. This keeps Phase 22 visibility available from the existing runtime surface without changing public API contracts.
 
 ### `GET /api/v1/admin/dashboard`
 

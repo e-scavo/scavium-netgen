@@ -144,6 +144,20 @@ curl -s http://127.0.0.1:18080/api/v1/admin/metrics \
 
 The response includes process-local counters for accepted claims, rejected claims, captcha failures, rate-limit hits, daily-budget exceedances, faucet-unavailable responses, claim-unavailable responses, and risk rejections. It also includes build metadata and uptime. These counters are operational diagnostics only and reset when the process restarts; durable claim history remains in SQLite.
 
+
+### Phase 22 RPC failover and wallet runtime visibility
+
+RPC failover is intentionally startup-only. Configure the primary endpoint in `SCAVIUM_FAUCET_RPC_URL` and optional fallback candidates in `SCAVIUM_FAUCET_RPC_SECONDARY_URLS`. On startup the app dials candidates in order and validates the configured chain ID before keeping one. After startup, one selected RPC client is shared by sender, watcher, readiness, and wallet visibility. Do not treat this as load balancing or high availability; if the selected endpoint degrades later, alerts and operator restart/failover remain the safe response.
+
+Admin-only wallet visibility is available at:
+
+```bash
+curl -sS http://127.0.0.1:18080/api/v1/admin/wallet \
+  -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN"
+```
+
+The same object is embedded under `wallet` in `/api/v1/admin/runtime`. Operators should use `native_balance_wei`, `pending_nonce`, and token balance statuses to detect refill needs, nonce stalls, and ERC20 funding gaps. The response deliberately excludes private keys, secrets, raw RPC credentials, and request material. If `status` is `degraded`, inspect `/ready`, RPC logs, Besu health, and ERC20 contract availability before resuming distribution.
+
 ### Request logging
 
 The binary writes one JSON log line per request to stdout. Each line contains:

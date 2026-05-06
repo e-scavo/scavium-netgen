@@ -17,6 +17,7 @@ import (
 
 type fakeClient struct {
 	chainID     int64
+	closed      bool
 	nonce       uint64
 	gasPrice    *big.Int
 	balance     *big.Int // nil → 100 ETH
@@ -63,7 +64,10 @@ func (f *fakeClient) BlockNumber(_ context.Context) (uint64, error) {
 	return f.blockNumber, nil
 }
 
+func (f *fakeClient) Close() { f.closed = true }
+
 var _ ChainClient = (*fakeClient)(nil)
+var _ ClosableChainClient = (*fakeClient)(nil)
 
 // ── fakeSigner ───────────────────────────────────────────────────────────────
 
@@ -105,6 +109,53 @@ func TestValidateChainIDMismatch(t *testing.T) {
 	err := ValidateChainID(context.Background(), client, 31337)
 	if err == nil {
 		t.Fatal("expected chain ID mismatch error, got nil")
+	}
+}
+
+func TestCandidateRPCURLsKeepsPrimaryFirstAndDeduplicates(t *testing.T) {
+	got := CandidateRPCURLs(" http://primary ", []string{"", "http://secondary-a", "http://primary", "http://secondary-b"})
+	want := []string{"http://primary", "http://secondary-a", "http://secondary-b"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidate[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestNewValidatedClientFallsBackAfterInvalidPrimary(t *testing.T) {
+	clients := map[string]*fakeClient{
+		"http://primary":   {chainID: 1},
+		"http://secondary": {chainID: 31337},
+	}
+	selection, err := newValidatedClient(context.Background(), "http://primary", []string{"http://secondary"}, 31337, func(_ context.Context, rpcURL string) (ClosableChainClient, error) {
+		return clients[rpcURL], nil
+	})
+	if err != nil {
+		t.Fatalf("new validated client: %v", err)
+	}
+	if selection.URL != "http://secondary" || selection.Index != 1 {
+		t.Fatalf("selection = (%q,%d), want secondary index 1", selection.URL, selection.Index)
+	}
+	if !clients["http://primary"].closed {
+		t.Fatal("invalid primary client must be closed")
+	}
+	if clients["http://secondary"].closed {
+		t.Fatal("selected secondary client must remain open")
+	}
+}
+
+func TestNewValidatedClientFailsWhenAllCandidatesInvalid(t *testing.T) {
+	_, err := newValidatedClient(context.Background(), "http://primary", []string{"http://secondary"}, 31337, func(_ context.Context, rpcURL string) (ClosableChainClient, error) {
+		return &fakeClient{chainID: 1}, nil
+	})
+	if err == nil {
+		t.Fatal("expected error when every RPC candidate fails chain ID validation")
+	}
+	if !contains(err.Error(), "chain ID mismatch") {
+		t.Fatalf("error = %q, want chain ID mismatch", err.Error())
 	}
 }
 
