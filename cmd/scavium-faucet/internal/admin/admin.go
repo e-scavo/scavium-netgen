@@ -173,6 +173,13 @@ type ReadStore interface {
 	ListAdminQueueClaims(ctx context.Context, limit int) ([]domain.Claim, error)
 }
 
+// ControlStore provides persisted admin control transitions for claim retry
+// and cancel operations.
+type ControlStore interface {
+	AdminRetryClaim(ctx context.Context, id string) (bool, error)
+	AdminCancelClaim(ctx context.Context, id, reason string) (bool, error)
+}
+
 // ValidMode reports whether mode is a supported faucet operational mode.
 func ValidMode(mode string) bool {
 	switch mode {
@@ -544,11 +551,91 @@ func (s *SQLiteReadAdminService) SetMode(ctx context.Context, mode, actor string
 }
 
 func (s *SQLiteReadAdminService) RetryClaim(ctx context.Context, id, actor string) error {
-	return s.fallback.RetryClaim(ctx, id, actor)
+	if s.reads == nil {
+		return s.fallback.RetryClaim(ctx, id, actor)
+	}
+	claim, err := s.reads.GetClaim(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if claim.Status != domain.ClaimStatusFailed && claim.Status != domain.ClaimStatusRejected {
+		return ErrNotRetryable
+	}
+	control, ok := s.reads.(ControlStore)
+	if !ok {
+		return s.fallback.RetryClaim(ctx, id, actor)
+	}
+	updated, err := control.AdminRetryClaim(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		latest, readErr := s.reads.GetClaim(ctx, id)
+		if readErr != nil {
+			if errors.Is(readErr, domain.ErrNotFound) {
+				return ErrNotFound
+			}
+			return readErr
+		}
+		if latest.Status != domain.ClaimStatusFailed && latest.Status != domain.ClaimStatusRejected {
+			return ErrNotRetryable
+		}
+		return ErrNotFound
+	}
+	s.fallback.auditLog.Append(AuditEntry{
+		Action:    "retry_claim",
+		Actor:     actor,
+		Target:    id,
+		CreatedAt: s.now().UTC().Format(time.RFC3339),
+	})
+	return nil
 }
 
 func (s *SQLiteReadAdminService) CancelClaim(ctx context.Context, id, actor string) error {
-	return s.fallback.CancelClaim(ctx, id, actor)
+	if s.reads == nil {
+		return s.fallback.CancelClaim(ctx, id, actor)
+	}
+	claim, err := s.reads.GetClaim(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if claim.Status == domain.ClaimStatusSent || claim.Status == domain.ClaimStatusConfirmed || claim.Status == domain.ClaimStatusSending {
+		return ErrNotCancellable
+	}
+	control, ok := s.reads.(ControlStore)
+	if !ok {
+		return s.fallback.CancelClaim(ctx, id, actor)
+	}
+	updated, err := control.AdminCancelClaim(ctx, id, "cancelled by admin")
+	if err != nil {
+		return err
+	}
+	if !updated {
+		latest, readErr := s.reads.GetClaim(ctx, id)
+		if readErr != nil {
+			if errors.Is(readErr, domain.ErrNotFound) {
+				return ErrNotFound
+			}
+			return readErr
+		}
+		if latest.Status == domain.ClaimStatusSent || latest.Status == domain.ClaimStatusConfirmed || latest.Status == domain.ClaimStatusSending {
+			return ErrNotCancellable
+		}
+		return ErrNotFound
+	}
+	s.fallback.auditLog.Append(AuditEntry{
+		Action:    "cancel_claim",
+		Actor:     actor,
+		Target:    id,
+		CreatedAt: s.now().UTC().Format(time.RFC3339),
+	})
+	return nil
 }
 
 func (s *SQLiteReadAdminService) BlocklistList(ctx context.Context) ([]abuse.BlocklistEntry, error) {

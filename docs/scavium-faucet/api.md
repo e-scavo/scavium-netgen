@@ -415,7 +415,7 @@ Returns an operator-safe queue snapshot from persisted SQLite claim/queue state.
 }
 ```
 
-Queue item responses intentionally omit wallet addresses, idempotency keys, request bodies, captcha tokens, and transaction internals. Phase 20.1 moves this read surface to persisted SQLite state, but retry/cancel actions, blocklist controls, and audit history remain on the existing in-memory admin control layer until later Phase 20 steps.
+Queue item responses intentionally omit wallet addresses, idempotency keys, request bodies, captcha tokens, and transaction internals. Phase 20.1 moves this read surface to persisted SQLite state.
 
 ### `POST /api/v1/admin/queue/retry`
 
@@ -430,6 +430,8 @@ Success response:
 ```json
 { "status": "retried", "id": "claim_123" }
 ```
+
+Phase 20.2 applies this transition to persisted SQLite claim state. Eligible `failed` and `rejected` claims are moved to `queued` and `next_attempt_at` is cleared so worker pickup can resume immediately.
 
 Conflict response:
 
@@ -449,13 +451,15 @@ Success response:
 { "status": "cancelled", "id": "claim_123" }
 ```
 
+Phase 20.2 applies this transition to persisted SQLite claim state for eligible not-yet-sent claims.
+
 Conflict response:
 
 - `409` / `not_cancellable`
 
 ### `GET /api/v1/admin/claims?limit=50&offset=0`
 
-Lists in-memory claims. `limit` is capped at `500`. The current Phase 18 closure does not hydrate this view from the SQLite claim store in production.
+Lists persisted claims from the SQLite-backed admin read model. `limit` is capped at `500`.
 
 ```json
 {
@@ -471,6 +475,8 @@ Returns one claim or `404`.
 
 Moves a `failed` or `rejected` claim back to `queued`.
 
+Phase 20.2 persists this transition in SQLite and clears `next_attempt_at`.
+
 Success response:
 
 ```json
@@ -484,6 +490,8 @@ Conflict response:
 ### `POST /api/v1/admin/claim/{id}/cancel`
 
 Rejects a claim that has not been sent yet.
+
+Phase 20.2 persists this transition in SQLite.
 
 Success response:
 

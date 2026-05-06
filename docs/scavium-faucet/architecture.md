@@ -181,9 +181,10 @@ The admin service currently has split runtime scopes:
 
 - **Runtime-effective mode control:** `POST /api/v1/admin/faucet/mode` validates `active`, `paused`, and `maintenance`, records an audit entry, and propagates the accepted mode into the live `PersistentReadService` through the `ModeController` boundary added in Phase 18.7.
 - **SQLite-backed read surfaces (Phase 20.1):** dashboard claim counts, claim listing/detail, and queue snapshots now read from persisted SQLite claim/queue state.
-- **In-memory control surfaces (still deferred for durability):** retry/cancel mutations, blocklist management, and the audit ring buffer still operate on the current in-memory admin service.
+- **SQLite-backed control surfaces (Phase 20.2):** retry/cancel mutations now update persisted SQLite claim state.
+- **In-memory control surfaces (still deferred for durability):** blocklist management and the audit ring buffer still operate on the current in-memory admin service.
 
-This split is deliberate for the Phase 20.1 step. It improves operator read visibility against persisted state while preserving existing admin HTTP contracts and deferring durable admin mutations to later Phase 20 substeps.
+This split is deliberate for the current Phase 20 progression. It keeps existing admin HTTP contracts stable while introducing persisted claim/queue reads and persisted retry/cancel transitions before later durable blocklist/audit substeps.
 
 Phase 18.8 closes the final audit notes by aligning the documented queue response with the real `QueueResponse` structure, validating blocklist `key_type` values (`ip`, `address`, `fingerprint`), and applying a shared `500` item cap to admin queue, claims, and audit list endpoints.
 ## Phase 19.3 — Performance Safety / Request Body & Timeout Hardening

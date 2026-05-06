@@ -700,6 +700,58 @@ func (s *Store) ListAdminQueueClaims(ctx context.Context, limit int) ([]domain.C
 	return claims, nil
 }
 
+// AdminRetryClaim re-queues an eligible failed/rejected claim for worker
+// processing. next_attempt_at is cleared so the claim becomes immediately
+// processable by DequeueBatch.
+func (s *Store) AdminRetryClaim(ctx context.Context, id string) (bool, error) {
+	now := formatTime(time.Now().UTC())
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE requests
+		SET status = ?, reason = '', next_attempt_at = NULL, updated_at = ?
+		WHERE id = ? AND status IN (?, ?)
+	`,
+		string(domain.ClaimStatusQueued),
+		now,
+		id,
+		string(domain.ClaimStatusFailed),
+		string(domain.ClaimStatusRejected),
+	)
+	if err != nil {
+		return false, fmt.Errorf("admin retry claim: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("admin retry rows affected: %w", err)
+	}
+	return rows > 0, nil
+}
+
+// AdminCancelClaim rejects an eligible not-yet-sent claim.
+func (s *Store) AdminCancelClaim(ctx context.Context, id, reason string) (bool, error) {
+	now := formatTime(time.Now().UTC())
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE requests
+		SET status = ?, reason = ?, next_attempt_at = NULL, updated_at = ?
+		WHERE id = ? AND status NOT IN (?, ?, ?)
+	`,
+		string(domain.ClaimStatusRejected),
+		reason,
+		now,
+		id,
+		string(domain.ClaimStatusSent),
+		string(domain.ClaimStatusConfirmed),
+		string(domain.ClaimStatusSending),
+	)
+	if err != nil {
+		return false, fmt.Errorf("admin cancel claim: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("admin cancel rows affected: %w", err)
+	}
+	return rows > 0, nil
+}
+
 // LastClaimByAddressAndToken returns the latest persisted claim for one address and token_id.
 func (s *Store) LastClaimByAddressAndToken(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `

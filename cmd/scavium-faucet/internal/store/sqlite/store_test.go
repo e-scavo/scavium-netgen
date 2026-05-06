@@ -241,6 +241,111 @@ func TestAdminQueueCountsAndListAdminQueueClaims(t *testing.T) {
 	}
 }
 
+func TestAdminRetryClaimRequeuesEligibleClaim(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	claim := testClaim("retry_claim")
+	claim.Status = domain.ClaimStatusFailed
+	claim.Reason = "worker failure"
+	if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+	if _, err := store.db.Exec(`UPDATE requests SET next_attempt_at = ? WHERE id = ?`, formatTime(time.Now().UTC().Add(5*time.Minute)), claim.ID); err != nil {
+		t.Fatalf("set next_attempt_at: %v", err)
+	}
+
+	updated, err := store.AdminRetryClaim(context.Background(), claim.ID)
+	if err != nil {
+		t.Fatalf("admin retry claim: %v", err)
+	}
+	if !updated {
+		t.Fatal("updated = false, want true")
+	}
+
+	got, err := store.GetClaim(context.Background(), claim.ID)
+	if err != nil {
+		t.Fatalf("get claim: %v", err)
+	}
+	if got.Status != domain.ClaimStatusQueued {
+		t.Fatalf("status = %q, want queued", got.Status)
+	}
+	if got.Reason != "" {
+		t.Fatalf("reason = %q, want empty", got.Reason)
+	}
+	if got.NextAttemptAt != nil {
+		t.Fatalf("next_attempt_at = %v, want nil", got.NextAttemptAt)
+	}
+}
+
+func TestAdminRetryClaimReturnsFalseWhenNotEligible(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	claim := testClaim("retry_not_eligible")
+	claim.Status = domain.ClaimStatusQueued
+	if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	updated, err := store.AdminRetryClaim(context.Background(), claim.ID)
+	if err != nil {
+		t.Fatalf("admin retry claim: %v", err)
+	}
+	if updated {
+		t.Fatal("updated = true, want false")
+	}
+}
+
+func TestAdminCancelClaimRejectsEligibleClaim(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	claim := testClaim("cancel_claim")
+	claim.Status = domain.ClaimStatusQueued
+	if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	updated, err := store.AdminCancelClaim(context.Background(), claim.ID, "cancelled by admin")
+	if err != nil {
+		t.Fatalf("admin cancel claim: %v", err)
+	}
+	if !updated {
+		t.Fatal("updated = false, want true")
+	}
+
+	got, err := store.GetClaim(context.Background(), claim.ID)
+	if err != nil {
+		t.Fatalf("get claim: %v", err)
+	}
+	if got.Status != domain.ClaimStatusRejected {
+		t.Fatalf("status = %q, want rejected", got.Status)
+	}
+	if got.Reason != "cancelled by admin" {
+		t.Fatalf("reason = %q, want cancelled by admin", got.Reason)
+	}
+}
+
+func TestAdminCancelClaimReturnsFalseWhenNotEligible(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	claim := testClaim("cancel_not_eligible")
+	claim.Status = domain.ClaimStatusSent
+	if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	updated, err := store.AdminCancelClaim(context.Background(), claim.ID, "cancelled by admin")
+	if err != nil {
+		t.Fatalf("admin cancel claim: %v", err)
+	}
+	if updated {
+		t.Fatal("updated = true, want false")
+	}
+}
+
 func TestLastClaimByAddressAndToken(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()

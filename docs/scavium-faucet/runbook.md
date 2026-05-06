@@ -427,13 +427,13 @@ curl -sS http://127.0.0.1:18080/api/v1/admin/audit?limit=100 \
 Operational scope notes:
 
 - `POST /api/v1/admin/faucet/mode` is runtime-effective. Accepted values are `active`, `paused`, and `maintenance`; invalid modes return `400 invalid_mode`.
-- `GET /api/v1/admin/queue`, `GET /api/v1/admin/claims`, queue retry/cancel, and claim retry/cancel use the current in-memory admin claim view. The broader SQLite-backed admin service remains intentionally deferred, so production SQLite claim rows are not pre-populated into those views in this phase.
-- Queue or claim control commands may return `404 not_found` for real persisted claims until the SQLite-backed admin service is implemented. This is expected Phase 18 scope, not a worker failure.
+- `GET /api/v1/admin/queue` and `GET /api/v1/admin/claims` read persisted SQLite claim/queue state (Phase 20.1).
+- Queue and claim retry/cancel commands update persisted SQLite claim state (Phase 20.2). Retry clears `next_attempt_at` and re-queues eligible `failed`/`rejected` claims for worker pickup; cancel rejects eligible not-yet-sent claims.
 - Admin blocklist values are visible through the admin blocklist/audit surface for operator traceability, but the Phase 18 in-memory blocklist is not a replacement for persisted abuse enforcement.
 - `key_type` for blocklist add/remove is restricted to `ip`, `address`, or `fingerprint`.
 - Admin list limits for queue, claims, and audit are capped at `500` even if a larger `limit` query value is supplied.
 
-This closure does not introduce dynamic budget editing, CSV exports, allowlist/campaign management, SQLite-backed admin claim control, durable audit persistence, or runtime token mutation. Those remain explicitly deferred from the Phase 18 production-safe admin-control baseline.
+This closure does not introduce dynamic budget editing, CSV exports, allowlist/campaign management, durable audit persistence, persisted blocklist enforcement, or runtime token mutation. Those remain explicitly deferred from the current production-safe admin-control baseline.
 
 
 ## Phase 19 hardening validation checklist

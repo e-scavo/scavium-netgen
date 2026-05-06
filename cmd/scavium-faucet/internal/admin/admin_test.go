@@ -537,7 +537,7 @@ func TestSQLiteReadAdminServiceReadsPersistedClaimsAndQueue(t *testing.T) {
 	}
 }
 
-func TestSQLiteReadAdminServiceKeepsControlsInMemory(t *testing.T) {
+func TestSQLiteReadAdminServiceUsesPersistedRetryCancel(t *testing.T) {
 	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -547,6 +547,56 @@ func TestSQLiteReadAdminServiceKeepsControlsInMemory(t *testing.T) {
 	controller := &testModeController{}
 	svc := NewSQLiteReadAdminService(store)
 	svc.SetModeController(controller)
+
+	retryClaim := testClaim("retry_claim", domain.ClaimStatusFailed)
+	retryClaim.CreatedAt = time.Now().UTC().Add(-2 * time.Minute)
+	retryClaim.UpdatedAt = retryClaim.CreatedAt
+	cancelClaim := testClaim("cancel_claim", domain.ClaimStatusQueued)
+	cancelClaim.CreatedAt = time.Now().UTC().Add(-1 * time.Minute)
+	cancelClaim.UpdatedAt = cancelClaim.CreatedAt
+	queuedClaim := testClaim("queued_claim", domain.ClaimStatusQueued)
+	sentClaim := testClaim("sent_claim", domain.ClaimStatusSent)
+
+	for _, claim := range []domain.Claim{retryClaim, cancelClaim, queuedClaim, sentClaim} {
+		if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+			t.Fatalf("create claim %s: %v", claim.ID, err)
+		}
+	}
+
+	if err := svc.RetryClaim(context.Background(), retryClaim.ID, "operator"); err != nil {
+		t.Fatalf("retry claim: %v", err)
+	}
+	retried, err := store.GetClaim(context.Background(), retryClaim.ID)
+	if err != nil {
+		t.Fatalf("get retried claim: %v", err)
+	}
+	if retried.Status != domain.ClaimStatusQueued {
+		t.Fatalf("status = %q, want queued", retried.Status)
+	}
+
+	if err := svc.CancelClaim(context.Background(), cancelClaim.ID, "operator"); err != nil {
+		t.Fatalf("cancel claim: %v", err)
+	}
+	cancelled, err := store.GetClaim(context.Background(), cancelClaim.ID)
+	if err != nil {
+		t.Fatalf("get cancelled claim: %v", err)
+	}
+	if cancelled.Status != domain.ClaimStatusRejected {
+		t.Fatalf("status = %q, want rejected", cancelled.Status)
+	}
+	if cancelled.Reason != "cancelled by admin" {
+		t.Fatalf("reason = %q, want cancelled by admin", cancelled.Reason)
+	}
+
+	if err := svc.RetryClaim(context.Background(), queuedClaim.ID, "operator"); err != ErrNotRetryable {
+		t.Fatalf("retry err = %v, want ErrNotRetryable", err)
+	}
+	if err := svc.CancelClaim(context.Background(), sentClaim.ID, "operator"); err != ErrNotCancellable {
+		t.Fatalf("cancel err = %v, want ErrNotCancellable", err)
+	}
+	if err := svc.RetryClaim(context.Background(), "missing", "operator"); err != ErrNotFound {
+		t.Fatalf("retry missing err = %v, want ErrNotFound", err)
+	}
 
 	if err := svc.SetMode(context.Background(), "maintenance", "operator"); err != nil {
 		t.Fatalf("set mode: %v", err)
@@ -574,11 +624,11 @@ func TestSQLiteReadAdminServiceKeepsControlsInMemory(t *testing.T) {
 		t.Fatalf("entries len = %d, want 1", len(entries))
 	}
 
-	logs, err := svc.RecentAuditLog(context.Background(), 10)
+	logs, err := svc.RecentAuditLog(context.Background(), 20)
 	if err != nil {
 		t.Fatalf("audit log: %v", err)
 	}
-	if len(logs) < 2 {
-		t.Fatalf("audit entries = %d, want at least 2", len(logs))
+	if len(logs) < 4 {
+		t.Fatalf("audit entries = %d, want at least 4", len(logs))
 	}
 }
