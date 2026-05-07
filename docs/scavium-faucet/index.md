@@ -30,6 +30,7 @@ The service is production-ready for the current testnet scope, including validat
 | [phase26-public-frontend-completion.md](phase26-public-frontend-completion.md) | Phase 26 public frontend implementation narrative |
 | [phase26-public-frontend-closure-audit.md](phase26-public-frontend-closure-audit.md) | Phase 26 closure audit and deferred-work boundary |
 | [phase27-advanced-anti-abuse-closure-audit.md](phase27-advanced-anti-abuse-closure-audit.md) | Phase 27 advanced anti-abuse implementation and closure audit |
+| [phase27-fix4-completion.md](phase27-fix4-completion.md) | Phase 27 Fix4 completion note for manual-review/risk-rejection ordering |
 
 ## Current implementation snapshot
 
