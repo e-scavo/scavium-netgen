@@ -1185,6 +1185,12 @@ func (s *SQLiteReadAdminService) CreateInvitationCode(ctx context.Context, req I
 	if code.Code == "" || code.CampaignID == "" || code.MaxUses < 0 {
 		return domain.InvitationCode{}, ErrInvalidCampaign
 	}
+	if _, err := store.GetCampaign(ctx, code.CampaignID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.InvitationCode{}, ErrInvalidCampaign
+		}
+		return domain.InvitationCode{}, err
+	}
 	created, err := store.CreateInvitationCode(ctx, code)
 	if err != nil {
 		return domain.InvitationCode{}, err
@@ -1211,12 +1217,24 @@ func (s *SQLiteReadAdminService) AddAllowlistEntry(ctx context.Context, req Allo
 	if entry.CampaignID == "" {
 		return ErrInvalidCampaign
 	}
+	if _, err := store.GetCampaign(ctx, entry.CampaignID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return ErrInvalidCampaign
+		}
+		return err
+	}
+	existed, err := store.IsAddressAllowlisted(ctx, entry.CampaignID, entry.Address)
+	if err != nil {
+		return err
+	}
 	if err := store.AddCampaignAllowlistEntry(ctx, entry); err != nil {
 		return err
 	}
 	if err := s.appendAudit(ctx, AuditEntry{Action: "campaign_allowlist_add", Actor: actor, Target: entry.CampaignID, CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
-		if rollback, ok := store.(campaignRollbackStore); ok {
-			_ = rollback.RemoveCampaignAllowlistEntry(ctx, entry.CampaignID, entry.Address)
+		if !existed {
+			if rollback, ok := store.(campaignRollbackStore); ok {
+				_ = rollback.RemoveCampaignAllowlistEntry(ctx, entry.CampaignID, entry.Address)
+			}
 		}
 		return err
 	}

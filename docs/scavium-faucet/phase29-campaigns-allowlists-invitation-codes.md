@@ -61,6 +61,10 @@ The Phase 29 fix pass verified the runtime/admin fallback path in addition to th
 
 The second Phase 29 fix pass verified durable admin mutation/audit consistency. SQLite-backed campaign create, campaign disable, invitation creation, and allowlist insertion now use best-effort rollback primitives if durable audit append fails after the mutation, mirroring the Phase 28 runtime-policy safety rule that unaudited admin changes must not remain active. Focused admin tests cover rollback for campaign creation, campaign disable, invitation creation, and allowlist insertion, while SQLite store helpers provide the rollback primitives used by the admin service.
 
+## Fix 3 verification notes
+
+The third Phase 29 fix pass verified campaign reference validation and rollback edge cases after the previous audit rollback hardening. SQLite campaign invitation and allowlist writes now explicitly verify that the referenced campaign exists before insertion instead of relying on database foreign-key behavior. Campaign allowlist insertion is idempotent and no longer replaces an existing entry, preventing an unaudited admin retry from changing allowlist metadata if durable audit persistence fails after the mutation. Focused SQLite tests cover missing campaign references and idempotent allowlist insertion.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:

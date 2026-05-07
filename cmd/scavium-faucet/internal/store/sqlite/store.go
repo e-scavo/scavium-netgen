@@ -1778,6 +1778,9 @@ func (s *Store) CreateInvitationCode(ctx context.Context, code domain.Invitation
 	if code.Code == "" || code.CampaignID == "" || code.MaxUses < 0 || code.Uses < 0 || (code.MaxUses > 0 && code.Uses > code.MaxUses) {
 		return domain.InvitationCode{}, fmt.Errorf("invalid invitation code")
 	}
+	if _, err := s.GetCampaign(ctx, code.CampaignID); err != nil {
+		return domain.InvitationCode{}, err
+	}
 	now := time.Now().UTC()
 	if code.CreatedAt.IsZero() {
 		code.CreatedAt = now
@@ -1828,10 +1831,13 @@ func (s *Store) AddCampaignAllowlistEntry(ctx context.Context, entry domain.Camp
 	if entry.CampaignID == "" || entry.Address == (common.Address{}) {
 		return fmt.Errorf("invalid allowlist entry")
 	}
+	if _, err := s.GetCampaign(ctx, entry.CampaignID); err != nil {
+		return err
+	}
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO campaign_allowlist (campaign_id, address, note, created_at) VALUES (?, ?, ?, ?)`, entry.CampaignID, entry.Address.Hex(), strings.TrimSpace(entry.Note), formatTime(entry.CreatedAt))
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO campaign_allowlist (campaign_id, address, note, created_at) VALUES (?, ?, ?, ?)`, entry.CampaignID, entry.Address.Hex(), strings.TrimSpace(entry.Note), formatTime(entry.CreatedAt))
 	return err
 }
 

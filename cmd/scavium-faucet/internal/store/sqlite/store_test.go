@@ -1492,3 +1492,43 @@ func TestInvitationAndAllowlistPersistence(t *testing.T) {
 		t.Fatal("address not allowlisted")
 	}
 }
+
+func TestCampaignReferencesRequireExistingCampaign(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	_, err := store.CreateInvitationCode(context.Background(), domain.InvitationCode{Code: "MISSING", CampaignID: "missing", MaxUses: 1, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("CreateInvitationCode error = %v, want ErrNotFound", err)
+	}
+	addr := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "missing", Address: addr, CreatedAt: now}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("AddCampaignAllowlistEntry error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCampaignAllowlistAddIsIdempotentWithoutReplacingExistingEntry(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "camp-idem", Name: "Idempotent", Scope: domain.CampaignScopeAllowlist, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	addr := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "camp-idem", Address: addr, Note: "first", CreatedAt: now}); err != nil {
+		t.Fatalf("first allowlist add: %v", err)
+	}
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "camp-idem", Address: addr, Note: "second", CreatedAt: now.Add(time.Hour)}); err != nil {
+		t.Fatalf("second allowlist add: %v", err)
+	}
+	var note string
+	if err := store.db.QueryRow(`SELECT note FROM campaign_allowlist WHERE campaign_id = ? AND address = ?`, "camp-idem", addr.Hex()).Scan(&note); err != nil {
+		t.Fatalf("read allowlist note: %v", err)
+	}
+	if note != "first" {
+		t.Fatalf("allowlist note = %q, want first", note)
+	}
+}
