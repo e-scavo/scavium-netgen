@@ -844,6 +844,31 @@ func TestInMemoryAdminServicePersistsCampaignControls(t *testing.T) {
 	}
 }
 
+func TestSQLiteReadAdminServiceRejectsDuplicateCampaignAndInvitationAsInvalid(t *testing.T) {
+	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin-campaign-duplicates.db") + "?_pragma=synchronous(OFF)")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	svc := NewSQLiteReadAdminService(store)
+
+	req := CampaignRequest{ID: "camp-dupe", Name: "Campaign", Scope: string(domain.CampaignScopeInvite), Enabled: true}
+	if _, err := svc.CreateCampaign(context.Background(), req, "operator"); err != nil {
+		t.Fatalf("first CreateCampaign error = %v", err)
+	}
+	if _, err := svc.CreateCampaign(context.Background(), req, "operator"); !errors.Is(err, ErrInvalidCampaign) {
+		t.Fatalf("duplicate CreateCampaign error = %v, want ErrInvalidCampaign", err)
+	}
+
+	invReq := InvitationCodeRequest{Code: "DUPLICATE", CampaignID: "camp-dupe", MaxUses: 1, Enabled: true}
+	if _, err := svc.CreateInvitationCode(context.Background(), invReq, "operator"); err != nil {
+		t.Fatalf("first CreateInvitationCode error = %v", err)
+	}
+	if _, err := svc.CreateInvitationCode(context.Background(), invReq, "operator"); !errors.Is(err, ErrInvalidCampaign) {
+		t.Fatalf("duplicate CreateInvitationCode error = %v, want ErrInvalidCampaign", err)
+	}
+}
+
 func TestInMemoryAdminServiceRejectsMissingCampaignReferences(t *testing.T) {
 	svc := NewInMemoryAdminService()
 

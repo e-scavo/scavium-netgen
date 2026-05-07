@@ -91,6 +91,10 @@ The eighth Phase 29 fix pass corrected the final coverage-test build regression 
 
 The ninth Phase 29 fix pass closed the remaining test-coverage gap for the admin HTTP surface. Campaign, invitation, allowlist, update, disable, and CSV export admin endpoints now have focused HTTP tests for bearer-token protection. Campaign create also has explicit invalid content-type and malformed JSON coverage, campaign dispatch verifies unsupported methods, and the campaign CSV export test verifies both bounded output and spreadsheet-formula injection hardening for campaign names/token identifiers. No runtime behavior changed in this pass; the fix makes the Phase 29 admin contract harder to regress.
 
+## Fix 10 verification
+
+The tenth Phase 29 fix pass tightened the production SQLite admin contract for duplicate operator input. SQLite-backed campaign creation now preflights existing campaign IDs and returns `ErrInvalidCampaign` for duplicate IDs instead of surfacing a raw database constraint as an internal failure. SQLite-backed invitation creation does the same for duplicate invitation codes. Campaign create timestamps now use the admin service clock, keeping fallback and SQLite admin audit timing deterministic in tests and aligned with operator-visible audit entries. Focused admin tests cover duplicate campaign and invitation rejection through the SQLite-backed service.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:

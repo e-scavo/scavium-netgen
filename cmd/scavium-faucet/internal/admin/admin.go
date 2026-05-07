@@ -1018,7 +1018,7 @@ func runtimePolicyChangeSummary(before, after RuntimePolicyResponse) string {
 }
 
 func (s *InMemoryAdminService) CreateCampaign(_ context.Context, req CampaignRequest, actor string) (domain.Campaign, error) {
-	campaign, err := campaignFromRequest(req)
+	campaign, err := campaignFromRequest(req, s.now().UTC())
 	if err != nil {
 		return domain.Campaign{}, err
 	}
@@ -1043,7 +1043,7 @@ func (s *InMemoryAdminService) UpdateCampaign(_ context.Context, id string, req 
 	if strings.TrimSpace(req.ID) != id {
 		return domain.Campaign{}, ErrInvalidCampaign
 	}
-	campaign, err := campaignFromRequest(req)
+	campaign, err := campaignFromRequest(req, s.now().UTC())
 	if err != nil {
 		return domain.Campaign{}, err
 	}
@@ -1155,8 +1155,13 @@ func (s *SQLiteReadAdminService) CreateCampaign(ctx context.Context, req Campaig
 	if !ok {
 		return s.fallback.CreateCampaign(ctx, req, actor)
 	}
-	campaign, err := campaignFromRequest(req)
+	campaign, err := campaignFromRequest(req, s.now().UTC())
 	if err != nil {
+		return domain.Campaign{}, err
+	}
+	if _, err := store.GetCampaign(ctx, campaign.ID); err == nil {
+		return domain.Campaign{}, ErrInvalidCampaign
+	} else if !errors.Is(err, domain.ErrNotFound) {
 		return domain.Campaign{}, err
 	}
 	created, err := store.CreateCampaign(ctx, campaign)
@@ -1198,7 +1203,7 @@ func (s *SQLiteReadAdminService) UpdateCampaign(ctx context.Context, id string, 
 		}
 		return domain.Campaign{}, err
 	}
-	campaign, err := campaignFromRequest(req)
+	campaign, err := campaignFromRequest(req, s.now().UTC())
 	if err != nil {
 		return domain.Campaign{}, err
 	}
@@ -1273,6 +1278,11 @@ func (s *SQLiteReadAdminService) CreateInvitationCode(ctx context.Context, req I
 		}
 		return domain.InvitationCode{}, err
 	}
+	if _, err := store.GetInvitationCode(ctx, code.Code); err == nil {
+		return domain.InvitationCode{}, ErrInvalidCampaign
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return domain.InvitationCode{}, err
+	}
 	created, err := store.CreateInvitationCode(ctx, code)
 	if err != nil {
 		return domain.InvitationCode{}, err
@@ -1338,8 +1348,12 @@ func copyCampaign(c domain.Campaign) domain.Campaign {
 	return c
 }
 
-func campaignFromRequest(req CampaignRequest) (domain.Campaign, error) {
-	now := time.Now().UTC()
+func campaignFromRequest(req CampaignRequest, now time.Time) (domain.Campaign, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
 	campaign := domain.Campaign{ID: strings.TrimSpace(req.ID), Name: strings.TrimSpace(req.Name), TokenID: strings.TrimSpace(req.TokenID), Scope: domain.CampaignScope(strings.TrimSpace(req.Scope)), Enabled: req.Enabled, CreatedAt: now, UpdatedAt: now}
 	if campaign.ID == "" || campaign.Name == "" || !domain.IsValidCampaignScope(campaign.Scope) {
 		return domain.Campaign{}, ErrInvalidCampaign
