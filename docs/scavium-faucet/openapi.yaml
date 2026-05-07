@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: SCAVIUM Faucet API
-  version: phase-25
+  version: phase-29
   description: |
     Lightweight maintained contract for the implemented SCAVIUM Faucet HTTP API.
     This document mirrors real code and intentionally avoids generator dependencies.
@@ -164,6 +164,83 @@ paths:
       summary: Clear admin runtime policy overrides
       responses:
         '200': { description: Runtime policy cleared }
+  /api/v1/admin/campaigns:
+    get:
+      security: [ { bearerAuth: [] } ]
+      summary: List durable faucet campaigns
+      responses:
+        '200': { description: Campaign list }
+    post:
+      security: [ { bearerAuth: [] } ]
+      summary: Create a durable faucet campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignRequest' }
+      responses:
+        '201': { description: Campaign created }
+        '400': { description: Invalid campaign }
+  /api/v1/admin/campaigns/{id}:
+    put:
+      security: [ { bearerAuth: [] } ]
+      summary: Update a durable faucet campaign
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignRequest' }
+      responses:
+        '200': { description: Campaign updated }
+        '400': { description: Invalid campaign }
+        '404': { description: Campaign not found }
+  /api/v1/admin/campaigns/{id}/disable:
+    post:
+      security: [ { bearerAuth: [] } ]
+      summary: Disable a durable faucet campaign
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Campaign disabled }
+        '404': { description: Campaign not found }
+  /api/v1/admin/campaigns/export.csv:
+    get:
+      security: [ { bearerAuth: [] } ]
+      summary: Export a bounded campaign CSV
+      responses:
+        '200': { description: Campaign CSV }
+  /api/v1/admin/invitations:
+    post:
+      security: [ { bearerAuth: [] } ]
+      summary: Create an invitation code for a campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationCodeRequest' }
+      responses:
+        '201': { description: Invitation code created }
+        '400': { description: Invalid invitation }
+  /api/v1/admin/allowlist:
+    post:
+      security: [ { bearerAuth: [] } ]
+      summary: Add a campaign allowlist entry idempotently
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AllowlistAddRequest' }
+      responses:
+        '201': { description: Address allowlisted }
+        '400': { description: Invalid allowlist entry }
   /api/v1/admin/wallet:
     get:
       security: [ { bearerAuth: [] } ]
@@ -218,6 +295,33 @@ components:
           type: object
           additionalProperties: { type: string }
         source: { type: string }
+    CampaignRequest:
+      type: object
+      required: [id, name, scope]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        token_id: { type: string }
+        scope: { type: string, enum: [public, invite, allowlist] }
+        budget_wei: { type: string }
+        enabled: { type: boolean }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+    InvitationCodeRequest:
+      type: object
+      required: [code, campaign_id]
+      properties:
+        code: { type: string }
+        campaign_id: { type: string }
+        max_uses: { type: integer, minimum: 0 }
+        enabled: { type: boolean }
+    AllowlistAddRequest:
+      type: object
+      required: [campaign_id, address]
+      properties:
+        campaign_id: { type: string }
+        address: { type: string }
+        note: { type: string }
     ErrorEnvelope:
       type: object
       required: [code, message, details, request_id]
@@ -232,6 +336,8 @@ components:
       properties:
         address: { type: string }
         token_id: { type: string }
+        campaign_id: { type: string }
+        invitation_code: { type: string }
         captcha_token: { type: string }
         fingerprint: { type: string }
         website: { type: string, description: "Optional honeypot field; omit or leave empty." }
@@ -253,6 +359,7 @@ components:
           enum: [received, validated, queued, sending, sent, confirmed, failed, rejected, paused]
         reason: { type: string }
         idempotency_key: { type: string }
+        campaign_id: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     BudgetStatus:

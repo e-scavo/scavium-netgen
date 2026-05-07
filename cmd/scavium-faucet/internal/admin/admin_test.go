@@ -793,3 +793,328 @@ func TestInMemoryAdminServicePersistsRuntimePolicyView(t *testing.T) {
 		t.Fatalf("cleared runtime policy = %#v", cleared)
 	}
 }
+
+func TestInMemoryAdminServicePersistsCampaignControls(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	created, err := svc.CreateCampaign(context.Background(), CampaignRequest{
+		ID:        "camp1",
+		Name:      "Launch",
+		TokenID:   "native",
+		Scope:     "invite",
+		BudgetWei: "1000",
+		Enabled:   true,
+	}, "operator")
+	if err != nil {
+		t.Fatalf("CreateCampaign error = %v", err)
+	}
+	if created.ID != "camp1" || created.BudgetWei == nil || created.BudgetWei.String() != "1000" {
+		t.Fatalf("created campaign = %#v", created)
+	}
+
+	campaigns, err := svc.ListCampaigns(context.Background(), 100, 0)
+	if err != nil {
+		t.Fatalf("ListCampaigns error = %v", err)
+	}
+	if len(campaigns) != 1 || campaigns[0].ID != "camp1" || !campaigns[0].Enabled {
+		t.Fatalf("campaigns = %#v", campaigns)
+	}
+
+	code, err := svc.CreateInvitationCode(context.Background(), InvitationCodeRequest{Code: "CODE1", CampaignID: "camp1", MaxUses: 1, Enabled: true}, "operator")
+	if err != nil {
+		t.Fatalf("CreateInvitationCode error = %v", err)
+	}
+	if code.Code != "CODE1" || code.CampaignID != "camp1" || !code.Enabled {
+		t.Fatalf("invitation code = %#v", code)
+	}
+
+	if err := svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "camp1", Address: "0x1111111111111111111111111111111111111111", Note: "seed"}, "operator"); err != nil {
+		t.Fatalf("AddAllowlistEntry error = %v", err)
+	}
+
+	if err := svc.DisableCampaign(context.Background(), "camp1", "operator"); err != nil {
+		t.Fatalf("DisableCampaign error = %v", err)
+	}
+	campaigns, err = svc.ListCampaigns(context.Background(), 100, 0)
+	if err != nil {
+		t.Fatalf("ListCampaigns after disable error = %v", err)
+	}
+	if len(campaigns) != 1 || campaigns[0].Enabled {
+		t.Fatalf("campaigns after disable = %#v", campaigns)
+	}
+}
+
+func TestSQLiteReadAdminServiceRejectsDuplicateCampaignAndInvitationAsInvalid(t *testing.T) {
+	store, err := storesqlite.Open(filepath.Join(t.TempDir(), "admin-campaign-duplicates.db") + "?_pragma=synchronous(OFF)")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	svc := NewSQLiteReadAdminService(store)
+
+	req := CampaignRequest{ID: "camp-dupe", Name: "Campaign", Scope: string(domain.CampaignScopeInvite), Enabled: true}
+	if _, err := svc.CreateCampaign(context.Background(), req, "operator"); err != nil {
+		t.Fatalf("first CreateCampaign error = %v", err)
+	}
+	if _, err := svc.CreateCampaign(context.Background(), req, "operator"); !errors.Is(err, ErrInvalidCampaign) {
+		t.Fatalf("duplicate CreateCampaign error = %v, want ErrInvalidCampaign", err)
+	}
+
+	invReq := InvitationCodeRequest{Code: "DUPLICATE", CampaignID: "camp-dupe", MaxUses: 1, Enabled: true}
+	if _, err := svc.CreateInvitationCode(context.Background(), invReq, "operator"); err != nil {
+		t.Fatalf("first CreateInvitationCode error = %v", err)
+	}
+	if _, err := svc.CreateInvitationCode(context.Background(), invReq, "operator"); !errors.Is(err, ErrInvalidCampaign) {
+		t.Fatalf("duplicate CreateInvitationCode error = %v, want ErrInvalidCampaign", err)
+	}
+}
+
+func TestInMemoryAdminServiceRejectsMissingCampaignReferences(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	if _, err := svc.CreateInvitationCode(context.Background(), InvitationCodeRequest{Code: "CODE1", CampaignID: "missing", MaxUses: 1, Enabled: true}, "operator"); !errors.Is(err, ErrInvalidCampaign) {
+		t.Fatalf("CreateInvitationCode error = %v, want ErrInvalidCampaign", err)
+	}
+	if err := svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "missing", Address: "0x1111111111111111111111111111111111111111"}, "operator"); !errors.Is(err, ErrInvalidCampaign) {
+		t.Fatalf("AddAllowlistEntry error = %v, want ErrInvalidCampaign", err)
+	}
+	if err := svc.DisableCampaign(context.Background(), "missing", "operator"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DisableCampaign error = %v, want ErrNotFound", err)
+	}
+}
+
+type failingCampaignAuditStore struct {
+	failingRuntimePolicyAuditStore
+	campaigns   map[string]domain.Campaign
+	invitations map[string]domain.InvitationCode
+	allowlist   map[string]map[string]domain.CampaignAllowlistEntry
+}
+
+func newFailingCampaignAuditStore(err error) *failingCampaignAuditStore {
+	return &failingCampaignAuditStore{
+		failingRuntimePolicyAuditStore: failingRuntimePolicyAuditStore{appendErr: err},
+		campaigns:                      make(map[string]domain.Campaign),
+		invitations:                    make(map[string]domain.InvitationCode),
+		allowlist:                      make(map[string]map[string]domain.CampaignAllowlistEntry),
+	}
+}
+
+func (s *failingCampaignAuditStore) CreateCampaign(_ context.Context, c domain.Campaign) (domain.Campaign, error) {
+	s.campaigns[c.ID] = c
+	return c, nil
+}
+
+func (s *failingCampaignAuditStore) UpdateCampaign(_ context.Context, c domain.Campaign) (domain.Campaign, error) {
+	if _, ok := s.campaigns[c.ID]; !ok {
+		return domain.Campaign{}, domain.ErrNotFound
+	}
+	s.campaigns[c.ID] = c
+	return c, nil
+}
+
+func (s *failingCampaignAuditStore) GetCampaign(_ context.Context, id string) (domain.Campaign, error) {
+	c, ok := s.campaigns[id]
+	if !ok {
+		return domain.Campaign{}, domain.ErrNotFound
+	}
+	return c, nil
+}
+
+func (s *failingCampaignAuditStore) ListCampaigns(context.Context, int, int) ([]domain.Campaign, error) {
+	return nil, nil
+}
+
+func (s *failingCampaignAuditStore) DisableCampaign(_ context.Context, id string) error {
+	c, ok := s.campaigns[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	c.Enabled = false
+	s.campaigns[id] = c
+	return nil
+}
+
+func (s *failingCampaignAuditStore) SetCampaignEnabled(_ context.Context, id string, enabled bool) error {
+	c, ok := s.campaigns[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	c.Enabled = enabled
+	s.campaigns[id] = c
+	return nil
+}
+
+func (s *failingCampaignAuditStore) DeleteCampaign(_ context.Context, id string) error {
+	if _, ok := s.campaigns[id]; !ok {
+		return domain.ErrNotFound
+	}
+	delete(s.campaigns, id)
+	return nil
+}
+
+func (s *failingCampaignAuditStore) CreateInvitationCode(_ context.Context, code domain.InvitationCode) (domain.InvitationCode, error) {
+	if _, ok := s.campaigns[code.CampaignID]; !ok {
+		return domain.InvitationCode{}, domain.ErrNotFound
+	}
+	s.invitations[code.Code] = code
+	return code, nil
+}
+
+func (s *failingCampaignAuditStore) GetInvitationCode(_ context.Context, code string) (domain.InvitationCode, error) {
+	inv, ok := s.invitations[code]
+	if !ok {
+		return domain.InvitationCode{}, domain.ErrNotFound
+	}
+	return inv, nil
+}
+
+func (s *failingCampaignAuditStore) ConsumeInvitationCode(context.Context, string) error { return nil }
+
+func (s *failingCampaignAuditStore) DeleteInvitationCode(_ context.Context, code string) error {
+	if _, ok := s.invitations[code]; !ok {
+		return domain.ErrNotFound
+	}
+	delete(s.invitations, code)
+	return nil
+}
+
+func (s *failingCampaignAuditStore) AddCampaignAllowlistEntry(_ context.Context, entry domain.CampaignAllowlistEntry) error {
+	if _, ok := s.campaigns[entry.CampaignID]; !ok {
+		return domain.ErrNotFound
+	}
+	if s.allowlist[entry.CampaignID] == nil {
+		s.allowlist[entry.CampaignID] = make(map[string]domain.CampaignAllowlistEntry)
+	}
+	s.allowlist[entry.CampaignID][entry.Address.Hex()] = entry
+	return nil
+}
+
+func (s *failingCampaignAuditStore) IsAddressAllowlisted(_ context.Context, campaignID string, address common.Address) (bool, error) {
+	return s.allowlist[campaignID][address.Hex()] != (domain.CampaignAllowlistEntry{}), nil
+}
+
+func (s *failingCampaignAuditStore) RemoveCampaignAllowlistEntry(_ context.Context, campaignID string, address common.Address) error {
+	if s.allowlist[campaignID] == nil {
+		return domain.ErrNotFound
+	}
+	delete(s.allowlist[campaignID], address.Hex())
+	return nil
+}
+
+func (s *failingCampaignAuditStore) CampaignUsage(context.Context, string, []domain.ClaimStatus) (domain.CampaignUsage, error) {
+	return domain.CampaignUsage{}, nil
+}
+
+func TestSQLiteReadAdminServiceRollsBackCampaignCreateWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := newFailingCampaignAuditStore(auditErr)
+	svc := NewSQLiteReadAdminService(store)
+
+	_, err := svc.CreateCampaign(context.Background(), CampaignRequest{ID: "camp-a", Name: "Campaign A", Scope: string(domain.CampaignScopePublic), Enabled: true}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("CreateCampaign error = %v, want audit error", err)
+	}
+	if _, ok := store.campaigns["camp-a"]; ok {
+		t.Fatalf("campaign persisted after failed audit")
+	}
+}
+
+func TestSQLiteReadAdminServiceRollsBackCampaignDisableWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := newFailingCampaignAuditStore(auditErr)
+	createdAt := time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 5, 7, 10, 5, 0, 0, time.UTC)
+	store.campaigns["camp-a"] = domain.Campaign{ID: "camp-a", Name: "Campaign A", Scope: domain.CampaignScopePublic, Enabled: true, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	svc := NewSQLiteReadAdminService(store)
+
+	err := svc.DisableCampaign(context.Background(), "camp-a", "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("DisableCampaign error = %v, want audit error", err)
+	}
+	got := store.campaigns["camp-a"]
+	if !got.Enabled {
+		t.Fatalf("campaign remained disabled after failed audit")
+	}
+	if !got.CreatedAt.Equal(createdAt) || !got.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("campaign timestamps changed after failed audit: created_at=%s updated_at=%s", got.CreatedAt, got.UpdatedAt)
+	}
+}
+
+func TestSQLiteReadAdminServiceRollsBackInvitationAndAllowlistWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := newFailingCampaignAuditStore(auditErr)
+	store.campaigns["camp-a"] = domain.Campaign{ID: "camp-a", Name: "Campaign A", Scope: domain.CampaignScopeInvite, Enabled: true}
+	svc := NewSQLiteReadAdminService(store)
+
+	_, err := svc.CreateInvitationCode(context.Background(), InvitationCodeRequest{Code: "INVITE", CampaignID: "camp-a", MaxUses: 1, Enabled: true}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("CreateInvitationCode error = %v, want audit error", err)
+	}
+	if _, ok := store.invitations["INVITE"]; ok {
+		t.Fatalf("invitation persisted after failed audit")
+	}
+
+	addr := "0x52908400098527886E0F7030069857D2E4169EE7"
+	err = svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "camp-a", Address: addr}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("AddAllowlistEntry error = %v, want audit error", err)
+	}
+	allowed, _ := store.IsAddressAllowlisted(context.Background(), "camp-a", common.HexToAddress(addr))
+	if allowed {
+		t.Fatalf("allowlist entry persisted after failed audit")
+	}
+}
+
+func TestInMemoryAdminServiceUpdatesCampaign(t *testing.T) {
+	svc := NewInMemoryAdminService()
+	if _, err := svc.CreateCampaign(context.Background(), CampaignRequest{ID: "camp-update", Name: "Before", Scope: "public", Enabled: true}, "operator"); err != nil {
+		t.Fatalf("CreateCampaign error = %v", err)
+	}
+	updated, err := svc.UpdateCampaign(context.Background(), "camp-update", CampaignRequest{Name: "After", Scope: "invite", BudgetWei: "123", Enabled: true}, "operator")
+	if err != nil {
+		t.Fatalf("UpdateCampaign error = %v", err)
+	}
+	if updated.Name != "After" || updated.Scope != domain.CampaignScopeInvite || updated.BudgetWei.String() != "123" || !updated.Enabled {
+		t.Fatalf("updated campaign = %#v", updated)
+	}
+	entries, err := svc.RecentAuditLog(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RecentAuditLog error = %v", err)
+	}
+	if len(entries) == 0 || entries[len(entries)-1].Action != "campaign_update" {
+		t.Fatalf("audit entries = %#v", entries)
+	}
+}
+
+func TestSQLiteReadAdminServiceRollsBackCampaignUpdateWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := newFailingCampaignAuditStore(auditErr)
+	store.campaigns["camp-a"] = domain.Campaign{ID: "camp-a", Name: "Before", Scope: domain.CampaignScopePublic, Enabled: true, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	svc := NewSQLiteReadAdminService(store)
+
+	_, err := svc.UpdateCampaign(context.Background(), "camp-a", CampaignRequest{Name: "After", Scope: "invite", Enabled: true}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("UpdateCampaign error = %v, want audit error", err)
+	}
+	if got := store.campaigns["camp-a"]; got.Name != "Before" || got.Scope != domain.CampaignScopePublic {
+		t.Fatalf("campaign after rollback = %#v", got)
+	}
+}
+
+func TestInMemoryAdminServiceAllowlistAddIsIdempotent(t *testing.T) {
+	svc := NewInMemoryAdminService()
+	if _, err := svc.CreateCampaign(context.Background(), CampaignRequest{ID: "camp-allow-idem", Name: "Allow", Scope: "allowlist", Enabled: true}, "operator"); err != nil {
+		t.Fatalf("CreateCampaign error = %v", err)
+	}
+	addr := "0x1111111111111111111111111111111111111111"
+	if err := svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "camp-allow-idem", Address: addr, Note: "first"}, "operator"); err != nil {
+		t.Fatalf("first AddAllowlistEntry error = %v", err)
+	}
+	if err := svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "camp-allow-idem", Address: addr, Note: "second"}, "operator"); err != nil {
+		t.Fatalf("second AddAllowlistEntry error = %v", err)
+	}
+	entry := svc.allowlist["camp-allow-idem"][common.HexToAddress(addr).Hex()]
+	if entry.Note != "first" {
+		t.Fatalf("allowlist note = %q, want first", entry.Note)
+	}
+}

@@ -1421,3 +1421,181 @@ func TestRuntimePolicyPersistsClearsAndIgnoresInvalidRows(t *testing.T) {
 		t.Fatalf("cleared runtime policy = %#v", got)
 	}
 }
+
+func TestCampaignPersistenceAndUsage(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	campaign := domain.Campaign{ID: "camp-1", Name: "Phase 29", Scope: domain.CampaignScopeInvite, TokenID: "native", BudgetWei: big.NewInt(84), Enabled: true, CreatedAt: now, UpdatedAt: now}
+	created, err := store.CreateCampaign(context.Background(), campaign)
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	if created.ID != campaign.ID {
+		t.Fatalf("campaign id = %q", created.ID)
+	}
+	got, err := store.GetCampaign(context.Background(), campaign.ID)
+	if err != nil {
+		t.Fatalf("get campaign: %v", err)
+	}
+	if got.Scope != domain.CampaignScopeInvite || got.BudgetWei.Cmp(big.NewInt(84)) != 0 {
+		t.Fatalf("campaign = %#v", got)
+	}
+
+	claim := testClaim("campaign_claim")
+	claim.CampaignID = campaign.ID
+	if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+		t.Fatalf("create campaign claim: %v", err)
+	}
+	usage, err := store.CampaignUsage(context.Background(), campaign.ID, []domain.ClaimStatus{domain.ClaimStatusQueued})
+	if err != nil {
+		t.Fatalf("campaign usage: %v", err)
+	}
+	if usage.ClaimCount != 1 || usage.UsedWei.Cmp(big.NewInt(42)) != 0 {
+		t.Fatalf("usage = %#v", usage)
+	}
+}
+
+func TestCreateClaimWithIdempotencyAndBudgetsRejectsCampaignBudgetAtomically(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "atomic-budget", Name: "Atomic Budget", Scope: domain.CampaignScopePublic, BudgetWei: big.NewInt(50), Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	existing := testClaim("atomic_existing")
+	existing.CampaignID = "atomic-budget"
+	existing.AmountWei = big.NewInt(40)
+	if _, err := store.CreateClaim(context.Background(), existing); err != nil {
+		t.Fatalf("create existing claim: %v", err)
+	}
+
+	blocked := testClaim("atomic_blocked")
+	blocked.CampaignID = "atomic-budget"
+	blocked.AmountWei = big.NewInt(20)
+	created, used, reason, err := store.CreateClaimWithIdempotencyAndBudgets(context.Background(), blocked, "", blocked.TokenID, now.Add(-time.Hour), now.Add(time.Hour), nil, "atomic-budget", big.NewInt(50), []domain.ClaimStatus{domain.ClaimStatusQueued})
+	if err != nil {
+		t.Fatalf("create with campaign budget: %v", err)
+	}
+	if reason != "campaign_budget_exceeded" {
+		t.Fatalf("reason = %q, want campaign_budget_exceeded", reason)
+	}
+	if used == nil || used.Cmp(big.NewInt(40)) != 0 {
+		t.Fatalf("used = %v, want 40", used)
+	}
+	if created.ID != "" {
+		t.Fatalf("created = %#v, want zero claim", created)
+	}
+	if _, err := store.GetClaim(context.Background(), "atomic_blocked"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("blocked claim lookup error = %v, want not found", err)
+	}
+}
+
+func TestInvitationAndAllowlistPersistence(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "camp-allow", Name: "Allow", Scope: domain.CampaignScopeAllowlist, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	code, err := store.CreateInvitationCode(context.Background(), domain.InvitationCode{Code: "INVITE-1", CampaignID: "camp-allow", MaxUses: 1, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	if code.Uses != 0 {
+		t.Fatalf("initial uses = %d", code.Uses)
+	}
+	if err := store.ConsumeInvitationCode(context.Background(), code.Code); err != nil {
+		t.Fatalf("consume invitation: %v", err)
+	}
+	if err := store.ConsumeInvitationCode(context.Background(), code.Code); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("second consume err = %v, want not found", err)
+	}
+
+	addr := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "camp-allow", Address: addr, CreatedAt: now}); err != nil {
+		t.Fatalf("allowlist add: %v", err)
+	}
+	allowed, err := store.IsAddressAllowlisted(context.Background(), "camp-allow", addr)
+	if err != nil {
+		t.Fatalf("allowlist check: %v", err)
+	}
+	if !allowed {
+		t.Fatal("address not allowlisted")
+	}
+}
+
+func TestCampaignReferencesRequireExistingCampaign(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	_, err := store.CreateInvitationCode(context.Background(), domain.InvitationCode{Code: "MISSING", CampaignID: "missing", MaxUses: 1, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("CreateInvitationCode error = %v, want ErrNotFound", err)
+	}
+	addr := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "missing", Address: addr, CreatedAt: now}); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("AddCampaignAllowlistEntry error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCampaignAllowlistAddIsIdempotentWithoutReplacingExistingEntry(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "camp-idem", Name: "Idempotent", Scope: domain.CampaignScopeAllowlist, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	addr := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "camp-idem", Address: addr, Note: "first", CreatedAt: now}); err != nil {
+		t.Fatalf("first allowlist add: %v", err)
+	}
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "camp-idem", Address: addr, Note: "second", CreatedAt: now.Add(time.Hour)}); err != nil {
+		t.Fatalf("second allowlist add: %v", err)
+	}
+	var note string
+	if err := store.db.QueryRow(`SELECT note FROM campaign_allowlist WHERE campaign_id = ? AND address = ?`, "camp-idem", addr.Hex()).Scan(&note); err != nil {
+		t.Fatalf("read allowlist note: %v", err)
+	}
+	if note != "first" {
+		t.Fatalf("allowlist note = %q, want first", note)
+	}
+}
+
+func TestCampaignUpdatePersistence(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	created, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "camp-update", Name: "Before", Scope: domain.CampaignScopePublic, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	created.Name = "After"
+	created.Scope = domain.CampaignScopeInvite
+	created.BudgetWei = big.NewInt(99)
+	created.Enabled = false
+	created.UpdatedAt = now.Add(time.Hour)
+	updated, err := store.UpdateCampaign(context.Background(), created)
+	if err != nil {
+		t.Fatalf("update campaign: %v", err)
+	}
+	if updated.Name != "After" || updated.Scope != domain.CampaignScopeInvite || updated.BudgetWei.String() != "99" || updated.Enabled {
+		t.Fatalf("updated = %#v", updated)
+	}
+	got, err := store.GetCampaign(context.Background(), "camp-update")
+	if err != nil {
+		t.Fatalf("get campaign: %v", err)
+	}
+	if got.Name != "After" || got.Scope != domain.CampaignScopeInvite || got.BudgetWei.String() != "99" || got.Enabled {
+		t.Fatalf("got = %#v", got)
+	}
+}

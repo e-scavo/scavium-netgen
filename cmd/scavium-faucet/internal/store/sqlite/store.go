@@ -30,6 +30,7 @@ var _ domain.AbuseSignalPruner = (*Store)(nil)
 var _ domain.AbuseSignalReporter = (*Store)(nil)
 var _ domain.QueueStore = (*Store)(nil)
 var _ domain.RuntimePolicyStore = (*Store)(nil)
+var _ domain.CampaignStore = (*Store)(nil)
 
 // ErrNotFound reports that the requested record does not exist.
 var ErrNotFound = domain.ErrNotFound
@@ -387,8 +388,8 @@ func (s *Store) CreateClaimWithIdempotency(ctx context.Context, claim domain.Cla
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO requests (
 			id, address, token_id, token_symbol, token_type, token_address, token_decimals,
-			amount_wei, status, reason, idempotency_key, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+			amount_wei, status, reason, idempotency_key, campaign_id, invitation_code, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
 	`,
 		claim.ID,
 		claim.Address.Hex(),
@@ -401,6 +402,8 @@ func (s *Store) CreateClaimWithIdempotency(ctx context.Context, claim domain.Cla
 		string(claim.Status),
 		claim.Reason,
 		idempotencyKey,
+		strings.TrimSpace(claim.CampaignID),
+		strings.TrimSpace(claim.InvitationCode),
 		formatTime(claim.CreatedAt),
 		formatTime(claim.UpdatedAt),
 	)
@@ -429,6 +432,125 @@ func (s *Store) CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx context.Con
 	return s.createClaimWithBudget(ctx, claim, idempotencyKey, tokenID, dayStart, dayEnd, budgetWei, statuses)
 }
 
+// CreateClaimWithIdempotencyAndBudgets checks daily and campaign budgets in one
+// SQLite write transaction before inserting a claim. It returns exceededReason
+// as "daily_budget_exceeded" or "campaign_budget_exceeded" when a budget blocks
+// insertion; an empty reason means the returned claim was inserted or reused via
+// idempotency.
+func (s *Store) CreateClaimWithIdempotencyAndBudgets(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, dailyBudgetWei *big.Int, campaignID string, campaignBudgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, string, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return domain.Claim{}, nil, "", err
+	}
+	defer conn.Close() //nolint:errcheck
+
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return domain.Claim{}, nil, "", fmt.Errorf("begin budget tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	if idempotencyKey != "" {
+		row := conn.QueryRowContext(ctx, `
+			SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
+			FROM requests
+			WHERE idempotency_key = NULLIF(?, '')
+		`, idempotencyKey)
+		existing, err := scanClaim(row)
+		if err == nil {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return domain.Claim{}, nil, "", fmt.Errorf("commit existing idempotent claim: %w", err)
+			}
+			committed = true
+			return existing, big.NewInt(0), "", nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return domain.Claim{}, nil, "", err
+		}
+	}
+
+	claimAmount := big.NewInt(0)
+	if claim.AmountWei != nil {
+		claimAmount = new(big.Int).Set(claim.AmountWei)
+	}
+
+	var dailyUsed *big.Int
+	if dailyBudgetWei != nil && dailyBudgetWei.Sign() > 0 {
+		dailyUsed, err = claimAmountWeiForToken(ctx, conn, tokenID, dayStart, dayEnd, statuses)
+		if err != nil {
+			return domain.Claim{}, nil, "", err
+		}
+		if new(big.Int).Add(dailyUsed, claimAmount).Cmp(dailyBudgetWei) > 0 {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return domain.Claim{}, nil, "", fmt.Errorf("commit exceeded daily budget check: %w", err)
+			}
+			committed = true
+			return domain.Claim{}, dailyUsed, "daily_budget_exceeded", nil
+		}
+	}
+
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID != "" && campaignBudgetWei != nil && campaignBudgetWei.Sign() > 0 {
+		campaignUsed, err := claimAmountWeiForCampaign(ctx, conn, campaignID, statuses)
+		if err != nil {
+			return domain.Claim{}, nil, "", err
+		}
+		if new(big.Int).Add(campaignUsed, claimAmount).Cmp(campaignBudgetWei) > 0 {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return domain.Claim{}, nil, "", fmt.Errorf("commit exceeded campaign budget check: %w", err)
+			}
+			committed = true
+			return domain.Claim{}, campaignUsed, "campaign_budget_exceeded", nil
+		}
+	}
+
+	if claim.AmountWei == nil {
+		claim.AmountWei = big.NewInt(0)
+	}
+	if claim.CreatedAt.IsZero() {
+		claim.CreatedAt = time.Now().UTC()
+	}
+	if claim.UpdatedAt.IsZero() {
+		claim.UpdatedAt = claim.CreatedAt
+	}
+
+	_, err = conn.ExecContext(ctx, `
+		INSERT INTO requests (
+			id, address, token_id, token_symbol, token_type, token_address, token_decimals,
+			amount_wei, status, reason, idempotency_key, campaign_id, invitation_code, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
+	`,
+		claim.ID,
+		claim.Address.Hex(),
+		claim.TokenID,
+		claim.TokenSymbol,
+		string(claim.TokenType),
+		tokenAddressHex(claim.TokenAddress),
+		claim.TokenDecimals,
+		claim.AmountWei.String(),
+		string(claim.Status),
+		claim.Reason,
+		idempotencyKey,
+		strings.TrimSpace(claim.CampaignID),
+		strings.TrimSpace(claim.InvitationCode),
+		formatTime(claim.CreatedAt),
+		formatTime(claim.UpdatedAt),
+	)
+	if err != nil {
+		return domain.Claim{}, nil, "", err
+	}
+
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return domain.Claim{}, nil, "", fmt.Errorf("commit budget claim create: %w", err)
+	}
+	committed = true
+	return claim, dailyUsed, "", nil
+}
+
 func (s *Store) createClaimWithBudget(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -448,7 +570,7 @@ func (s *Store) createClaimWithBudget(ctx context.Context, claim domain.Claim, i
 
 	if idempotencyKey != "" {
 		row := conn.QueryRowContext(ctx, `
-			SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+			SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 			FROM requests
 			WHERE idempotency_key = NULLIF(?, '')
 		`, idempotencyKey)
@@ -496,8 +618,8 @@ func (s *Store) createClaimWithBudget(ctx context.Context, claim domain.Claim, i
 	_, err = conn.ExecContext(ctx, `
 		INSERT INTO requests (
 			id, address, token_id, token_symbol, token_type, token_address, token_decimals,
-			amount_wei, status, reason, idempotency_key, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+			amount_wei, status, reason, idempotency_key, campaign_id, invitation_code, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
 	`,
 		claim.ID,
 		claim.Address.Hex(),
@@ -510,6 +632,8 @@ func (s *Store) createClaimWithBudget(ctx context.Context, claim domain.Claim, i
 		string(claim.Status),
 		claim.Reason,
 		idempotencyKey,
+		strings.TrimSpace(claim.CampaignID),
+		strings.TrimSpace(claim.InvitationCode),
 		formatTime(claim.CreatedAt),
 		formatTime(claim.UpdatedAt),
 	)
@@ -527,7 +651,7 @@ func (s *Store) createClaimWithBudget(ctx context.Context, claim domain.Claim, i
 // GetClaimByIdempotencyKey returns the claim previously created for idempotencyKey.
 func (s *Store) GetClaimByIdempotencyKey(ctx context.Context, idempotencyKey string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		WHERE idempotency_key = NULLIF(?, '')
 	`, idempotencyKey)
@@ -541,7 +665,7 @@ func (s *Store) GetClaimByIdempotencyKey(ctx context.Context, idempotencyKey str
 
 func (s *Store) GetClaim(ctx context.Context, id string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		WHERE id = ?
 	`, id)
@@ -590,7 +714,7 @@ func (s *Store) ListClaimsByAddressPage(ctx context.Context, address common.Addr
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		WHERE address = ?
 		ORDER BY created_at DESC, id DESC
@@ -631,7 +755,7 @@ func (s *Store) ListAdminClaims(ctx context.Context, limit, offset int) ([]domai
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		ORDER BY created_at DESC, id DESC
 		LIMIT ? OFFSET ?
@@ -724,7 +848,7 @@ func (s *Store) ListAdminQueueClaims(ctx context.Context, limit int) ([]domain.C
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		WHERE status IN (?, ?, ?, ?)
 		ORDER BY updated_at DESC, id ASC
@@ -958,7 +1082,7 @@ func (s *Store) IsBlocked(ctx context.Context, keyType abuse.KeyType, value stri
 // LastClaimByAddressAndToken returns the latest persisted claim for one address and token_id.
 func (s *Store) LastClaimByAddressAndToken(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		WHERE address = ? AND token_id = ?
 		ORDER BY created_at DESC
@@ -974,7 +1098,7 @@ func (s *Store) LastClaimByAddressAndToken(ctx context.Context, address common.A
 
 func (s *Store) LastClaimByAddress(ctx context.Context, address common.Address) (domain.Claim, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		WHERE address = ?
 		ORDER BY created_at DESC
@@ -1058,23 +1182,25 @@ type claimScanner interface {
 
 func scanClaim(scanner claimScanner) (domain.Claim, error) {
 	var (
-		id            string
-		address       string
-		tokenID       string
-		tokenSymbol   string
-		tokenType     string
-		tokenAddress  string
-		tokenDecimals int
-		amountWei     string
-		status        string
-		reason        string
-		retryCount    int
-		nextAttemptAt sql.NullString
-		createdAt     string
-		updatedAt     string
+		id             string
+		address        string
+		tokenID        string
+		tokenSymbol    string
+		tokenType      string
+		tokenAddress   string
+		tokenDecimals  int
+		amountWei      string
+		status         string
+		reason         string
+		retryCount     int
+		nextAttemptAt  sql.NullString
+		campaignID     string
+		invitationCode string
+		createdAt      string
+		updatedAt      string
 	)
 
-	if err := scanner.Scan(&id, &address, &tokenID, &tokenSymbol, &tokenType, &tokenAddress, &tokenDecimals, &amountWei, &status, &reason, &retryCount, &nextAttemptAt, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&id, &address, &tokenID, &tokenSymbol, &tokenType, &tokenAddress, &tokenDecimals, &amountWei, &status, &reason, &retryCount, &nextAttemptAt, &campaignID, &invitationCode, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Claim{}, ErrNotFound
 		}
@@ -1105,20 +1231,22 @@ func scanClaim(scanner claimScanner) (domain.Claim, error) {
 	}
 
 	return domain.Claim{
-		ID:            id,
-		Address:       common.HexToAddress(address),
-		TokenID:       tokenID,
-		TokenSymbol:   tokenSymbol,
-		TokenType:     domain.TokenType(tokenType),
-		TokenAddress:  common.HexToAddress(tokenAddress),
-		TokenDecimals: tokenDecimals,
-		AmountWei:     amount,
-		Status:        domain.ClaimStatus(status),
-		Reason:        reason,
-		RetryCount:    retryCount,
-		NextAttemptAt: nextAttempt,
-		CreatedAt:     created,
-		UpdatedAt:     updated,
+		ID:             id,
+		Address:        common.HexToAddress(address),
+		TokenID:        tokenID,
+		TokenSymbol:    tokenSymbol,
+		TokenType:      domain.TokenType(tokenType),
+		TokenAddress:   common.HexToAddress(tokenAddress),
+		TokenDecimals:  tokenDecimals,
+		AmountWei:      amount,
+		Status:         domain.ClaimStatus(status),
+		Reason:         reason,
+		RetryCount:     retryCount,
+		NextAttemptAt:  nextAttempt,
+		CampaignID:     campaignID,
+		InvitationCode: invitationCode,
+		CreatedAt:      created,
+		UpdatedAt:      updated,
 	}, nil
 }
 
@@ -1176,7 +1304,7 @@ func (s *Store) DequeueBatch(ctx context.Context, n int) ([]domain.Claim, error)
 	defer tx.Rollback() //nolint:errcheck
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		WHERE status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 		ORDER BY created_at ASC
@@ -1486,7 +1614,7 @@ func (s *Store) ListStuckSending(ctx context.Context, stuckAfter time.Duration, 
 	}
 	cutoff := formatTime(time.Now().UTC().Add(-stuckAfter))
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
+		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
 		FROM requests
 		WHERE status = ? AND updated_at <= ?
 		ORDER BY updated_at ASC
@@ -1660,4 +1788,375 @@ func parseRuntimePolicyBig(raw string) *big.Int {
 		return nil
 	}
 	return v
+}
+
+// CreateCampaign inserts or replaces no existing campaign; ids are stable and unique.
+func (s *Store) CreateCampaign(ctx context.Context, campaign domain.Campaign) (domain.Campaign, error) {
+	campaign.ID = strings.TrimSpace(campaign.ID)
+	campaign.Name = strings.TrimSpace(campaign.Name)
+	campaign.TokenID = strings.TrimSpace(campaign.TokenID)
+	if campaign.ID == "" || campaign.Name == "" || !domain.IsValidCampaignScope(campaign.Scope) {
+		return domain.Campaign{}, fmt.Errorf("invalid campaign")
+	}
+	now := time.Now().UTC()
+	if campaign.CreatedAt.IsZero() {
+		campaign.CreatedAt = now
+	}
+	if campaign.UpdatedAt.IsZero() {
+		campaign.UpdatedAt = campaign.CreatedAt
+	}
+	budget := ""
+	if campaign.BudgetWei != nil {
+		if campaign.BudgetWei.Sign() < 0 {
+			return domain.Campaign{}, fmt.Errorf("invalid campaign budget")
+		}
+		budget = campaign.BudgetWei.String()
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO campaigns (id, name, token_id, scope, budget_wei, enabled, starts_at, ends_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, campaign.ID, campaign.Name, campaign.TokenID, string(campaign.Scope), budget, boolInt(campaign.Enabled), nullableTime(campaign.StartsAt), nullableTime(campaign.EndsAt), formatTime(campaign.CreatedAt), formatTime(campaign.UpdatedAt))
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	return campaign, nil
+}
+
+// UpdateCampaign replaces mutable campaign fields while preserving caller-provided
+// creation metadata. It is used by the admin plane for audited campaign edits.
+func (s *Store) UpdateCampaign(ctx context.Context, campaign domain.Campaign) (domain.Campaign, error) {
+	campaign.ID = strings.TrimSpace(campaign.ID)
+	campaign.Name = strings.TrimSpace(campaign.Name)
+	campaign.TokenID = strings.TrimSpace(campaign.TokenID)
+	if campaign.ID == "" || campaign.Name == "" || !domain.IsValidCampaignScope(campaign.Scope) {
+		return domain.Campaign{}, fmt.Errorf("invalid campaign")
+	}
+	if campaign.CreatedAt.IsZero() {
+		return domain.Campaign{}, fmt.Errorf("invalid campaign created_at")
+	}
+	if campaign.UpdatedAt.IsZero() {
+		campaign.UpdatedAt = time.Now().UTC()
+	}
+	budget := ""
+	if campaign.BudgetWei != nil {
+		if campaign.BudgetWei.Sign() < 0 {
+			return domain.Campaign{}, fmt.Errorf("invalid campaign budget")
+		}
+		budget = campaign.BudgetWei.String()
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE campaigns
+		SET name = ?, token_id = ?, scope = ?, budget_wei = ?, enabled = ?, starts_at = ?, ends_at = ?, created_at = ?, updated_at = ?
+		WHERE id = ?
+	`, campaign.Name, campaign.TokenID, string(campaign.Scope), budget, boolInt(campaign.Enabled), nullableTime(campaign.StartsAt), nullableTime(campaign.EndsAt), formatTime(campaign.CreatedAt), formatTime(campaign.UpdatedAt), campaign.ID)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return domain.Campaign{}, ErrNotFound
+	}
+	return campaign, nil
+}
+
+func (s *Store) GetCampaign(ctx context.Context, id string) (domain.Campaign, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, token_id, scope, budget_wei, enabled, starts_at, ends_at, created_at, updated_at FROM campaigns WHERE id = ?`, strings.TrimSpace(id))
+	return scanCampaign(row)
+}
+
+func (s *Store) ListCampaigns(ctx context.Context, limit, offset int) ([]domain.Campaign, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, token_id, scope, budget_wei, enabled, starts_at, ends_at, created_at, updated_at FROM campaigns ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Campaign
+	for rows.Next() {
+		c, err := scanCampaign(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DisableCampaign(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE campaigns SET enabled = 0, updated_at = ? WHERE id = ?`, formatTime(time.Now().UTC()), strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetCampaignEnabled updates only the enabled flag. It is used by the
+// admin service as a best-effort rollback primitive if durable audit writing
+// fails after a disable operation.
+func (s *Store) SetCampaignEnabled(ctx context.Context, id string, enabled bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE campaigns SET enabled = ?, updated_at = ? WHERE id = ?`, boolInt(enabled), formatTime(time.Now().UTC()), strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteCampaign removes a campaign that has no dependent rows. It is intended
+// for admin rollback after an audit failure immediately following creation.
+func (s *Store) DeleteCampaign(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM campaigns WHERE id = ?`, strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) CreateInvitationCode(ctx context.Context, code domain.InvitationCode) (domain.InvitationCode, error) {
+	code.Code = strings.TrimSpace(code.Code)
+	code.CampaignID = strings.TrimSpace(code.CampaignID)
+	if code.Code == "" || code.CampaignID == "" || code.MaxUses < 0 || code.Uses < 0 || (code.MaxUses > 0 && code.Uses > code.MaxUses) {
+		return domain.InvitationCode{}, fmt.Errorf("invalid invitation code")
+	}
+	if _, err := s.GetCampaign(ctx, code.CampaignID); err != nil {
+		return domain.InvitationCode{}, err
+	}
+	now := time.Now().UTC()
+	if code.CreatedAt.IsZero() {
+		code.CreatedAt = now
+	}
+	if code.UpdatedAt.IsZero() {
+		code.UpdatedAt = code.CreatedAt
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO invitation_codes (code, campaign_id, max_uses, uses, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, code.Code, code.CampaignID, code.MaxUses, code.Uses, boolInt(code.Enabled), formatTime(code.CreatedAt), formatTime(code.UpdatedAt))
+	if err != nil {
+		return domain.InvitationCode{}, err
+	}
+	return code, nil
+}
+
+func (s *Store) GetInvitationCode(ctx context.Context, code string) (domain.InvitationCode, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT code, campaign_id, max_uses, uses, enabled, created_at, updated_at FROM invitation_codes WHERE code = ?`, strings.TrimSpace(code))
+	return scanInvitationCode(row)
+}
+
+func (s *Store) ConsumeInvitationCode(ctx context.Context, code string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE invitation_codes SET uses = uses + 1, updated_at = ? WHERE code = ? AND enabled = 1 AND (max_uses = 0 OR uses < max_uses)`, formatTime(time.Now().UTC()), strings.TrimSpace(code))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteInvitationCode removes an invitation created by an admin operation that
+// could not be durably audited.
+func (s *Store) DeleteInvitationCode(ctx context.Context, code string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM invitation_codes WHERE code = ?`, strings.TrimSpace(code))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) AddCampaignAllowlistEntry(ctx context.Context, entry domain.CampaignAllowlistEntry) error {
+	entry.CampaignID = strings.TrimSpace(entry.CampaignID)
+	if entry.CampaignID == "" || entry.Address == (common.Address{}) {
+		return fmt.Errorf("invalid allowlist entry")
+	}
+	if _, err := s.GetCampaign(ctx, entry.CampaignID); err != nil {
+		return err
+	}
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = time.Now().UTC()
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO campaign_allowlist (campaign_id, address, note, created_at) VALUES (?, ?, ?, ?)`, entry.CampaignID, entry.Address.Hex(), strings.TrimSpace(entry.Note), formatTime(entry.CreatedAt))
+	return err
+}
+
+func (s *Store) IsAddressAllowlisted(ctx context.Context, campaignID string, address common.Address) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM campaign_allowlist WHERE campaign_id = ? AND address = ?`, strings.TrimSpace(campaignID), address.Hex()).Scan(&count)
+	return count > 0, err
+}
+
+// RemoveCampaignAllowlistEntry removes one allowlist entry for admin rollback.
+func (s *Store) RemoveCampaignAllowlistEntry(ctx context.Context, campaignID string, address common.Address) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM campaign_allowlist WHERE campaign_id = ? AND address = ?`, strings.TrimSpace(campaignID), address.Hex())
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func claimAmountWeiForCampaign(ctx context.Context, q claimAmountQuerier, campaignID string, statuses []domain.ClaimStatus) (*big.Int, error) {
+	used := big.NewInt(0)
+	if campaignID == "" || len(statuses) == 0 {
+		return used, nil
+	}
+	placeholders := make([]string, 0, len(statuses))
+	args := []any{campaignID}
+	for _, st := range statuses {
+		placeholders = append(placeholders, "?")
+		args = append(args, string(st))
+	}
+	rows, err := q.QueryContext(ctx, `SELECT amount_wei FROM requests WHERE campaign_id = ? AND status IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		v, ok := new(big.Int).SetString(raw, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid campaign amount wei: %s", raw)
+		}
+		used.Add(used, v)
+	}
+	return used, rows.Err()
+}
+
+func (s *Store) CampaignUsage(ctx context.Context, campaignID string, statuses []domain.ClaimStatus) (domain.CampaignUsage, error) {
+	campaignID = strings.TrimSpace(campaignID)
+	usage := domain.CampaignUsage{CampaignID: campaignID, UsedWei: big.NewInt(0)}
+	if campaignID == "" || len(statuses) == 0 {
+		return usage, nil
+	}
+	placeholders := make([]string, 0, len(statuses))
+	args := []any{campaignID}
+	for _, st := range statuses {
+		placeholders = append(placeholders, "?")
+		args = append(args, string(st))
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT amount_wei FROM requests WHERE campaign_id = ? AND status IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return usage, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return usage, err
+		}
+		v, ok := new(big.Int).SetString(raw, 10)
+		if !ok {
+			return usage, fmt.Errorf("invalid campaign amount wei: %s", raw)
+		}
+		usage.ClaimCount++
+		usage.UsedWei.Add(usage.UsedWei, v)
+	}
+	return usage, rows.Err()
+}
+
+type campaignScanner interface{ Scan(dest ...any) error }
+
+func scanCampaign(scanner campaignScanner) (domain.Campaign, error) {
+	var id, name, tokenID, scope, budget, createdAt, updatedAt string
+	var enabled int
+	var startsAt, endsAt sql.NullString
+	if err := scanner.Scan(&id, &name, &tokenID, &scope, &budget, &enabled, &startsAt, &endsAt, &createdAt, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Campaign{}, ErrNotFound
+		}
+		return domain.Campaign{}, err
+	}
+	created, err := parseTime(createdAt)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	updated, err := parseTime(updatedAt)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	var starts, ends *time.Time
+	if startsAt.Valid {
+		t, err := parseTime(startsAt.String)
+		if err != nil {
+			return domain.Campaign{}, err
+		}
+		starts = &t
+	}
+	if endsAt.Valid {
+		t, err := parseTime(endsAt.String)
+		if err != nil {
+			return domain.Campaign{}, err
+		}
+		ends = &t
+	}
+	var b *big.Int
+	if strings.TrimSpace(budget) != "" {
+		v, ok := new(big.Int).SetString(budget, 10)
+		if !ok {
+			return domain.Campaign{}, fmt.Errorf("invalid campaign budget wei: %s", budget)
+		}
+		b = v
+	}
+	return domain.Campaign{ID: id, Name: name, TokenID: tokenID, Scope: domain.CampaignScope(scope), BudgetWei: b, Enabled: enabled != 0, StartsAt: starts, EndsAt: ends, CreatedAt: created, UpdatedAt: updated}, nil
+}
+
+func scanInvitationCode(scanner campaignScanner) (domain.InvitationCode, error) {
+	var c domain.InvitationCode
+	var createdAt, updatedAt string
+	var enabled int
+	if err := scanner.Scan(&c.Code, &c.CampaignID, &c.MaxUses, &c.Uses, &enabled, &createdAt, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.InvitationCode{}, ErrNotFound
+		}
+		return domain.InvitationCode{}, err
+	}
+	created, err := parseTime(createdAt)
+	if err != nil {
+		return domain.InvitationCode{}, err
+	}
+	updated, err := parseTime(updatedAt)
+	if err != nil {
+		return domain.InvitationCode{}, err
+	}
+	c.Enabled = enabled != 0
+	c.CreatedAt = created
+	c.UpdatedAt = updated
+	return c, nil
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+func nullableTime(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return formatTime(*t)
 }

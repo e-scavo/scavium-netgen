@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,6 +102,8 @@ type ClaimRequest struct {
 	CaptchaToken   string
 	Fingerprint    string
 	Honeypot       string
+	CampaignID     string
+	InvitationCode string
 }
 
 // TokenResponse is returned by public config and claim endpoints for token-aware clients.
@@ -128,6 +131,7 @@ type ClaimResponse struct {
 	Status         domain.ClaimStatus `json:"status"`
 	Reason         string             `json:"reason,omitempty"`
 	IdempotencyKey string             `json:"idempotency_key,omitempty"`
+	CampaignID     string             `json:"campaign_id,omitempty"`
 	CreatedAt      string             `json:"created_at"`
 	UpdatedAt      string             `json:"updated_at"`
 }
@@ -341,6 +345,7 @@ func (s *InMemoryReadService) CreateClaim(_ context.Context, request ClaimReques
 		TokenDecimals: token.Decimals,
 		AmountWei:     token.AmountWei,
 		Status:        domain.ClaimStatusQueued,
+		CampaignID:    strings.TrimSpace(request.CampaignID),
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -388,6 +393,7 @@ func claimResponse(claim domain.Claim, idempotencyKey string) ClaimResponse {
 		AmountWei:      amountWei,
 		Status:         claim.Status,
 		Reason:         claim.Reason,
+		CampaignID:     claim.CampaignID,
 		IdempotencyKey: idempotencyKey,
 		CreatedAt:      claim.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:      claim.UpdatedAt.UTC().Format(time.RFC3339),
