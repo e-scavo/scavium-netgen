@@ -12,6 +12,7 @@ import (
 
 	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -33,7 +34,7 @@ func TestMigrateCreatesRequiredTables(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "admin_audit_logs", "admin_blocklist", "runtime_policy", "schema_migrations"} {
+	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "admin_audit_logs", "admin_blocklist", "runtime_policy", "wallet_challenges", "schema_migrations"} {
 		if !tableExists(t, store.db, table) {
 			t.Fatalf("table %s does not exist", table)
 		}
@@ -44,7 +45,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip", "idx_admin_audit_logs_created_at", "idx_admin_blocklist_type_value", "idx_admin_blocklist_blocked_at", "idx_runtime_policy_updated_at"} {
+	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip", "idx_admin_audit_logs_created_at", "idx_admin_blocklist_type_value", "idx_admin_blocklist_blocked_at", "idx_runtime_policy_updated_at", "idx_wallet_challenges_address", "idx_wallet_challenges_expires_at"} {
 		if !indexExists(t, store.db, index) {
 			t.Fatalf("index %s does not exist", index)
 		}
@@ -1597,5 +1598,34 @@ func TestCampaignUpdatePersistence(t *testing.T) {
 	}
 	if got.Name != "After" || got.Scope != domain.CampaignScopeInvite || got.BudgetWei.String() != "99" || got.Enabled {
 		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestWalletChallengesPersistExpireAndReplay(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+	address := common.HexToAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	challenge := faucet.WalletChallenge{ID: "wch_test", Address: address, Nonce: "nonce", Message: "message", CreatedAt: now, ExpiresAt: now.Add(5 * time.Minute)}
+	if _, err := store.CreateWalletChallenge(context.Background(), challenge); err != nil {
+		t.Fatalf("create challenge: %v", err)
+	}
+	consumed, err := store.ConsumeWalletChallenge(context.Background(), challenge.ID, address, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("consume challenge: %v", err)
+	}
+	if consumed.ConsumedAt == nil {
+		t.Fatal("consumed_at is nil")
+	}
+	if _, err := store.ConsumeWalletChallenge(context.Background(), challenge.ID, address, now.Add(2*time.Minute)); !errors.Is(err, faucet.ErrWalletChallengeInvalid) {
+		t.Fatalf("replay err = %v, want invalid", err)
+	}
+
+	expired := faucet.WalletChallenge{ID: "wch_expired", Address: address, Nonce: "nonce2", Message: "message2", CreatedAt: now, ExpiresAt: now.Add(time.Minute)}
+	if _, err := store.CreateWalletChallenge(context.Background(), expired); err != nil {
+		t.Fatalf("create expired challenge: %v", err)
+	}
+	if _, err := store.ConsumeWalletChallenge(context.Background(), expired.ID, address, now.Add(2*time.Minute)); !errors.Is(err, faucet.ErrWalletChallengeInvalid) {
+		t.Fatalf("expired err = %v, want invalid", err)
 	}
 }

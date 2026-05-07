@@ -37,6 +37,7 @@ Configuration is loaded from environment variables at startup via `internal/conf
 | `SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS` | `30` | Number of days to retain rows in `abuse_signals`; expired rows are pruned at startup; `0` disables pruning |
 | `SCAVIUM_FAUCET_TRUSTED_PROXY` | empty | When set to the reverse proxy's IP, the handler extracts the real client IP from `X-Forwarded-For` / `X-Real-IP` via `internal/iputil`; used for rate limiting and logging |
 | `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` | empty | Comma-separated exact origins allowed for public API CORS; empty disables CORS headers; wildcard `*` is not allowed |
+| `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` | empty | Optional comma-separated exact origins allowed to use wallet challenge/proof surfaces from browsers; empty disables the extra origin gate; missing `Origin` remains allowed for native wallets and CLI/server integrations |
 | `SCAVIUM_FAUCET_PRIVATE_KEY` | empty | Hex-encoded signer key; required and validated at startup when `DRY_RUN=false`; used by `chain.EthSender` to sign transactions |
 | `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` | `disabled` | Selects the captcha backend: `disabled` (no check), `dev` (always pass), `hcaptcha`, `recaptcha`, or `turnstile`; active in claim creation when not `disabled` |
 | `SCAVIUM_FAUCET_CAPTCHA_SITE_KEY` | empty | Public browser-side site key exposed by `/api/v1/config`; required for `hcaptcha`, `recaptcha`, or `turnstile` so the frontend can render the provider widget |
@@ -155,6 +156,7 @@ See [token-registration.md](token-registration.md) for the full testnet operator
 - No extra environment variable is required for Phase 16 observability. Request correlation, structured logs, health/readiness enrichment, and process-local metrics are active in the binary. `/api/v1/admin/metrics` is available only when `SCAVIUM_FAUCET_ADMIN_TOKEN` is set.
 - Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to the loopback or reverse proxy address so that IP-based rate limiting uses the real client IP rather than `127.0.0.1`.
 - Set `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` only to exact public origins that should call the API from browsers. Leave it empty to disable CORS headers; `*` is rejected.
+- Set `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` only when browser-based wallet integrations should be restricted to known application origins. It is defense-in-depth and never replaces wallet signature verification; native clients without `Origin` remain compatible.
 - `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced against queued, sent, and confirmed claims and resets at UTC midnight.
 - `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_*` is intentionally conservative: it reads only negative abuse signals from the configured lookback window and contributes to a bounded risk score. Phase 27 adds burst, rotating-IP, address-cluster, optional honeypot, and bounded manual-review inputs, all derived from or persisted to `abuse_signals`; burst detection counts successful and failed intake records, and thresholds set to `0` disable the individual scope while keeping the rest of the enforcement layer active. Public responses remain the normalized `claim_rejected` envelope and never expose raw fingerprints, IPs, or cluster details.
 - In dry-run mode (`DRY_RUN=true`), the `PRIVATE_KEY` is not required; `DryRunSender` is used and no on-chain transactions are submitted.
@@ -259,3 +261,8 @@ These variables are script controls only. They do not change the faucet API, tok
 The startup environment remains the source of defaults. Phase 28 adds a SQLite-backed override layer for a small non-secret subset: cooldown seconds, IP/hour rate limit, address/day rate limit, aggregate daily budget, and token-specific daily budgets. Persisted overrides take precedence at runtime when present and valid; clearing the policy restores environment/default behavior without a restart. Secrets, RPC URLs, private keys, captcha secrets, CORS, trusted proxy, token catalog metadata, token contract addresses, decimals, and claim amounts are not runtime-editable.
 
 Use `GET /api/v1/admin/policy`, `PUT /api/v1/admin/policy`, and `DELETE /api/v1/admin/policy` with the existing admin bearer token. Every mutation is persisted to `admin_audit_logs` with bounded before/after summaries and no secret values.
+
+
+## Phase 30 wallet integration configuration
+
+Phase 30 introduces optional wallet proof fields on the existing claim request plus `POST /api/v1/wallet/challenge` and `/api/v1/faucet/wallet/challenge`. No private keys, production origins, wallet secrets, or RPC credentials are added to configuration. `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` is the only new operator setting, is optional, rejects wildcard values, and uses exact string matching.

@@ -191,7 +191,17 @@ Status: implemented and closure-audited through fix 13 (full SQLite admin disabl
 - Admin campaign create/update/list/disable controls.
 - Admin CSV export if not already complete.
 
-### Phase 30 — SCAVIUM Wallet Integration
+### Phase 30 — SCAVIUM Wallet Integration — CLOSED
+
+Closure scope:
+
+- Wallet-specific challenge endpoint added at `/api/v1/wallet/challenge` and alias `/api/v1/faucet/wallet/challenge`.
+- Short-lived persisted challenges with expiry, replay resistance, and in-memory fallback behavior.
+- Optional Ethereum personal-sign verification on `POST /api/v1/claim` through `wallet_challenge_id` + `wallet_signature`; legacy clients remain compatible when both fields are omitted.
+- Configurable app-origin defense-in-depth through `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS`; missing `Origin` remains allowed for native/CLI clients.
+- Docs, OpenAPI, tests, and SQLite migration updated.
+
+Deferred professional-scale wallet backlog remains explicit: multi-wallet UX negotiation, multi-network routing, external wallet-provider webhooks, HA/distributed challenge stores beyond SQLite, and production origin presets.
 
 - Wallet-specific endpoints and challenge strategy.
 - Optional wallet signature challenge.

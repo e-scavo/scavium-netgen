@@ -354,3 +354,26 @@ func TestValidateRejectsCaptchaProviderWithoutSiteKeyOrSecret(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigLoadsWalletAllowedOrigins(t *testing.T) {
+	cfg, err := FromEnv(func(key string) string {
+		if key == EnvWalletAllowedOrigins {
+			return "https://wallet.example, https://app.example"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("from env: %v", err)
+	}
+	if len(cfg.WalletAllowedOrigins) != 2 || cfg.WalletAllowedOrigins[0] != "https://wallet.example" || cfg.WalletAllowedOrigins[1] != "https://app.example" {
+		t.Fatalf("wallet origins = %#v", cfg.WalletAllowedOrigins)
+	}
+}
+
+func TestConfigRejectsWildcardWalletAllowedOrigin(t *testing.T) {
+	cfg := Defaults()
+	cfg.WalletAllowedOrigins = []string{"*"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("validate err = nil, want wildcard rejection")
+	}
+}

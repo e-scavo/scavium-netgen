@@ -48,17 +48,23 @@ type ErrorEnvelope struct {
 }
 
 type claimRequest struct {
-	Address        string `json:"address"`
-	TokenID        string `json:"token_id"`
-	CampaignID     string `json:"campaign_id,omitempty"`
-	InvitationCode string `json:"invitation_code,omitempty"`
-	CaptchaToken   string `json:"captcha_token"`
-	Fingerprint    string `json:"fingerprint"`
-	Honeypot       string `json:"website,omitempty"`
+	Address           string `json:"address"`
+	TokenID           string `json:"token_id"`
+	CampaignID        string `json:"campaign_id,omitempty"`
+	InvitationCode    string `json:"invitation_code,omitempty"`
+	WalletChallengeID string `json:"wallet_challenge_id,omitempty"`
+	WalletSignature   string `json:"wallet_signature,omitempty"`
+	CaptchaToken      string `json:"captcha_token"`
+	Fingerprint       string `json:"fingerprint"`
+	Honeypot          string `json:"website,omitempty"`
 }
 
 // adminRuntimeResponse aggregates admin-plane runtime visibility without
 // changing existing public or admin endpoint contracts.
+type walletChallengeRequest struct {
+	Address string `json:"address"`
+}
+
 type adminRuntimeResponse struct {
 	Time      string                               `json:"time"`
 	Dashboard admin.DashboardResponse              `json:"dashboard"`
@@ -110,6 +116,8 @@ type Dependencies struct {
 	// CORSOrigins lists exact origins allowed for public API CORS.
 	// Empty means CORS is disabled and no CORS headers are emitted.
 	CORSOrigins []string
+	// WalletAllowedOrigins lists exact application origins allowed to use wallet proof endpoints. Empty disables this defense-in-depth check.
+	WalletAllowedOrigins []string
 	// Logger receives production-safe request logs when provided.
 	Logger *observability.Logger
 	// Metrics receives lightweight in-process runtime counters when provided.
@@ -142,13 +150,15 @@ func NewHandler(deps Dependencies) http.Handler {
 	mux.HandleFunc("/api/v1/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/config", handleFaucetConfig(deps.ReadService))
 	mux.HandleFunc("/api/v1/tokens", handleFaucetTokens(deps.ReadService))
-	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger, deps.Metrics))
+	mux.HandleFunc("/api/v1/wallet/challenge", handleWalletChallenge(deps.ReadService, deps.WalletAllowedOrigins))
+	mux.HandleFunc("/api/v1/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.WalletAllowedOrigins, deps.Logger, deps.Metrics))
 	mux.HandleFunc("/api/v1/claim/", handleGetClaim(deps.ReadService, "/api/v1/claim/"))
 	mux.HandleFunc("/api/v1/address/", handleAddressDispatch(deps.ReadService, "/api/v1/address/", "/status"))
 	mux.HandleFunc("/api/v1/faucet/status", handleFaucetStatus(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/config", handleFaucetConfig(deps.ReadService))
 	mux.HandleFunc("/api/v1/faucet/tokens", handleFaucetTokens(deps.ReadService))
-	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.Logger, deps.Metrics))
+	mux.HandleFunc("/api/v1/faucet/wallet/challenge", handleWalletChallenge(deps.ReadService, deps.WalletAllowedOrigins))
+	mux.HandleFunc("/api/v1/faucet/claim", handleCreateClaim(deps.ReadService, deps.TrustedProxy, deps.WalletAllowedOrigins, deps.Logger, deps.Metrics))
 	mux.HandleFunc("/api/v1/faucet/claim/", handleGetClaim(deps.ReadService, "/api/v1/faucet/claim/"))
 	mux.HandleFunc("/api/v1/faucet/address/", handleAddressDispatch(deps.ReadService, "/api/v1/faucet/address/", "/eligibility"))
 	mux.HandleFunc("/api/v1/version", handleVersion(deps.VersionInfo))
@@ -397,7 +407,68 @@ func handleAddressStatus(readService faucet.ReadService, prefix, suffix string) 
 	}
 }
 
-func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logger *observability.Logger, metrics *observability.RuntimeMetrics) http.HandlerFunc {
+func handleWalletChallenge(readService faucet.ReadService, walletAllowedOrigins []string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+		if !allowWalletOrigin(w, r, walletAllowedOrigins) {
+			return
+		}
+		if !requireJSONContentType(w, r) {
+			return
+		}
+		var body walletChallengeRequest
+		if err := decodeJSONBody(w, r, &body); err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+			return
+		}
+		address, err := domain.ValidateAddress(body.Address)
+		if err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_address", "invalid address", map[string]any{"reason": err.Error()})
+			return
+		}
+		challenge, err := readService.CreateWalletChallenge(r.Context(), faucet.WalletChallengeRequest{Address: address})
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "wallet_challenge_unavailable", "wallet challenge unavailable", nil)
+			return
+		}
+		WriteJSON(w, http.StatusCreated, challenge)
+	}
+}
+
+func allowWalletOrigin(w http.ResponseWriter, r *http.Request, allowed []string) bool {
+	allowed = normalizeOrigins(allowed)
+	if len(allowed) == 0 {
+		return true
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	for _, candidate := range allowed {
+		if origin == candidate {
+			return true
+		}
+	}
+	WriteError(w, r, http.StatusForbidden, "origin_not_allowed", "origin not allowed", nil)
+	return false
+}
+
+func normalizeOrigins(origins []string) []string {
+	out := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func handleCreateClaim(readService faucet.ReadService, trustedProxy string, walletAllowedOrigins []string, logger *observability.Logger, metrics *observability.RuntimeMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -405,9 +476,9 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 			return
 		}
 
-		// TODO(step 5.x): optional address-ownership challenge/signature verification.
-		// The wallet may include an `X-Signature` header containing a signed challenge
-		// to prove control of the address before the claim is enqueued.
+		if !allowWalletOrigin(w, r, walletAllowedOrigins) {
+			return
+		}
 
 		if !requireJSONContentType(w, r) {
 			return
@@ -428,16 +499,18 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 		}
 
 		claimRequest := faucet.ClaimRequest{
-			Address:        address,
-			TokenID:        strings.TrimSpace(body.TokenID),
-			IdempotencyKey: strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)),
-			RemoteIP:       iputil.RealIP(r, trustedProxy),
-			UserAgent:      r.UserAgent(),
-			CaptchaToken:   strings.TrimSpace(body.CaptchaToken),
-			Fingerprint:    strings.TrimSpace(body.Fingerprint),
-			Honeypot:       strings.TrimSpace(body.Honeypot),
-			CampaignID:     strings.TrimSpace(body.CampaignID),
-			InvitationCode: strings.TrimSpace(body.InvitationCode),
+			Address:           address,
+			TokenID:           strings.TrimSpace(body.TokenID),
+			IdempotencyKey:    strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)),
+			RemoteIP:          iputil.RealIP(r, trustedProxy),
+			UserAgent:         r.UserAgent(),
+			CaptchaToken:      strings.TrimSpace(body.CaptchaToken),
+			Fingerprint:       strings.TrimSpace(body.Fingerprint),
+			Honeypot:          strings.TrimSpace(body.Honeypot),
+			CampaignID:        strings.TrimSpace(body.CampaignID),
+			InvitationCode:    strings.TrimSpace(body.InvitationCode),
+			WalletChallengeID: strings.TrimSpace(body.WalletChallengeID),
+			WalletSignature:   strings.TrimSpace(body.WalletSignature),
 		}
 
 		claim, err := readService.CreateClaim(r.Context(), claimRequest)

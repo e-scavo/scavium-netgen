@@ -112,6 +112,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 			AdminToken:            cfg.AdminToken,
 			TrustedProxy:          cfg.TrustedProxy,
 			CORSOrigins:           cfg.CORSAllowedOrigins,
+			WalletAllowedOrigins:  cfg.WalletAllowedOrigins,
 			Logger:                logger,
 			Metrics:               metrics,
 			WalletRuntimeProvider: newWalletRuntimeProvider(cfg, senderBundle),

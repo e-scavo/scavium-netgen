@@ -252,6 +252,33 @@ Example response:
 
 Invalid addresses return `400 invalid_address`. Invalid pagination values return `400 invalid_pagination`. Empty history is a successful `200` with an empty `claims` array and `count: 0`.
 
+
+### `POST /api/v1/wallet/challenge`
+### `POST /api/v1/faucet/wallet/challenge`
+
+Phase 30 adds a wallet-oriented challenge endpoint for clients that want to prove address control before submitting a claim. The endpoint is public, accepts JSON, and returns a short-lived non-secret message that a wallet can sign using the standard Ethereum personal-sign envelope. Challenges are persisted in SQLite, expire after five minutes, and are consumed after a successful optional signature verification so replayed proofs are rejected. Legacy claim clients do not need to call this endpoint.
+
+Request:
+
+```json
+{ "address": "0x52908400098527886E0F7030069857D2E4169EE7" }
+```
+
+Response (`201 Created`):
+
+```json
+{
+  "id": "wch_...",
+  "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+  "nonce": "...",
+  "message": "SCAVIUM Faucet wallet challenge\nAddress: ...",
+  "expires_at": "2026-05-03T12:05:00Z",
+  "created_at": "2026-05-03T12:00:00Z"
+}
+```
+
+If `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` is configured, browser requests with an `Origin` header must match one of the configured exact origins. Missing `Origin` is allowed so native wallets, CLI clients, and server-to-server integrations continue to work. Origin validation is defense-in-depth only and is not a replacement for the signed challenge.
+
 ### `POST /api/v1/claim`
 ### `POST /api/v1/faucet/claim`
 
@@ -271,7 +298,7 @@ Request body:
 }
 ```
 
-`token_id` is optional; when omitted, the configured default token is used. `campaign_id` and `invitation_code` are optional Phase 29 campaign controls; legacy clients can omit both and continue through the normal faucet policy path. Invite-scoped campaigns require a valid invitation code, allowlist-scoped campaigns require the claimant address to be present in the durable allowlist, and private campaign failures return the generic `invalid_campaign` rejection reason. All fields except `address` remain optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting and Phase 27 clustering when provided. `website` is an optional compatibility-safe honeypot field: legitimate clients should omit it or send an empty string, and it is evaluated only when `SCAVIUM_FAUCET_ABUSE_HONEYPOT_ENABLED=true`.
+`token_id` is optional; when omitted, the configured default token is used. `wallet_challenge_id` and `wallet_signature` are optional Phase 30 fields; when both are present the service verifies the signed challenge against the claim address and consumes the challenge before enqueueing the claim. Omitting both fields preserves the legacy claim path. Supplying only one proof field returns `claim_rejected` with reason `wallet_proof_incomplete`. `campaign_id` and `invitation_code` are optional Phase 29 campaign controls; legacy clients can omit both and continue through the normal faucet policy path. Invite-scoped campaigns require a valid invitation code, allowlist-scoped campaigns require the claimant address to be present in the durable allowlist, and private campaign failures return the generic `invalid_campaign` rejection reason. All fields except `address` remain optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting and Phase 27 clustering when provided. `website` is an optional compatibility-safe honeypot field: legitimate clients should omit it or send an empty string, and it is evaluated only when `SCAVIUM_FAUCET_ABUSE_HONEYPOT_ENABLED=true`.
 
 Optional request header:
 
@@ -321,7 +348,7 @@ Common errors:
 | 400 | `invalid_address` | Address failed validation |
 | 413 | `request_body_too_large` | Declared JSON request body exceeds `1 MiB` |
 | 422 | `captcha_failed` | Captcha verification failed |
-| 403 | `claim_rejected` | Claim rejected by abuse, risk, or invalid campaign policy |
+| 403 | `claim_rejected` | Claim rejected by abuse, risk, invalid campaign policy, or invalid wallet proof |
 | 429 | `rate_limited` | IP, address, fingerprint, or cooldown limit exceeded |
 | 429 | `daily_budget_exceeded` | Global daily faucet budget exceeded |
 | 503 | `faucet_unavailable` | Faucet is paused, in maintenance, or unavailable |
