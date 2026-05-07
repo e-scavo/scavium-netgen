@@ -661,6 +661,26 @@ type failingRuntimePolicyAuditStore struct {
 	appendErr error
 }
 
+func (s *failingRuntimePolicyAuditStore) GetClaim(context.Context, string) (domain.Claim, error) {
+	return domain.Claim{}, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) ListAdminClaims(context.Context, int, int) ([]domain.Claim, error) {
+	return nil, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) AdminClaimCounts(context.Context) (map[string]int, error) {
+	return nil, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) AdminQueueCounts(context.Context, time.Time) (map[string]int, int, int, int, int, int, error) {
+	return nil, 0, 0, 0, 0, 0, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) ListAdminQueueClaims(context.Context, int) ([]domain.Claim, error) {
+	return nil, nil
+}
+
 func (s *failingRuntimePolicyAuditStore) GetRuntimePolicy(context.Context) (domain.RuntimePolicy, error) {
 	return domain.CopyRuntimePolicy(s.policy), nil
 }
