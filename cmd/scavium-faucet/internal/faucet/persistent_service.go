@@ -66,6 +66,7 @@ type PersistentReadService struct {
 	captchaVerifier domain.CaptchaVerifier
 	riskEngine      domain.RiskEngine
 	abuseSignals    domain.AbuseSignalRecorder
+	campaigns       domain.CampaignStore
 	now             func() time.Time
 	generateClaimID func() (string, error)
 }
@@ -115,6 +116,11 @@ func (s *PersistentReadService) SetRiskEngine(engine domain.RiskEngine) {
 // SetAbuseSignalRecorder enables durable claim intake signal recording.
 func (s *PersistentReadService) SetAbuseSignalRecorder(recorder domain.AbuseSignalRecorder) {
 	s.abuseSignals = recorder
+}
+
+// SetCampaignStore enables durable campaign, allowlist, and invitation enforcement.
+func (s *PersistentReadService) SetCampaignStore(store domain.CampaignStore) {
+	s.campaigns = store
 }
 
 // SetFaucetMode updates the live operational faucet mode. It is used by the
@@ -407,6 +413,11 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		return ClaimResponse{}, err
 	}
 
+	campaign, inviteCode, err := s.enforceCampaign(ctx, request, token.ID, token.AmountWei)
+	if err != nil {
+		return ClaimResponse{}, err
+	}
+
 	if err := s.verifyCaptcha(ctx, request); err != nil {
 		return ClaimResponse{}, err
 	}
@@ -440,17 +451,19 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 	}
 	now := s.now()
 	claim := domain.Claim{
-		ID:            id,
-		Address:       request.Address,
-		TokenID:       token.ID,
-		TokenSymbol:   token.Symbol,
-		TokenType:     token.Type,
-		TokenAddress:  token.Address,
-		TokenDecimals: token.Decimals,
-		AmountWei:     copyBigInt(token.AmountWei),
-		Status:        domain.ClaimStatusReceived,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:             id,
+		Address:        request.Address,
+		TokenID:        token.ID,
+		TokenSymbol:    token.Symbol,
+		TokenType:      token.Type,
+		TokenAddress:   token.Address,
+		TokenDecimals:  token.Decimals,
+		AmountWei:      copyBigInt(token.AmountWei),
+		Status:         domain.ClaimStatusReceived,
+		CampaignID:     campaign.ID,
+		InvitationCode: inviteCode,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	created, err := s.createClaim(ctx, claim, idempotencyKey)
@@ -467,6 +480,11 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 	}
 	if created.ID != claim.ID {
 		return claimResponse(created, idempotencyKey), nil
+	}
+	if inviteCode != "" {
+		if err := s.campaigns.ConsumeInvitationCode(ctx, inviteCode); err != nil {
+			return ClaimResponse{}, claimError(ErrClaimRejected, "invalid_campaign")
+		}
 	}
 
 	s.recordAbuseSignal(ctx, request, domain.AbuseSignalClaimAccepted, created.ID, "", 0)
@@ -884,4 +902,74 @@ func (s *PersistentReadService) runtimeRateLimitAddrPerDayFromContext(ctx contex
 		return s.cfg.RateLimitAddrPerDay
 	}
 	return s.runtimeRateLimitAddrPerDay(policy)
+}
+
+func (s *PersistentReadService) enforceCampaign(ctx context.Context, request ClaimRequest, tokenID string, amountWei *big.Int) (domain.Campaign, string, error) {
+	campaignID := strings.TrimSpace(request.CampaignID)
+	inviteCode := strings.TrimSpace(request.InvitationCode)
+	if campaignID == "" && inviteCode == "" {
+		return domain.Campaign{}, "", nil
+	}
+	if s.campaigns == nil {
+		return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+	}
+	if campaignID == "" && inviteCode != "" {
+		invite, err := s.campaigns.GetInvitationCode(ctx, inviteCode)
+		if err != nil || !invite.Enabled || (invite.MaxUses > 0 && invite.Uses >= invite.MaxUses) {
+			return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+		}
+		campaignID = invite.CampaignID
+	}
+	campaign, err := s.campaigns.GetCampaign(ctx, campaignID)
+	if err != nil {
+		return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+	}
+	now := s.now().UTC()
+	if !campaign.Enabled || (campaign.StartsAt != nil && now.Before(campaign.StartsAt.UTC())) || (campaign.EndsAt != nil && !now.Before(campaign.EndsAt.UTC())) {
+		return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+	}
+	if campaign.TokenID != "" && campaign.TokenID != tokenID {
+		return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+	}
+	switch campaign.Scope {
+	case domain.CampaignScopePublic:
+		inviteCode = ""
+	case domain.CampaignScopeInvite:
+		if inviteCode == "" {
+			return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+		}
+		invite, err := s.campaigns.GetInvitationCode(ctx, inviteCode)
+		if err != nil || !invite.Enabled || invite.CampaignID != campaign.ID || (invite.MaxUses > 0 && invite.Uses >= invite.MaxUses) {
+			return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+		}
+	case domain.CampaignScopeAllowlist:
+		allowed, err := s.campaigns.IsAddressAllowlisted(ctx, campaign.ID, request.Address)
+		if err != nil {
+			return domain.Campaign{}, "", err
+		}
+		if !allowed {
+			return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+		}
+		inviteCode = ""
+	default:
+		return domain.Campaign{}, "", claimError(ErrClaimRejected, "invalid_campaign")
+	}
+	if campaign.BudgetWei != nil && campaign.BudgetWei.Sign() > 0 {
+		usage, err := s.campaigns.CampaignUsage(ctx, campaign.ID, dailyBudgetStatuses())
+		if err != nil {
+			return domain.Campaign{}, "", err
+		}
+		used := big.NewInt(0)
+		if usage.UsedWei != nil {
+			used = usage.UsedWei
+		}
+		amount := big.NewInt(0)
+		if amountWei != nil {
+			amount = amountWei
+		}
+		if new(big.Int).Add(used, amount).Cmp(campaign.BudgetWei) > 0 {
+			return domain.Campaign{}, "", claimError(ErrDailyBudgetExceeded, "campaign_budget_exceeded")
+		}
+	}
+	return campaign, inviteCode, nil
 }

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,6 +170,11 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux.HandleFunc("/api/v1/admin/faucet/mode", handleAdminSetMode(deps.AdminService, deps.Logger, deps.TrustedProxy))
 	adminMux.HandleFunc("/api/v1/admin/policy", handleAdminPolicy(deps.AdminService, deps.Logger, deps.TrustedProxy))
 	adminMux.HandleFunc("/api/v1/admin/blocklist", handleAdminBlocklist(deps.AdminService, deps.Logger, deps.TrustedProxy))
+	adminMux.HandleFunc("/api/v1/admin/campaigns", handleAdminCampaigns(deps.AdminService, deps.Logger, deps.TrustedProxy))
+	adminMux.HandleFunc("/api/v1/admin/campaigns/export.csv", handleAdminCampaignsCSV(deps.AdminService))
+	adminMux.HandleFunc("/api/v1/admin/campaigns/", handleAdminCampaignDispatch(deps.AdminService, deps.Logger, deps.TrustedProxy, "/api/v1/admin/campaigns/"))
+	adminMux.HandleFunc("/api/v1/admin/invitations", handleAdminInvitations(deps.AdminService, deps.Logger, deps.TrustedProxy))
+	adminMux.HandleFunc("/api/v1/admin/allowlist", handleAdminAllowlist(deps.AdminService, deps.Logger, deps.TrustedProxy))
 	adminMux.HandleFunc("/api/v1/admin/audit", handleAdminAuditLog(deps.AdminService))
 	mux.Handle("/api/v1/admin/", admin.TokenAuthMiddleware(deps.AdminToken, adminMux))
 
@@ -430,6 +436,8 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 			CaptchaToken:   strings.TrimSpace(body.CaptchaToken),
 			Fingerprint:    strings.TrimSpace(body.Fingerprint),
 			Honeypot:       strings.TrimSpace(body.Honeypot),
+			CampaignID:     strings.TrimSpace(body.CampaignID),
+			InvitationCode: strings.TrimSpace(body.InvitationCode),
 		}
 
 		claim, err := readService.CreateClaim(r.Context(), claimRequest)
@@ -1186,6 +1194,188 @@ func handleAdminAuditLog(svc admin.AdminService) http.HandlerFunc {
 		}
 		WriteJSON(w, http.StatusOK, map[string]any{"entries": entries})
 	}
+}
+
+func handleAdminCampaigns(svc admin.AdminService, logger *observability.Logger, trustedProxy string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			limit := adminListLimitFromQuery(r, 100)
+			offset := 0
+			if v := r.URL.Query().Get("offset"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+					offset = n
+				}
+			}
+			campaigns, err := svc.ListCampaigns(r.Context(), limit, offset)
+			if err != nil {
+				WriteError(w, r, http.StatusInternalServerError, "campaigns_unavailable", "campaigns unavailable", nil)
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns})
+		case http.MethodPost:
+			if !requireJSONContentType(w, r) {
+				return
+			}
+			var body admin.CampaignRequest
+			if err := decodeJSONBody(w, r, &body); err != nil {
+				WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+				return
+			}
+			actor := actorFromRequest(r, trustedProxy)
+			campaign, err := svc.CreateCampaign(r.Context(), body, actor)
+			if err != nil {
+				if errors.Is(err, admin.ErrInvalidCampaign) {
+					WriteError(w, r, http.StatusBadRequest, "invalid_campaign", "invalid campaign", nil)
+					return
+				}
+				WriteError(w, r, http.StatusInternalServerError, "campaign_create_failed", "campaign create failed", nil)
+				return
+			}
+			logAdminAudit(logger, r, "campaign_create", actor, campaign.ID, map[string]any{"result": "success"})
+			WriteJSON(w, http.StatusCreated, campaign)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+		}
+	}
+}
+
+func handleAdminCampaignDispatch(svc admin.AdminService, logger *observability.Logger, trustedProxy, prefix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tail := strings.Trim(strings.TrimPrefix(r.URL.Path, prefix), "/")
+		parts := strings.Split(tail, "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] != "disable" {
+			handleNotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+		actor := actorFromRequest(r, trustedProxy)
+		if err := svc.DisableCampaign(r.Context(), parts[0], actor); err != nil {
+			if errors.Is(err, admin.ErrNotFound) {
+				WriteError(w, r, http.StatusNotFound, "campaign_not_found", "campaign not found", nil)
+				return
+			}
+			if errors.Is(err, admin.ErrInvalidCampaign) {
+				WriteError(w, r, http.StatusBadRequest, "invalid_campaign", "invalid campaign", nil)
+				return
+			}
+			WriteError(w, r, http.StatusInternalServerError, "campaign_disable_failed", "campaign disable failed", nil)
+			return
+		}
+		logAdminAudit(logger, r, "campaign_disable", actor, parts[0], map[string]any{"result": "success"})
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "disabled", "id": parts[0]})
+	}
+}
+
+func handleAdminInvitations(svc admin.AdminService, logger *observability.Logger, trustedProxy string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+		if !requireJSONContentType(w, r) {
+			return
+		}
+		var body admin.InvitationCodeRequest
+		if err := decodeJSONBody(w, r, &body); err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+			return
+		}
+		actor := actorFromRequest(r, trustedProxy)
+		code, err := svc.CreateInvitationCode(r.Context(), body, actor)
+		if err != nil {
+			if errors.Is(err, admin.ErrInvalidCampaign) {
+				WriteError(w, r, http.StatusBadRequest, "invalid_invitation", "invalid invitation", nil)
+				return
+			}
+			WriteError(w, r, http.StatusInternalServerError, "invitation_create_failed", "invitation create failed", nil)
+			return
+		}
+		logAdminAudit(logger, r, "invitation_create", actor, code.Code, map[string]any{"result": "success", "campaign_id": code.CampaignID})
+		WriteJSON(w, http.StatusCreated, code)
+	}
+}
+
+func handleAdminAllowlist(svc admin.AdminService, logger *observability.Logger, trustedProxy string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+		if !requireJSONContentType(w, r) {
+			return
+		}
+		var body admin.AllowlistAddRequest
+		if err := decodeJSONBody(w, r, &body); err != nil {
+			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+			return
+		}
+		actor := actorFromRequest(r, trustedProxy)
+		if err := svc.AddAllowlistEntry(r.Context(), body, actor); err != nil {
+			if errors.Is(err, admin.ErrInvalidCampaign) {
+				WriteError(w, r, http.StatusBadRequest, "invalid_allowlist_entry", "invalid allowlist entry", nil)
+				return
+			}
+			WriteError(w, r, http.StatusInternalServerError, "allowlist_add_failed", "allowlist add failed", nil)
+			return
+		}
+		logAdminAudit(logger, r, "campaign_allowlist_add", actor, strings.TrimSpace(body.CampaignID), map[string]any{"result": "success"})
+		WriteJSON(w, http.StatusCreated, map[string]string{"status": "allowlisted"})
+	}
+}
+
+func handleAdminCampaignsCSV(svc admin.AdminService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+			return
+		}
+		campaigns, err := svc.ListCampaigns(r.Context(), adminListLimitFromQuery(r, 500), 0)
+		if err != nil {
+			WriteError(w, r, http.StatusInternalServerError, "campaign_export_failed", "campaign export failed", nil)
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=campaigns.csv")
+		w.WriteHeader(http.StatusOK)
+		cw := csv.NewWriter(w)
+		_ = cw.Write([]string{"id", "name", "token_id", "scope", "budget_wei", "enabled", "starts_at", "ends_at", "created_at", "updated_at"})
+		for _, c := range campaigns {
+			budget := ""
+			if c.BudgetWei != nil {
+				budget = c.BudgetWei.String()
+			}
+			starts, ends := "", ""
+			if c.StartsAt != nil {
+				starts = c.StartsAt.UTC().Format(time.RFC3339)
+			}
+			if c.EndsAt != nil {
+				ends = c.EndsAt.UTC().Format(time.RFC3339)
+			}
+			_ = cw.Write([]string{csvSafe(c.ID), csvSafe(c.Name), csvSafe(c.TokenID), string(c.Scope), budget, strconv.FormatBool(c.Enabled), starts, ends, c.CreatedAt.UTC().Format(time.RFC3339), c.UpdatedAt.UTC().Format(time.RFC3339)})
+		}
+		cw.Flush()
+	}
+}
+
+func csvSafe(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return v
+	}
+	switch v[0] {
+	case '=', '+', '-', '@':
+		return "'" + v
+	}
+	return v
 }
 
 // handleAdminServiceError maps admin sentinel errors to HTTP status codes.

@@ -216,3 +216,8 @@ Phase 27 is closed as an advanced anti-abuse increment over persisted abuse sign
 ## Phase 28 closure
 
 Phase 28 is closed as a durable config and budget control increment. Operators can now edit a minimal non-secret runtime policy subset through admin-protected endpoints, with persisted SQLite overrides, durable audit summaries, and immediate claim-time application. The detailed implementation narrative is `phase28-config-budget-control.md`. Campaigns, allowlists, runtime token catalog mutation, and all secret-bearing configuration remain out of scope for later phases.
+
+
+## Phase 29 closure — Campaigns, allowlists, and invitation codes
+
+Phase 29 is closed as a production-safe campaign distribution increment. The faucet now persists campaigns, invitation codes, allowlist entries, and claim-level campaign attribution in SQLite; optional public claim fields remain backward compatible; admin-only campaign controls and CSV export are protected by the existing bearer-token middleware. Details are maintained in `phase29-campaigns-allowlists-invitation-codes.md`.

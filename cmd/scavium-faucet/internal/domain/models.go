@@ -43,21 +43,23 @@ const (
 
 // Claim is the canonical persisted faucet request record.
 type Claim struct {
-	ID            string
-	Address       common.Address
-	TokenID       string
-	TokenSymbol   string
-	TokenType     TokenType
-	TokenAddress  common.Address
-	TokenDecimals int
-	AmountWei     *big.Int
-	Status        ClaimStatus
-	Transaction   *Transaction
-	Reason        string
-	RetryCount    int
-	NextAttemptAt *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID             string
+	Address        common.Address
+	TokenID        string
+	TokenSymbol    string
+	TokenType      TokenType
+	TokenAddress   common.Address
+	TokenDecimals  int
+	AmountWei      *big.Int
+	Status         ClaimStatus
+	Transaction    *Transaction
+	Reason         string
+	RetryCount     int
+	NextAttemptAt  *time.Time
+	CampaignID     string
+	InvitationCode string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Transaction stores chain-level data associated with a claim payout.
@@ -225,17 +227,16 @@ const (
 
 // Campaign represents a bounded faucet distribution campaign.
 type Campaign struct {
-	ID         string
-	Name       string
-	TokenID    string
-	Scope      CampaignScope
-	BudgetWei  *big.Int
-	ClaimCount int64
-	Enabled    bool
-	StartsAt   *time.Time
-	EndsAt     *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID        string
+	Name      string
+	TokenID   string
+	Scope     CampaignScope
+	BudgetWei *big.Int
+	Enabled   bool
+	StartsAt  *time.Time
+	EndsAt    *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // InvitationCode represents a reusable invite/access code.
@@ -247,4 +248,29 @@ type InvitationCode struct {
 	Enabled    bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// CampaignAllowlistEntry grants one address access to an allowlist-scoped campaign.
+type CampaignAllowlistEntry struct {
+	CampaignID string
+	Address    common.Address
+	Note       string
+	CreatedAt  time.Time
+}
+
+// CampaignUsage summarizes durable campaign spend and claim counts.
+type CampaignUsage struct {
+	CampaignID string
+	ClaimCount int64
+	UsedWei    *big.Int
+}
+
+// IsValidCampaignScope reports whether scope is a supported campaign access mode.
+func IsValidCampaignScope(scope CampaignScope) bool {
+	switch scope {
+	case CampaignScopePublic, CampaignScopeInvite, CampaignScopeAllowlist:
+		return true
+	default:
+		return false
+	}
 }

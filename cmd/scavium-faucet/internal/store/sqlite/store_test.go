@@ -1421,3 +1421,74 @@ func TestRuntimePolicyPersistsClearsAndIgnoresInvalidRows(t *testing.T) {
 		t.Fatalf("cleared runtime policy = %#v", got)
 	}
 }
+
+func TestCampaignPersistenceAndUsage(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	campaign := domain.Campaign{ID: "camp-1", Name: "Phase 29", Scope: domain.CampaignScopeInvite, TokenID: "native", BudgetWei: big.NewInt(84), Enabled: true, CreatedAt: now, UpdatedAt: now}
+	created, err := store.CreateCampaign(context.Background(), campaign)
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	if created.ID != campaign.ID {
+		t.Fatalf("campaign id = %q", created.ID)
+	}
+	got, err := store.GetCampaign(context.Background(), campaign.ID)
+	if err != nil {
+		t.Fatalf("get campaign: %v", err)
+	}
+	if got.Scope != domain.CampaignScopeInvite || got.BudgetWei.Cmp(big.NewInt(84)) != 0 {
+		t.Fatalf("campaign = %#v", got)
+	}
+
+	claim := testClaim("campaign_claim")
+	claim.CampaignID = campaign.ID
+	if _, err := store.CreateClaim(context.Background(), claim); err != nil {
+		t.Fatalf("create campaign claim: %v", err)
+	}
+	usage, err := store.CampaignUsage(context.Background(), campaign.ID, []domain.ClaimStatus{domain.ClaimStatusQueued})
+	if err != nil {
+		t.Fatalf("campaign usage: %v", err)
+	}
+	if usage.ClaimCount != 1 || usage.UsedWei.Cmp(big.NewInt(42)) != 0 {
+		t.Fatalf("usage = %#v", usage)
+	}
+}
+
+func TestInvitationAndAllowlistPersistence(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "camp-allow", Name: "Allow", Scope: domain.CampaignScopeAllowlist, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	code, err := store.CreateInvitationCode(context.Background(), domain.InvitationCode{Code: "INVITE-1", CampaignID: "camp-allow", MaxUses: 1, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	if code.Uses != 0 {
+		t.Fatalf("initial uses = %d", code.Uses)
+	}
+	if err := store.ConsumeInvitationCode(context.Background(), code.Code); err != nil {
+		t.Fatalf("consume invitation: %v", err)
+	}
+	if err := store.ConsumeInvitationCode(context.Background(), code.Code); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("second consume err = %v, want not found", err)
+	}
+
+	addr := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "camp-allow", Address: addr, CreatedAt: now}); err != nil {
+		t.Fatalf("allowlist add: %v", err)
+	}
+	allowed, err := store.IsAddressAllowlisted(context.Background(), "camp-allow", addr)
+	if err != nil {
+		t.Fatalf("allowlist check: %v", err)
+	}
+	if !allowed {
+		t.Fatal("address not allowlisted")
+	}
+}

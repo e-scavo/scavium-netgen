@@ -87,6 +87,7 @@ func NewWithLogger(cfg config.Config, logger *observability.Logger) (*App, error
 
 	readService := faucet.NewPersistentReadService(cfg, store, store, store)
 	readService.SetAbuseSignalRecorder(store)
+	readService.SetCampaignStore(store)
 	readService.SetRiskEngine(abuse.NewProgressiveEnforcer(cfg, store))
 	captchaVerifier, err := newCaptchaVerifier(cfg)
 	if err != nil {

@@ -1,32 +1,65 @@
 # Phase 29 — Campaigns, Allowlists, and Invitation Codes
 
-## Implemented baseline
+## Completion status
 
-Phase 29 introduces a production-safe baseline for campaign-aware faucet distribution:
+Phase 29 is implemented as a production-safe, single-instance SQLite increment. It adds durable campaign distribution controls without changing the legacy public claim contract: clients that do not send campaign fields continue to claim through the normal faucet policy path.
 
-- campaign domain models and scopes
-- invitation-code domain model
-- optional public claim request fields:
-  - `campaign_id`
-  - `invitation_code`
-- backward-compatible request handling for legacy clients
-- preparatory interfaces for durable SQLite-backed campaign persistence
+## Implemented behavior
 
-## Scope boundaries
+- Durable SQLite schema for:
+  - campaigns
+  - campaign allowlist entries
+  - invitation codes
+  - claim-level `campaign_id` and `invitation_code` attribution
+- Public claim integration:
+  - optional `campaign_id`
+  - optional `invitation_code`
+  - legacy clients remain backward compatible
+  - private campaign failures use a generic `invalid_campaign` rejection reason
+- Campaign scopes:
+  - `public`: any otherwise eligible claimant can use the campaign
+  - `invite`: claimant must provide a valid enabled invitation code for the campaign
+  - `allowlist`: claimant wallet must be explicitly allowlisted for the campaign
+- Campaign controls:
+  - campaign enable/disable state
+  - optional campaign start/end windows
+  - optional token scoping
+  - optional campaign budget enforced against persisted claim usage
+- Admin API:
+  - `GET /api/v1/admin/campaigns`
+  - `POST /api/v1/admin/campaigns`
+  - `POST /api/v1/admin/campaigns/{id}/disable`
+  - `GET /api/v1/admin/campaigns/export.csv`
+  - `POST /api/v1/admin/invitations`
+  - `POST /api/v1/admin/allowlist`
+- Admin mutation audit:
+  - campaign create
+  - campaign disable
+  - invitation create
+  - allowlist add
+- CSV export:
+  - standard-library CSV generation
+  - bounded admin list limit
+  - spreadsheet-formula injection hardening for user-controlled string fields
 
-The implementation intentionally preserves:
+## Runtime ordering
 
-- existing normalized error envelopes
-- existing claim flow contracts
-- existing admin authentication requirements
-- Stage 4/professional-scale deferrals
+Campaign validation runs after token and blocklist validation and before captcha/risk/cooldown/rate-limit/claim persistence. Invitation code consumption occurs only for newly created invite-scoped claims after durable claim creation succeeds; idempotent replays return the existing claim without consuming another invitation use.
+
+## Security and privacy notes
+
+- Admin routes remain protected by the existing bearer-token middleware.
+- Public errors do not reveal whether a private allowlist entry or invitation campaign exists.
+- Campaign IDs and token IDs are sanitized at service boundaries and never used as unbounded metric labels.
+- CSV export prefixes dangerous leading spreadsheet characters with a single quote.
 
 ## Deferred items
 
-The following remain intentionally deferred:
+The following remain intentionally deferred as Stage 4/professional-scale features:
 
 - distributed campaign coordination
 - HA/distributed locks
 - external CRM integrations
-- advanced allowlist segmentation
-- automatic wallet refill orchestration
+- advanced segmentation beyond public/invite/allowlist scopes
+- tamper-evident audit chains
+- full reporting suite
