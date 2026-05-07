@@ -165,6 +165,7 @@ func NewHandler(deps Dependencies) http.Handler {
 	adminMux.HandleFunc("/api/v1/admin/claims", handleAdminListClaims(deps.AdminService))
 	adminMux.HandleFunc("/api/v1/admin/claim/", handleAdminClaimDispatch(deps.AdminService, deps.Logger, deps.TrustedProxy, "/api/v1/admin/claim/"))
 	adminMux.HandleFunc("/api/v1/admin/faucet/mode", handleAdminSetMode(deps.AdminService, deps.Logger, deps.TrustedProxy))
+	adminMux.HandleFunc("/api/v1/admin/policy", handleAdminPolicy(deps.AdminService, deps.Logger, deps.TrustedProxy))
 	adminMux.HandleFunc("/api/v1/admin/blocklist", handleAdminBlocklist(deps.AdminService, deps.Logger, deps.TrustedProxy))
 	adminMux.HandleFunc("/api/v1/admin/audit", handleAdminAuditLog(deps.AdminService))
 	mux.Handle("/api/v1/admin/", admin.TokenAuthMiddleware(deps.AdminToken, adminMux))
@@ -1053,6 +1054,52 @@ func handleAdminSetMode(svc admin.AdminService, logger *observability.Logger, tr
 		}
 		logAdminAudit(logger, r, "set_mode", actor, "faucet", map[string]any{"result": "success", "mode": body.Mode})
 		WriteJSON(w, http.StatusOK, map[string]string{"mode": body.Mode})
+	}
+}
+
+func handleAdminPolicy(svc admin.AdminService, logger *observability.Logger, trustedProxy string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			policy, err := svc.RuntimePolicy(r.Context())
+			if err != nil {
+				WriteError(w, r, http.StatusInternalServerError, "runtime_policy_unavailable", "runtime policy unavailable", nil)
+				return
+			}
+			WriteJSON(w, http.StatusOK, policy)
+		case http.MethodPut:
+			if !requireJSONContentType(w, r) {
+				return
+			}
+			var body admin.SetRuntimePolicyRequest
+			if err := decodeJSONBody(w, r, &body); err != nil {
+				WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+				return
+			}
+			actor := actorFromRequest(r, trustedProxy)
+			policy, err := svc.SetRuntimePolicy(r.Context(), body, actor)
+			if err != nil {
+				if errors.Is(err, admin.ErrInvalidMode) {
+					WriteError(w, r, http.StatusBadRequest, "invalid_runtime_policy", "runtime policy values must be non-negative integers", nil)
+					return
+				}
+				WriteError(w, r, http.StatusInternalServerError, "runtime_policy_update_failed", "runtime policy update failed", nil)
+				return
+			}
+			logAdminAudit(logger, r, "set_runtime_policy", actor, "policy", map[string]any{"result": "success"})
+			WriteJSON(w, http.StatusOK, policy)
+		case http.MethodDelete:
+			actor := actorFromRequest(r, trustedProxy)
+			if err := svc.ClearRuntimePolicy(r.Context(), actor); err != nil {
+				WriteError(w, r, http.StatusInternalServerError, "runtime_policy_clear_failed", "runtime policy clear failed", nil)
+				return
+			}
+			logAdminAudit(logger, r, "clear_runtime_policy", actor, "policy", map[string]any{"result": "success"})
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+		default:
+			w.Header().Set("Allow", "GET, PUT, DELETE")
+			WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+		}
 	}
 }
 

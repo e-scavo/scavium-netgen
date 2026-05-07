@@ -252,3 +252,10 @@ Restore helper variables:
 | `SCAVIUM_FAUCET_ALLOW_LIVE_RESTORE` | `no` | Emergency override for the live-service guard. Avoid in production. |
 
 These variables are script controls only. They do not change the faucet API, token catalog, signing behavior, or admin authorization contract. Backup bundles may contain secrets from the env file, so they must be handled like production credentials. Restore mode intentionally requires a checksum-bearing bundle produced by the backup helper and restores optional SQLite WAL/SHM companions only when they are present in that verified bundle.
+
+
+## Phase 28 runtime policy overrides
+
+The startup environment remains the source of defaults. Phase 28 adds a SQLite-backed override layer for a small non-secret subset: cooldown seconds, IP/hour rate limit, address/day rate limit, aggregate daily budget, and token-specific daily budgets. Persisted overrides take precedence at runtime when present and valid; clearing the policy restores environment/default behavior without a restart. Secrets, RPC URLs, private keys, captcha secrets, CORS, trusted proxy, token catalog metadata, token contract addresses, decimals, and claim amounts are not runtime-editable.
+
+Use `GET /api/v1/admin/policy`, `PUT /api/v1/admin/policy`, and `DELETE /api/v1/admin/policy` with the existing admin bearer token. Every mutation is persisted to `admin_audit_logs` with bounded before/after summaries and no secret values.

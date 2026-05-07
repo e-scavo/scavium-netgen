@@ -660,3 +660,22 @@ After deploying the Phase 26 frontend, run these browser checks against the publ
 6. If `SCAVIUM_FAUCET_EXPLORER_TX_URL` is configured, confirm explorer actions appear only after a valid `tx_hash` is returned. Remove or malform the explorer template in a staging environment and confirm the UI suppresses links.
 7. Put the faucet in `paused`, `maintenance`, and `no_funds` modes and confirm the public banner disables submission without hiding read-only status/history actions.
 8. Resize the viewport below 640px and confirm buttons, token details, status cards, and history entries stack without horizontal scrolling.
+
+
+## Runtime policy rollback
+
+Phase 28 runtime policy changes are admin-protected and persisted in SQLite. Inspect current overrides with:
+
+```bash
+curl -s -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  http://127.0.0.1:18080/api/v1/admin/policy
+```
+
+Replace the complete override set with `PUT /api/v1/admin/policy`, using only non-secret budget/throttle fields. To roll back to environment/default configuration immediately:
+
+```bash
+curl -s -X DELETE -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
+  http://127.0.0.1:18080/api/v1/admin/policy
+```
+
+After a change, check `/api/v1/config`, an address eligibility response, and `/api/v1/admin/audit?limit=20`. Do not use runtime policy for secrets, RPC endpoints, token contract metadata, or signer configuration; those remain restart-managed.

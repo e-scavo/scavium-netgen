@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"fmt"
+	"math/big"
 	"net/http"
 	"sort"
 	"strings"
@@ -114,6 +116,25 @@ type QueueResponse struct {
 	UpdatedAt string              `json:"updated_at"`
 }
 
+// RuntimePolicyResponse is the admin-safe view of mutable runtime policy.
+type RuntimePolicyResponse struct {
+	CooldownSeconds     int               `json:"cooldown_seconds"`
+	RateLimitIPPerHour  int               `json:"rate_limit_ip_per_hour"`
+	RateLimitAddrPerDay int               `json:"rate_limit_addr_per_day"`
+	DailyBudgetWei      string            `json:"daily_budget_wei,omitempty"`
+	TokenDailyBudgetWei map[string]string `json:"token_daily_budget_wei,omitempty"`
+	Source              string            `json:"source"`
+}
+
+// SetRuntimePolicyRequest is the body for PUT /api/v1/admin/policy.
+type SetRuntimePolicyRequest struct {
+	CooldownSeconds     int               `json:"cooldown_seconds"`
+	RateLimitIPPerHour  int               `json:"rate_limit_ip_per_hour"`
+	RateLimitAddrPerDay int               `json:"rate_limit_addr_per_day"`
+	DailyBudgetWei      string            `json:"daily_budget_wei"`
+	TokenDailyBudgetWei map[string]string `json:"token_daily_budget_wei"`
+}
+
 // QueueControlRequest is the body for POST /api/v1/admin/queue/{retry,cancel}.
 type QueueControlRequest struct {
 	ID string `json:"id"`
@@ -161,6 +182,9 @@ type AdminService interface {
 	BlocklistList(ctx context.Context) ([]abuse.BlocklistEntry, error)
 	BlocklistAdd(ctx context.Context, kt abuse.KeyType, value, reason, actor string) error
 	BlocklistRemove(ctx context.Context, kt abuse.KeyType, value, actor string) error
+	RuntimePolicy(ctx context.Context) (RuntimePolicyResponse, error)
+	SetRuntimePolicy(ctx context.Context, req SetRuntimePolicyRequest, actor string) (RuntimePolicyResponse, error)
+	ClearRuntimePolicy(ctx context.Context, actor string) error
 	RecentAuditLog(ctx context.Context, limit int) ([]AuditEntry, error)
 }
 
@@ -185,6 +209,13 @@ type ControlStore interface {
 type AuditStore interface {
 	AppendAdminAudit(ctx context.Context, entry domain.AdminAuditEntry) error
 	ListAdminAudit(ctx context.Context, limit int) ([]domain.AdminAuditEntry, error)
+}
+
+// RuntimePolicyStore provides durable runtime policy operations.
+type RuntimePolicyStore interface {
+	GetRuntimePolicy(ctx context.Context) (domain.RuntimePolicy, error)
+	SetRuntimePolicy(ctx context.Context, policy domain.RuntimePolicy) error
+	ClearRuntimePolicy(ctx context.Context) error
 }
 
 // BlocklistStore provides durable admin blocklist operations.
@@ -778,4 +809,127 @@ func TokenAuthMiddleware(token string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *InMemoryAdminService) RuntimePolicy(context.Context) (RuntimePolicyResponse, error) {
+	return RuntimePolicyResponse{Source: "env"}, nil
+}
+
+func (s *InMemoryAdminService) SetRuntimePolicy(_ context.Context, req SetRuntimePolicyRequest, actor string) (RuntimePolicyResponse, error) {
+	policy, err := runtimePolicyFromRequest(req)
+	if err != nil {
+		return RuntimePolicyResponse{}, err
+	}
+	resp := runtimePolicyResponse(policy, "runtime")
+	s.auditLog.Append(AuditEntry{Action: "set_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicySummary(resp), CreatedAt: s.now().UTC().Format(time.RFC3339)})
+	return resp, nil
+}
+
+func (s *InMemoryAdminService) ClearRuntimePolicy(_ context.Context, actor string) error {
+	s.auditLog.Append(AuditEntry{Action: "clear_runtime_policy", Actor: actor, Target: "policy", CreatedAt: s.now().UTC().Format(time.RFC3339)})
+	return nil
+}
+
+func (s *SQLiteReadAdminService) RuntimePolicy(ctx context.Context) (RuntimePolicyResponse, error) {
+	store, ok := s.reads.(RuntimePolicyStore)
+	if !ok {
+		return s.fallback.RuntimePolicy(ctx)
+	}
+	policy, err := store.GetRuntimePolicy(ctx)
+	if err != nil {
+		return RuntimePolicyResponse{}, err
+	}
+	return runtimePolicyResponse(policy, "runtime"), nil
+}
+
+func (s *SQLiteReadAdminService) SetRuntimePolicy(ctx context.Context, req SetRuntimePolicyRequest, actor string) (RuntimePolicyResponse, error) {
+	store, ok := s.reads.(RuntimePolicyStore)
+	if !ok {
+		return s.fallback.SetRuntimePolicy(ctx, req, actor)
+	}
+	before, err := store.GetRuntimePolicy(ctx)
+	if err != nil {
+		return RuntimePolicyResponse{}, err
+	}
+	policy, err := runtimePolicyFromRequest(req)
+	if err != nil {
+		return RuntimePolicyResponse{}, err
+	}
+	if err := store.SetRuntimePolicy(ctx, policy); err != nil {
+		return RuntimePolicyResponse{}, err
+	}
+	after := runtimePolicyResponse(policy, "runtime")
+	if err := s.appendAudit(ctx, AuditEntry{Action: "set_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicyChangeSummary(runtimePolicyResponse(before, "runtime"), after), CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+		return RuntimePolicyResponse{}, err
+	}
+	return after, nil
+}
+
+func (s *SQLiteReadAdminService) ClearRuntimePolicy(ctx context.Context, actor string) error {
+	store, ok := s.reads.(RuntimePolicyStore)
+	if !ok {
+		return s.fallback.ClearRuntimePolicy(ctx, actor)
+	}
+	before, err := store.GetRuntimePolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if err := store.ClearRuntimePolicy(ctx); err != nil {
+		return err
+	}
+	return s.appendAudit(ctx, AuditEntry{Action: "clear_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicySummary(runtimePolicyResponse(before, "runtime")), CreatedAt: s.now().UTC().Format(time.RFC3339)})
+}
+
+func runtimePolicyFromRequest(req SetRuntimePolicyRequest) (domain.RuntimePolicy, error) {
+	if req.CooldownSeconds < 0 || req.RateLimitIPPerHour < 0 || req.RateLimitAddrPerDay < 0 {
+		return domain.RuntimePolicy{}, ErrInvalidMode
+	}
+	policy := domain.RuntimePolicy{CooldownSeconds: req.CooldownSeconds, RateLimitIPPerHour: req.RateLimitIPPerHour, RateLimitAddrPerDay: req.RateLimitAddrPerDay}
+	if strings.TrimSpace(req.DailyBudgetWei) != "" {
+		v, ok := new(big.Int).SetString(strings.TrimSpace(req.DailyBudgetWei), 10)
+		if !ok || v.Sign() < 0 {
+			return domain.RuntimePolicy{}, ErrInvalidMode
+		}
+		policy.DailyBudgetWei = v
+	}
+	if len(req.TokenDailyBudgetWei) > 0 {
+		policy.TokenDailyBudgetWei = make(map[string]*big.Int, len(req.TokenDailyBudgetWei))
+		for tokenID, raw := range req.TokenDailyBudgetWei {
+			tokenID = strings.TrimSpace(tokenID)
+			if tokenID == "" {
+				return domain.RuntimePolicy{}, ErrInvalidMode
+			}
+			v, ok := new(big.Int).SetString(strings.TrimSpace(raw), 10)
+			if !ok || v.Sign() < 0 {
+				return domain.RuntimePolicy{}, ErrInvalidMode
+			}
+			policy.TokenDailyBudgetWei[tokenID] = v
+		}
+	}
+	return policy, nil
+}
+
+func runtimePolicyResponse(policy domain.RuntimePolicy, source string) RuntimePolicyResponse {
+	policy = domain.CopyRuntimePolicy(policy)
+	resp := RuntimePolicyResponse{CooldownSeconds: policy.CooldownSeconds, RateLimitIPPerHour: policy.RateLimitIPPerHour, RateLimitAddrPerDay: policy.RateLimitAddrPerDay, Source: source}
+	if policy.DailyBudgetWei != nil {
+		resp.DailyBudgetWei = policy.DailyBudgetWei.String()
+	}
+	if len(policy.TokenDailyBudgetWei) > 0 {
+		resp.TokenDailyBudgetWei = make(map[string]string, len(policy.TokenDailyBudgetWei))
+		for tokenID, budget := range policy.TokenDailyBudgetWei {
+			if budget != nil {
+				resp.TokenDailyBudgetWei[tokenID] = budget.String()
+			}
+		}
+	}
+	return resp
+}
+
+func runtimePolicySummary(resp RuntimePolicyResponse) string {
+	return fmt.Sprintf("cooldown=%d ip_per_hour=%d addr_per_day=%d daily_budget=%s token_budgets=%d", resp.CooldownSeconds, resp.RateLimitIPPerHour, resp.RateLimitAddrPerDay, resp.DailyBudgetWei, len(resp.TokenDailyBudgetWei))
+}
+
+func runtimePolicyChangeSummary(before, after RuntimePolicyResponse) string {
+	return "before{" + runtimePolicySummary(before) + "} after{" + runtimePolicySummary(after) + "}"
 }

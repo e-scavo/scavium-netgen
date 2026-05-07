@@ -174,12 +174,12 @@ Phase 24 is closed. Continue with the remaining features from `docs/scavium_fauc
 - Optional JS/honeypot challenge.
 - Manual review only after admin persistence is stable.
 
-### Phase 28 — Config and Budget Control
+### Phase 28 — Config and Budget Control — CLOSED
 
-- Dynamic budget/config editing with durable audit.
-- Safe runtime policy changes.
-- Optional allowlist groundwork.
-- No campaign system yet unless explicitly scheduled.
+- Durable SQLite runtime policy store for a minimal non-secret subset.
+- Admin-protected policy read/update/clear API with durable audit.
+- Runtime application for cooldown, rate-limit, aggregate budget, and token daily-budget enforcement.
+- No campaign system, allowlist behavior, secret mutation, or token catalog mutation introduced.
 
 ### Phase 29 — Campaigns, Allowlists, and Invitation Codes
 

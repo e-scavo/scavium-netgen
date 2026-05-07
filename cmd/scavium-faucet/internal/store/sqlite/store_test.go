@@ -33,7 +33,7 @@ func TestMigrateCreatesRequiredTables(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "admin_audit_logs", "admin_blocklist", "schema_migrations"} {
+	for _, table := range []string{"requests", "transactions", "rate_limits", "config", "abuse_signals", "admin_audit_logs", "admin_blocklist", "runtime_policy", "schema_migrations"} {
 		if !tableExists(t, store.db, table) {
 			t.Fatalf("table %s does not exist", table)
 		}
@@ -44,7 +44,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
 
-	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip", "idx_admin_audit_logs_created_at", "idx_admin_blocklist_type_value", "idx_admin_blocklist_blocked_at"} {
+	for _, index := range []string{"idx_requests_address", "idx_requests_status", "idx_requests_created_at", "idx_abuse_signals_kind", "idx_abuse_signals_remote_ip", "idx_admin_audit_logs_created_at", "idx_admin_blocklist_type_value", "idx_admin_blocklist_blocked_at", "idx_runtime_policy_updated_at"} {
 		if !indexExists(t, store.db, index) {
 			t.Fatalf("index %s does not exist", index)
 		}
@@ -1354,5 +1354,51 @@ func TestListAbuseSignalSummariesGroupsRecentKinds(t *testing.T) {
 	}
 	if summaries[1].Kind != domain.AbuseSignalRateLimited || summaries[1].Count != 1 {
 		t.Fatalf("second summary = %+v", summaries[1])
+	}
+}
+
+func TestRuntimePolicyPersistsClearsAndIgnoresInvalidRows(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	policy := domain.RuntimePolicy{
+		CooldownSeconds:     45,
+		RateLimitIPPerHour:  6,
+		RateLimitAddrPerDay: 7,
+		DailyBudgetWei:      big.NewInt(1000),
+		TokenDailyBudgetWei: map[string]*big.Int{"native": big.NewInt(500)},
+	}
+	if err := store.SetRuntimePolicy(context.Background(), policy); err != nil {
+		t.Fatalf("set runtime policy: %v", err)
+	}
+	got, err := store.GetRuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("get runtime policy: %v", err)
+	}
+	if got.CooldownSeconds != 45 || got.RateLimitIPPerHour != 6 || got.RateLimitAddrPerDay != 7 {
+		t.Fatalf("runtime policy ints = %#v", got)
+	}
+	if got.DailyBudgetWei == nil || got.DailyBudgetWei.String() != "1000" || got.TokenDailyBudgetWei["native"].String() != "500" {
+		t.Fatalf("runtime policy budgets = %#v", got)
+	}
+	if _, err := store.db.Exec(`INSERT OR REPLACE INTO runtime_policy (key, value, updated_at) VALUES ('cooldown_seconds', 'bad', 'now')`); err != nil {
+		t.Fatalf("insert invalid policy: %v", err)
+	}
+	got, err = store.GetRuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("get runtime policy after invalid row: %v", err)
+	}
+	if got.CooldownSeconds != 0 {
+		t.Fatalf("invalid cooldown = %d, want 0 fallback", got.CooldownSeconds)
+	}
+	if err := store.ClearRuntimePolicy(context.Background()); err != nil {
+		t.Fatalf("clear runtime policy: %v", err)
+	}
+	got, err = store.GetRuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("get cleared runtime policy: %v", err)
+	}
+	if got.CooldownSeconds != 0 || got.DailyBudgetWei != nil || len(got.TokenDailyBudgetWei) != 0 {
+		t.Fatalf("cleared runtime policy = %#v", got)
 	}
 }
