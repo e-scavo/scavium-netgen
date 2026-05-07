@@ -1127,3 +1127,86 @@ func TestPersistentReadServiceCampaignAllowlistRejectsUnknownAddress(t *testing.
 		t.Fatalf("err = %v, want claim rejected", err)
 	}
 }
+
+type failingInviteConsumeCampaignStore struct {
+	campaign domain.Campaign
+	invite   domain.InvitationCode
+	err      error
+}
+
+func (s failingInviteConsumeCampaignStore) CreateCampaign(context.Context, domain.Campaign) (domain.Campaign, error) {
+	return domain.Campaign{}, domain.ErrNotFound
+}
+
+func (s failingInviteConsumeCampaignStore) GetCampaign(_ context.Context, id string) (domain.Campaign, error) {
+	if id != s.campaign.ID {
+		return domain.Campaign{}, domain.ErrNotFound
+	}
+	return s.campaign, nil
+}
+
+func (s failingInviteConsumeCampaignStore) ListCampaigns(context.Context, int, int) ([]domain.Campaign, error) {
+	return []domain.Campaign{s.campaign}, nil
+}
+
+func (s failingInviteConsumeCampaignStore) DisableCampaign(context.Context, string) error { return nil }
+
+func (s failingInviteConsumeCampaignStore) CreateInvitationCode(context.Context, domain.InvitationCode) (domain.InvitationCode, error) {
+	return domain.InvitationCode{}, domain.ErrNotFound
+}
+
+func (s failingInviteConsumeCampaignStore) GetInvitationCode(_ context.Context, code string) (domain.InvitationCode, error) {
+	if code != s.invite.Code {
+		return domain.InvitationCode{}, domain.ErrNotFound
+	}
+	return s.invite, nil
+}
+
+func (s failingInviteConsumeCampaignStore) ConsumeInvitationCode(context.Context, string) error {
+	if s.err != nil {
+		return s.err
+	}
+	return domain.ErrNotFound
+}
+
+func (s failingInviteConsumeCampaignStore) AddCampaignAllowlistEntry(context.Context, domain.CampaignAllowlistEntry) error {
+	return nil
+}
+
+func (s failingInviteConsumeCampaignStore) IsAddressAllowlisted(context.Context, string, common.Address) (bool, error) {
+	return false, nil
+}
+
+func (s failingInviteConsumeCampaignStore) CampaignUsage(context.Context, string, []domain.ClaimStatus) (domain.CampaignUsage, error) {
+	return domain.CampaignUsage{UsedWei: big.NewInt(0)}, nil
+}
+
+func TestPersistentReadServiceRejectsCreatedInviteClaimWhenConsumeFails(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+
+	now := persistentTestNow()
+	campaigns := failingInviteConsumeCampaignStore{
+		campaign: domain.Campaign{ID: "invite-race", Name: "Invite Race", Scope: domain.CampaignScopeInvite, Enabled: true, CreatedAt: now, UpdatedAt: now},
+		invite:   domain.InvitationCode{Code: "RACE1", CampaignID: "invite-race", MaxUses: 1, Uses: 0, Enabled: true, CreatedAt: now, UpdatedAt: now},
+		err:      domain.ErrNotFound,
+	}
+	service := newPersistentTestService(t, store, persistentTestConfig(), now)
+	service.SetCampaignStore(campaigns)
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), CampaignID: "invite-race", InvitationCode: "RACE1"})
+	if !errors.Is(err, ErrClaimRejected) {
+		t.Fatalf("create claim error = %v, want ErrClaimRejected", err)
+	}
+
+	claims, err := store.ListClaimsByAddress(context.Background(), persistentTestAddress(), 10)
+	if err != nil {
+		t.Fatalf("list claims: %v", err)
+	}
+	if len(claims) != 1 {
+		t.Fatalf("claims len = %d, want 1", len(claims))
+	}
+	if claims[0].Status != domain.ClaimStatusRejected || claims[0].Reason != "invalid_campaign" {
+		t.Fatalf("claim status/reason = %q/%q, want rejected/invalid_campaign", claims[0].Status, claims[0].Reason)
+	}
+}

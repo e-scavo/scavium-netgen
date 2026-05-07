@@ -75,6 +75,10 @@ The fourth Phase 29 fix pass closed the remaining admin-control gap from the ste
 
 The fifth Phase 29 fix pass closed the HTTP test regression introduced with the audited campaign update endpoint. The campaign update endpoint test now sends a real `CampaignRequest` through the shared admin request helper instead of passing a prebuilt buffer that the helper marshaled as an unrelated JSON object. This keeps the test aligned with the actual public admin API contract and verifies create-then-update wiring end to end without changing runtime behavior.
 
+## Fix 6 verification
+
+The sixth Phase 29 fix pass closed a final invite-claim consistency edge case. If invitation validation succeeds before claim persistence but invitation consumption fails after the durable claim is created, the claim is now immediately marked `rejected` with `invalid_campaign` before returning the public rejection. This prevents an unqueued invite claim from remaining in a received/budget-counting state after a race with a max-use invitation code or another durable consume failure. A focused persistent-service test covers the post-create consume-failure path.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:

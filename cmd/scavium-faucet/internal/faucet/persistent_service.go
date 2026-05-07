@@ -483,6 +483,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 	}
 	if inviteCode != "" {
 		if err := s.campaigns.ConsumeInvitationCode(ctx, inviteCode); err != nil {
+			_, _ = s.claims.UpdateClaimStatus(ctx, created.ID, domain.ClaimStatusRejected, "invalid_campaign")
 			return ClaimResponse{}, claimError(ErrClaimRejected, "invalid_campaign")
 		}
 	}
