@@ -80,9 +80,32 @@ func TestHandlerServesStaticJS(t *testing.T) {
 	if !strings.Contains(body, "formatDecimalAmount") {
 		t.Fatal("faucet.js missing token amount display formatting")
 	}
-	for _, want := range []string{"/api/v1/address/", "loadAddressStatus", "loadAddressHistory", "txExplorerHref", "validExplorerTemplate", "data.status || data.mode"} {
+	for _, want := range []string{"/api/v1/address/", "loadAddressStatus", "loadAddressHistory", "txExplorerHref", "validExplorerTemplate", "isAbsoluteHTTPURLTemplate", "Loading address history", "data.status || data.mode"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("faucet.js missing Phase 26 UX logic %q", want)
 		}
+	}
+}
+
+func TestFrontendExplorerLinksRequireAbsoluteSafeTemplates(t *testing.T) {
+	h := Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/static/faucet.js", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		`/^https?:\/\//i.test`,
+		`new URL(template.replace("{txHash}"`,
+		`new URL(href)`,
+		`/^0x[0-9a-fA-F]{64}$/.test`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("faucet.js missing safe explorer guard %q", want)
+		}
+	}
+	if strings.Contains(body, `new URL(href, window.location.origin)`) {
+		t.Fatal("faucet.js must not resolve explorer transaction links relative to the faucet origin")
 	}
 }

@@ -242,6 +242,6 @@ Wallet refill and rotation remain manual. Phase 23 does not add treasury automat
 
 The public frontend remains dependency-free and CSP-compatible: JavaScript is still served from `/static/faucet.js`, and the HTML does not use inline event handlers. Phase 26 adds address eligibility and public address-history panels that call the existing Phase 25 public APIs with the address already typed by the user. These panels render only public-safe response fields and do not expose raw abuse signals, fingerprints, captcha tokens, idempotency keys, internal queue controls, admin audit data, or private blocklist notes.
 
-Explorer links are rendered defensively. The frontend requires a configured transaction URL template containing `{txHash}` and a syntactically valid EVM transaction hash before emitting an external link. Malformed templates or hashes suppress the link instead of constructing an unsafe URL.
+Explorer links are rendered defensively. The frontend requires an absolute HTTP(S) transaction URL template containing `{txHash}` and a syntactically valid EVM transaction hash before emitting an external link. Relative, non-HTTP(S), malformed templates, or malformed hashes suppress the link instead of constructing an unsafe URL.
 
 The in-page privacy and terms sections are safe defaults for the testnet faucet. They are not a substitute for legal review; operators with jurisdiction-specific requirements should replace the static copy or serve reviewed legal pages through nginx while preserving the no-secret/no-inline-script frontend posture.

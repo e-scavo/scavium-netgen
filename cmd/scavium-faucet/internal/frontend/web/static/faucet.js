@@ -60,12 +60,16 @@
     button.removeAttribute("aria-busy");
   }
 
+  function isAbsoluteHTTPURLTemplate(template) {
+    return /^https?:\/\//i.test(String(template || ""));
+  }
+
   function validExplorerTemplate(template) {
-    if (!template || template.indexOf("{txHash}") === -1) {
+    if (!template || template.indexOf("{txHash}") === -1 || !isAbsoluteHTTPURLTemplate(template)) {
       return false;
     }
     try {
-      var probe = new URL(template.replace("{txHash}", "0x" + "0".repeat(64)), window.location.origin);
+      var probe = new URL(template.replace("{txHash}", "0x" + "0".repeat(64)));
       return probe.protocol === "https:" || probe.protocol === "http:";
     } catch (_) {
       return false;
@@ -79,8 +83,8 @@
     }
     try {
       var href = state.explorerTxURL.replace("{txHash}", encodeURIComponent(hash));
-      var url = new URL(href, window.location.origin);
-      if (url.protocol !== "https:" && url.protocol !== "http:") {
+      var url = new URL(href);
+      if ((url.protocol !== "https:" && url.protocol !== "http:") || !isAbsoluteHTTPURLTemplate(href)) {
         return "";
       }
       return url.href;
@@ -596,6 +600,7 @@
       list.innerHTML = "";
       setStatus(status, "No public claims found for this address.", "info");
       setHidden(card, false);
+      card.focus && card.focus();
       return;
     }
     setStatus(status, "Showing latest " + claims.length + " public claim" + (claims.length === 1 ? "" : "s") + ".", "info");
@@ -611,6 +616,7 @@
       '</article>';
     }).join("");
     setHidden(card, false);
+    card.focus && card.focus();
   }
 
   function renderClaim(data) {
@@ -783,6 +789,7 @@
     }
     var btn = el("btn-address-status");
     setBusy(btn, true, "Checking...");
+    setStatus(el("msg"), "Checking address eligibility...", "info");
     try {
       var response = await fetch("/api/v1/address/" + encodeURIComponent(addr) + "/status", { headers: { Accept: "application/json" } });
       var data = await readJSON(response);
@@ -807,6 +814,9 @@
     }
     var btn = el("btn-address-history");
     setBusy(btn, true, "Loading...");
+    setStatus(el("address-history-status"), "Loading address history...", "info");
+    setHidden(el("address-history-card"), false);
+    setStatus(el("msg"), "Loading address history...", "info");
     try {
       var response = await fetch("/api/v1/address/" + encodeURIComponent(addr) + "/history?limit=10&offset=0", { headers: { Accept: "application/json" } });
       var data = await readJSON(response);
