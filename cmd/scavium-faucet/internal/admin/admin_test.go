@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -652,5 +653,143 @@ func TestSQLiteReadAdminServiceUsesPersistedRetryCancel(t *testing.T) {
 		if entry.Detail != string(abuse.KeyTypeIP) {
 			t.Fatalf("blocklist audit detail = %q, want %q", entry.Detail, abuse.KeyTypeIP)
 		}
+	}
+}
+
+type failingRuntimePolicyAuditStore struct {
+	policy    domain.RuntimePolicy
+	appendErr error
+}
+
+func (s *failingRuntimePolicyAuditStore) GetClaim(context.Context, string) (domain.Claim, error) {
+	return domain.Claim{}, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) ListAdminClaims(context.Context, int, int) ([]domain.Claim, error) {
+	return nil, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) AdminClaimCounts(context.Context) (map[string]int, error) {
+	return nil, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) AdminQueueCounts(context.Context, time.Time) (map[string]int, int, int, int, int, int, error) {
+	return nil, 0, 0, 0, 0, 0, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) ListAdminQueueClaims(context.Context, int) ([]domain.Claim, error) {
+	return nil, nil
+}
+
+func (s *failingRuntimePolicyAuditStore) GetRuntimePolicy(context.Context) (domain.RuntimePolicy, error) {
+	return domain.CopyRuntimePolicy(s.policy), nil
+}
+
+func (s *failingRuntimePolicyAuditStore) SetRuntimePolicy(_ context.Context, policy domain.RuntimePolicy) error {
+	s.policy = domain.CopyRuntimePolicy(policy)
+	return nil
+}
+
+func (s *failingRuntimePolicyAuditStore) ClearRuntimePolicy(context.Context) error {
+	s.policy = domain.RuntimePolicy{}
+	return nil
+}
+
+func (s *failingRuntimePolicyAuditStore) AppendAdminAudit(context.Context, domain.AdminAuditEntry) error {
+	return s.appendErr
+}
+
+func (s *failingRuntimePolicyAuditStore) ListAdminAudit(context.Context, int) ([]domain.AdminAuditEntry, error) {
+	return nil, nil
+}
+
+func TestSQLiteReadAdminServiceRollsBackRuntimePolicyWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := &failingRuntimePolicyAuditStore{
+		policy:    domain.RuntimePolicy{CooldownSeconds: 30, DailyBudgetWei: big.NewInt(100)},
+		appendErr: auditErr,
+	}
+	svc := NewSQLiteReadAdminService(store)
+
+	_, err := svc.SetRuntimePolicy(context.Background(), SetRuntimePolicyRequest{CooldownSeconds: 90, DailyBudgetWei: "200"}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("SetRuntimePolicy error = %v, want audit error", err)
+	}
+	if store.policy.CooldownSeconds != 30 || store.policy.DailyBudgetWei == nil || store.policy.DailyBudgetWei.String() != "100" {
+		t.Fatalf("policy after failed audited set = %#v, want original", store.policy)
+	}
+}
+
+func TestSQLiteReadAdminServiceRollsBackRuntimePolicyClearWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := &failingRuntimePolicyAuditStore{
+		policy:    domain.RuntimePolicy{CooldownSeconds: 30, TokenDailyBudgetWei: map[string]*big.Int{"native": big.NewInt(100)}},
+		appendErr: auditErr,
+	}
+	svc := NewSQLiteReadAdminService(store)
+
+	err := svc.ClearRuntimePolicy(context.Background(), "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("ClearRuntimePolicy error = %v, want audit error", err)
+	}
+	if store.policy.CooldownSeconds != 30 || store.policy.TokenDailyBudgetWei["native"] == nil || store.policy.TokenDailyBudgetWei["native"].String() != "100" {
+		t.Fatalf("policy after failed audited clear = %#v, want original", store.policy)
+	}
+}
+
+func TestInMemoryAdminServiceRejectsInvalidRuntimePolicyWithDedicatedError(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	_, err := svc.SetRuntimePolicy(context.Background(), SetRuntimePolicyRequest{CooldownSeconds: -1}, "operator")
+	if !errors.Is(err, ErrInvalidRuntimePolicy) {
+		t.Fatalf("SetRuntimePolicy error = %v, want ErrInvalidRuntimePolicy", err)
+	}
+	if errors.Is(err, ErrInvalidMode) {
+		t.Fatalf("SetRuntimePolicy error = %v, must not be ErrInvalidMode", err)
+	}
+}
+
+func TestInMemoryAdminServicePersistsRuntimePolicyView(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	initial, err := svc.RuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("initial runtime policy: %v", err)
+	}
+	if initial.Source != "env" {
+		t.Fatalf("initial source = %q, want env", initial.Source)
+	}
+
+	updated, err := svc.SetRuntimePolicy(context.Background(), SetRuntimePolicyRequest{
+		CooldownSeconds:     45,
+		RateLimitIPPerHour:  7,
+		RateLimitAddrPerDay: 3,
+		DailyBudgetWei:      "1000",
+		TokenDailyBudgetWei: map[string]string{"native": "250"},
+	}, "operator")
+	if err != nil {
+		t.Fatalf("set runtime policy: %v", err)
+	}
+	if updated.Source != "runtime" || updated.CooldownSeconds != 45 || updated.DailyBudgetWei != "1000" || updated.TokenDailyBudgetWei["native"] != "250" {
+		t.Fatalf("updated runtime policy = %#v", updated)
+	}
+
+	got, err := svc.RuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("get runtime policy: %v", err)
+	}
+	if got.Source != "runtime" || got.RateLimitIPPerHour != 7 || got.RateLimitAddrPerDay != 3 || got.TokenDailyBudgetWei["native"] != "250" {
+		t.Fatalf("persisted runtime policy = %#v", got)
+	}
+
+	if err := svc.ClearRuntimePolicy(context.Background(), "operator"); err != nil {
+		t.Fatalf("clear runtime policy: %v", err)
+	}
+	cleared, err := svc.RuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("cleared runtime policy: %v", err)
+	}
+	if cleared.Source != "env" || cleared.CooldownSeconds != 0 || cleared.DailyBudgetWei != "" || len(cleared.TokenDailyBudgetWei) != 0 {
+		t.Fatalf("cleared runtime policy = %#v", cleared)
 	}
 }

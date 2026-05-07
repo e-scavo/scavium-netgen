@@ -52,6 +52,10 @@ type blocklistChecker interface {
 	IsBlocked(ctx context.Context, keyType abuse.KeyType, value string) (bool, string, error)
 }
 
+type runtimePolicyProvider interface {
+	GetRuntimePolicy(ctx context.Context) (domain.RuntimePolicy, error)
+}
+
 // PersistentReadService implements ReadService using durable stores.
 type PersistentReadService struct {
 	modeMu          sync.RWMutex
@@ -138,27 +142,45 @@ func (s *PersistentReadService) Status(context.Context) (StatusResponse, error) 
 	}, nil
 }
 
-func (s *PersistentReadService) Config(context.Context) (ConfigResponse, error) {
+func (s *PersistentReadService) Config(ctx context.Context) (ConfigResponse, error) {
+	policy, err := s.runtimePolicy(ctx)
+	if err != nil {
+		return ConfigResponse{}, err
+	}
 	amountWei := ""
 	if s.cfg.AmountWei != nil {
 		amountWei = s.cfg.AmountWei.String()
 	}
 
-	tokens := tokenResponses(s.cfg.NormalizedTokens())
+	tokens := tokenResponsesWithRuntimePolicy(s.cfg.NormalizedTokens(), policy)
 	return ConfigResponse{
 		NetworkName:         s.cfg.NetworkName,
 		ChainID:             s.cfg.ChainID,
 		Symbol:              s.cfg.Symbol,
 		AmountWei:           amountWei,
 		Tokens:              tokens,
-		CooldownSeconds:     s.cfg.CooldownSeconds,
+		CooldownSeconds:     s.runtimeCooldownSeconds(policy),
 		ExplorerTxURL:       s.cfg.ExplorerTxURL,
 		DryRun:              s.cfg.DryRun,
-		RateLimitIPPerHour:  s.cfg.RateLimitIPPerHour,
-		RateLimitAddrPerDay: s.cfg.RateLimitAddrPerDay,
+		RateLimitIPPerHour:  s.runtimeRateLimitIPPerHour(policy),
+		RateLimitAddrPerDay: s.runtimeRateLimitAddrPerDay(policy),
 		CaptchaProvider:     s.cfg.CaptchaProvider,
 		CaptchaSiteKey:      s.cfg.CaptchaSiteKey,
 	}, nil
+}
+
+func tokenResponsesWithRuntimePolicy(tokens []config.TokenConfig, policy domain.RuntimePolicy) []TokenResponse {
+	out := tokenResponses(tokens)
+	for i := range out {
+		if budget, ok := policy.TokenDailyBudgetWei[out[i].ID]; ok && budget != nil {
+			out[i].DailyBudgetWei = budget.String()
+			continue
+		}
+		if policy.DailyBudgetWei != nil {
+			out[i].DailyBudgetWei = policy.DailyBudgetWei.String()
+		}
+	}
+	return out
 }
 
 // Tokens returns the public faucet token catalog. It intentionally exposes only
@@ -177,10 +199,10 @@ func (s *PersistentReadService) AddressStatus(ctx context.Context, address commo
 		Address:                  address.Hex(),
 		Eligible:                 remaining == 0,
 		Reason:                   "eligible",
-		CooldownSeconds:          s.cfg.CooldownSeconds,
+		CooldownSeconds:          s.runtimeCooldownSecondsFromContext(ctx),
 		CooldownRemainingSeconds: remaining,
-		RateLimitIPPerHour:       s.cfg.RateLimitIPPerHour,
-		RateLimitAddrPerDay:      s.cfg.RateLimitAddrPerDay,
+		RateLimitIPPerHour:       s.runtimeRateLimitIPPerHourFromContext(ctx),
+		RateLimitAddrPerDay:      s.runtimeRateLimitAddrPerDayFromContext(ctx),
 		DefaultTokenID:           s.cfg.DefaultTokenID,
 	}
 	blocked, err := s.addressBlocked(ctx, address)
@@ -328,7 +350,7 @@ func (s *PersistentReadService) dailyBudgetStatus(ctx context.Context, tokenID s
 	if s.claims == nil {
 		return nil, nil
 	}
-	budget := s.dailyBudgetForTokenID(tokenID)
+	budget := s.dailyBudgetForTokenID(ctx, tokenID)
 	if budget == nil || budget.Sign() <= 0 {
 		return nil, nil
 	}
@@ -472,7 +494,7 @@ func (s *PersistentReadService) GetClaim(ctx context.Context, id string) (ClaimR
 }
 
 func (s *PersistentReadService) createClaim(ctx context.Context, claim domain.Claim, idempotencyKey string) (domain.Claim, error) {
-	if budget := s.dailyBudgetForClaim(claim); budget != nil && budget.Sign() > 0 {
+	if budget := s.dailyBudgetForClaim(ctx, claim); budget != nil && budget.Sign() > 0 {
 		dayStart, dayEnd := utcDayWindow(s.now())
 		if store, ok := s.claims.(tokenBudgetedClaimStore); ok {
 			created, used, exceeded, err := store.CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx, claim, idempotencyKey, claim.TokenID, dayStart, dayEnd, copyBigInt(budget), dailyBudgetStatuses())
@@ -508,7 +530,7 @@ func (s *PersistentReadService) createClaim(ctx context.Context, claim domain.Cl
 }
 
 func (s *PersistentReadService) enforceDailyBudget(ctx context.Context) error {
-	budget := s.dailyBudgetForTokenID("")
+	budget := s.dailyBudgetForTokenID(ctx, "")
 	if budget == nil || budget.Sign() <= 0 {
 		return nil
 	}
@@ -530,16 +552,22 @@ func (s *PersistentReadService) enforceDailyBudget(ctx context.Context) error {
 	return nil
 }
 
-func (s *PersistentReadService) dailyBudgetForClaim(claim domain.Claim) *big.Int {
-	if claim.TokenID != "" {
-		if token, ok := s.cfg.TokenByID(claim.TokenID); ok {
-			return copyBigIntOrNil(token.DailyBudgetWei)
-		}
-	}
-	return s.dailyBudgetForTokenID("")
+func (s *PersistentReadService) dailyBudgetForClaim(ctx context.Context, claim domain.Claim) *big.Int {
+	return s.dailyBudgetForTokenID(ctx, claim.TokenID)
 }
 
-func (s *PersistentReadService) dailyBudgetForTokenID(tokenID string) *big.Int {
+func (s *PersistentReadService) dailyBudgetForTokenID(ctx context.Context, tokenID string) *big.Int {
+	policy, err := s.runtimePolicy(ctx)
+	if err == nil {
+		if tokenID != "" {
+			if budget, ok := policy.TokenDailyBudgetWei[tokenID]; ok && budget != nil {
+				return copyBigInt(budget)
+			}
+		}
+		if policy.DailyBudgetWei != nil {
+			return copyBigInt(policy.DailyBudgetWei)
+		}
+	}
 	token, ok := s.cfg.TokenByID(tokenID)
 	if ok && token.DailyBudgetWei != nil {
 		return copyBigInt(token.DailyBudgetWei)
@@ -570,7 +598,8 @@ func dailyBudgetStatuses() []domain.ClaimStatus {
 }
 
 func (s *PersistentReadService) cooldown(ctx context.Context, address common.Address, tokenID ...string) (int, time.Time, error) {
-	if s.cfg.CooldownSeconds <= 0 {
+	cooldownSeconds := s.runtimeCooldownSecondsFromContext(ctx)
+	if cooldownSeconds <= 0 {
 		return 0, time.Time{}, nil
 	}
 
@@ -582,7 +611,7 @@ func (s *PersistentReadService) cooldown(ctx context.Context, address common.Add
 		return 0, time.Time{}, err
 	}
 
-	nextEligible := last.CreatedAt.Add(time.Duration(s.cfg.CooldownSeconds) * time.Second)
+	nextEligible := last.CreatedAt.Add(time.Duration(cooldownSeconds) * time.Second)
 	remaining := nextEligible.Sub(s.now())
 	if remaining <= 0 {
 		return 0, nextEligible, nil
@@ -697,9 +726,9 @@ func (s *PersistentReadService) enforceRateLimits(ctx context.Context, request C
 
 	scope := s.tokenRateLimitScope(tokenID)
 	checks := []rateLimitCheck{
-		{key: rateLimitKey(scope, "ip", request.RemoteIP), limit: s.cfg.RateLimitIPPerHour, window: time.Hour, reason: "IP rate limit exceeded"},
-		{key: rateLimitKey(scope, "addr", request.Address.Hex()), limit: s.cfg.RateLimitAddrPerDay, window: 24 * time.Hour, reason: "address rate limit exceeded"},
-		{key: rateLimitKey(scope, "fp", request.Fingerprint), limit: s.cfg.RateLimitIPPerHour, window: time.Hour, reason: "fingerprint rate limit exceeded"},
+		{key: rateLimitKey(scope, "ip", request.RemoteIP), limit: s.runtimeRateLimitIPPerHourFromContext(ctx), window: time.Hour, reason: "IP rate limit exceeded"},
+		{key: rateLimitKey(scope, "addr", request.Address.Hex()), limit: s.runtimeRateLimitAddrPerDayFromContext(ctx), window: 24 * time.Hour, reason: "address rate limit exceeded"},
+		{key: rateLimitKey(scope, "fp", request.Fingerprint), limit: s.runtimeRateLimitIPPerHourFromContext(ctx), window: time.Hour, reason: "fingerprint rate limit exceeded"},
 	}
 
 	for _, check := range checks {
@@ -798,4 +827,61 @@ func copyBigIntOrNil(v *big.Int) *big.Int {
 		return nil
 	}
 	return new(big.Int).Set(v)
+}
+
+func (s *PersistentReadService) runtimePolicy(ctx context.Context) (domain.RuntimePolicy, error) {
+	provider, ok := s.claims.(runtimePolicyProvider)
+	if !ok || provider == nil {
+		return domain.RuntimePolicy{}, nil
+	}
+	policy, err := provider.GetRuntimePolicy(ctx)
+	if err != nil {
+		return domain.RuntimePolicy{}, err
+	}
+	return domain.CopyRuntimePolicy(policy), nil
+}
+
+func (s *PersistentReadService) runtimeCooldownSeconds(policy domain.RuntimePolicy) int {
+	if policy.CooldownSeconds > 0 {
+		return policy.CooldownSeconds
+	}
+	return s.cfg.CooldownSeconds
+}
+
+func (s *PersistentReadService) runtimeRateLimitIPPerHour(policy domain.RuntimePolicy) int {
+	if policy.RateLimitIPPerHour > 0 {
+		return policy.RateLimitIPPerHour
+	}
+	return s.cfg.RateLimitIPPerHour
+}
+
+func (s *PersistentReadService) runtimeRateLimitAddrPerDay(policy domain.RuntimePolicy) int {
+	if policy.RateLimitAddrPerDay > 0 {
+		return policy.RateLimitAddrPerDay
+	}
+	return s.cfg.RateLimitAddrPerDay
+}
+
+func (s *PersistentReadService) runtimeCooldownSecondsFromContext(ctx context.Context) int {
+	policy, err := s.runtimePolicy(ctx)
+	if err != nil {
+		return s.cfg.CooldownSeconds
+	}
+	return s.runtimeCooldownSeconds(policy)
+}
+
+func (s *PersistentReadService) runtimeRateLimitIPPerHourFromContext(ctx context.Context) int {
+	policy, err := s.runtimePolicy(ctx)
+	if err != nil {
+		return s.cfg.RateLimitIPPerHour
+	}
+	return s.runtimeRateLimitIPPerHour(policy)
+}
+
+func (s *PersistentReadService) runtimeRateLimitAddrPerDayFromContext(ctx context.Context) int {
+	policy, err := s.runtimePolicy(ctx)
+	if err != nil {
+		return s.cfg.RateLimitAddrPerDay
+	}
+	return s.runtimeRateLimitAddrPerDay(policy)
 }

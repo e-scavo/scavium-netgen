@@ -674,6 +674,18 @@ Success response:
 { "status": "unblocked" }
 ```
 
+### `GET /api/v1/admin/policy`
+
+Returns the persisted runtime policy override set for the minimal non-secret Phase 28 subset. The route is admin-protected and never returns secrets.
+
+### `PUT /api/v1/admin/policy`
+
+Replaces the runtime policy override set. The body may include `cooldown_seconds`, `rate_limit_ip_per_hour`, `rate_limit_addr_per_day`, `daily_budget_wei`, and `token_daily_budget_wei`. Values must be non-negative decimal integers. The mutation writes a durable admin audit entry.
+
+### `DELETE /api/v1/admin/policy`
+
+Clears all persisted runtime policy overrides and immediately restores environment/default behavior for the editable subset. The mutation writes a durable admin audit entry.
+
 ### `GET /api/v1/admin/audit?limit=100`
 
 Returns recent persisted admin audit entries from SQLite. `limit` is capped at `500`.

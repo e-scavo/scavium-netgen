@@ -996,3 +996,88 @@ func TestPersistentReadServiceRejectsPersistedBlocklistedAddress(t *testing.T) {
 		t.Fatalf("signal reason = %q, want blocked by abuse policy", signals[0].Reason)
 	}
 }
+
+func TestPersistentReadServiceAppliesRuntimePolicyAfterRestart(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+
+	cfg := persistentTestConfig()
+	cfg.CooldownSeconds = 0
+	cfg.RateLimitIPPerHour = 100
+	cfg.DailyBudgetWei = big.NewInt(1000)
+	if err := store.SetRuntimePolicy(context.Background(), domain.RuntimePolicy{CooldownSeconds: 600, RateLimitIPPerHour: 1, DailyBudgetWei: big.NewInt(42)}); err != nil {
+		t.Fatalf("set runtime policy: %v", err)
+	}
+
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), RemoteIP: "203.0.113.10"}); err != nil {
+		t.Fatalf("create first claim: %v", err)
+	}
+
+	restarted := newPersistentTestService(t, store, cfg, persistentTestNow().Add(time.Minute))
+	_, err := restarted.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), RemoteIP: "203.0.113.11"})
+	if err == nil || !errors.Is(err, ErrCooldownActive) {
+		t.Fatalf("second claim error = %v, want cooldown from persisted runtime policy", err)
+	}
+
+	status, err := restarted.Config(context.Background())
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if status.CooldownSeconds != 600 || status.RateLimitIPPerHour != 1 {
+		t.Fatalf("runtime config = %#v", status)
+	}
+}
+
+func TestPersistentReadServiceConfigReportsRuntimeTokenBudgets(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(1000)
+	cfg.Tokens = []config.TokenConfig{
+		{ID: "native", Symbol: "SCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42), DailyBudgetWei: big.NewInt(1000)},
+		{ID: "bonus", Symbol: "BON", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(7), DailyBudgetWei: big.NewInt(800)},
+	}
+	if err := store.SetRuntimePolicy(context.Background(), domain.RuntimePolicy{
+		DailyBudgetWei: big.NewInt(500),
+		TokenDailyBudgetWei: map[string]*big.Int{
+			"bonus": big.NewInt(125),
+		},
+	}); err != nil {
+		t.Fatalf("set runtime policy: %v", err)
+	}
+
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	got, err := service.Config(context.Background())
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	budgets := map[string]string{}
+	for _, token := range got.Tokens {
+		budgets[token.ID] = token.DailyBudgetWei
+	}
+	if budgets["native"] != "500" {
+		t.Fatalf("native runtime budget = %q, want aggregate runtime override 500", budgets["native"])
+	}
+	if budgets["bonus"] != "125" {
+		t.Fatalf("bonus runtime budget = %q, want token runtime override 125", budgets["bonus"])
+	}
+}
+
+func TestPersistentReadServiceRuntimeTokenBudgetOverridesEnv(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(1000)
+	cfg.Tokens = []config.TokenConfig{{ID: "native", Symbol: "SCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42), DailyBudgetWei: big.NewInt(1000)}}
+	if err := store.SetRuntimePolicy(context.Background(), domain.RuntimePolicy{TokenDailyBudgetWei: map[string]*big.Int{"native": big.NewInt(41)}}); err != nil {
+		t.Fatalf("set runtime policy: %v", err)
+	}
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), TokenID: "native", RemoteIP: "203.0.113.10"})
+	if err == nil || !errors.Is(err, ErrDailyBudgetExceeded) {
+		t.Fatalf("create claim error = %v, want runtime token budget exceeded", err)
+	}
+}

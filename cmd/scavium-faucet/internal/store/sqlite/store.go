@@ -29,6 +29,7 @@ var _ domain.AbuseSignalDistinctCounter = (*Store)(nil)
 var _ domain.AbuseSignalPruner = (*Store)(nil)
 var _ domain.AbuseSignalReporter = (*Store)(nil)
 var _ domain.QueueStore = (*Store)(nil)
+var _ domain.RuntimePolicyStore = (*Store)(nil)
 
 // ErrNotFound reports that the requested record does not exist.
 var ErrNotFound = domain.ErrNotFound
@@ -1505,4 +1506,158 @@ func (s *Store) ListStuckSending(ctx context.Context, stuckAfter time.Duration, 
 		claims = append(claims, claim)
 	}
 	return claims, rows.Err()
+}
+
+const (
+	runtimePolicyCooldownSeconds     = "cooldown_seconds"
+	runtimePolicyRateLimitIPPerHour  = "rate_limit_ip_per_hour"
+	runtimePolicyRateLimitAddrPerDay = "rate_limit_addr_per_day"
+	runtimePolicyDailyBudgetWei      = "daily_budget_wei"
+	runtimePolicyTokenBudgetPrefix   = "token_daily_budget_wei:"
+)
+
+// GetRuntimePolicy returns persisted runtime policy overrides. Unknown or
+// malformed values are ignored so env/default configuration remains the fallback.
+func (s *Store) GetRuntimePolicy(ctx context.Context) (domain.RuntimePolicy, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM runtime_policy`)
+	if err != nil {
+		return domain.RuntimePolicy{}, fmt.Errorf("get runtime policy: %w", err)
+	}
+	defer rows.Close()
+	policy := domain.RuntimePolicy{TokenDailyBudgetWei: make(map[string]*big.Int)}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return domain.RuntimePolicy{}, err
+		}
+		value = strings.TrimSpace(value)
+		switch key {
+		case runtimePolicyCooldownSeconds:
+			policy.CooldownSeconds = parseRuntimePolicyInt(value)
+		case runtimePolicyRateLimitIPPerHour:
+			policy.RateLimitIPPerHour = parseRuntimePolicyInt(value)
+		case runtimePolicyRateLimitAddrPerDay:
+			policy.RateLimitAddrPerDay = parseRuntimePolicyInt(value)
+		case runtimePolicyDailyBudgetWei:
+			policy.DailyBudgetWei = parseRuntimePolicyBig(value)
+		default:
+			if strings.HasPrefix(key, runtimePolicyTokenBudgetPrefix) {
+				tokenID := strings.TrimSpace(strings.TrimPrefix(key, runtimePolicyTokenBudgetPrefix))
+				if tokenID != "" {
+					if parsed := parseRuntimePolicyBig(value); parsed != nil {
+						policy.TokenDailyBudgetWei[tokenID] = parsed
+					}
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return domain.RuntimePolicy{}, err
+	}
+	if len(policy.TokenDailyBudgetWei) == 0 {
+		policy.TokenDailyBudgetWei = nil
+	}
+	return policy, nil
+}
+
+// SetRuntimePolicy atomically replaces persisted runtime policy overrides.
+// Invalid negative values are rejected at the persistence boundary as a final
+// defense even when callers normally validate through the admin/domain layer.
+func (s *Store) SetRuntimePolicy(ctx context.Context, policy domain.RuntimePolicy) error {
+	if err := validateRuntimePolicyForPersistence(policy); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin runtime policy update: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM runtime_policy`); err != nil {
+		return fmt.Errorf("clear runtime policy: %w", err)
+	}
+	now := formatTime(time.Now().UTC())
+	insert := func(key, value string) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO runtime_policy (key, value, updated_at) VALUES (?, ?, ?)`, key, value, now)
+		return err
+	}
+	if policy.CooldownSeconds > 0 {
+		if err := insert(runtimePolicyCooldownSeconds, fmt.Sprintf("%d", policy.CooldownSeconds)); err != nil {
+			return fmt.Errorf("set runtime cooldown: %w", err)
+		}
+	}
+	if policy.RateLimitIPPerHour > 0 {
+		if err := insert(runtimePolicyRateLimitIPPerHour, fmt.Sprintf("%d", policy.RateLimitIPPerHour)); err != nil {
+			return fmt.Errorf("set runtime ip limit: %w", err)
+		}
+	}
+	if policy.RateLimitAddrPerDay > 0 {
+		if err := insert(runtimePolicyRateLimitAddrPerDay, fmt.Sprintf("%d", policy.RateLimitAddrPerDay)); err != nil {
+			return fmt.Errorf("set runtime addr limit: %w", err)
+		}
+	}
+	if policy.DailyBudgetWei != nil {
+		if err := insert(runtimePolicyDailyBudgetWei, policy.DailyBudgetWei.String()); err != nil {
+			return fmt.Errorf("set runtime daily budget: %w", err)
+		}
+	}
+	for tokenID, budget := range policy.TokenDailyBudgetWei {
+		tokenID = strings.TrimSpace(tokenID)
+		if tokenID == "" || budget == nil {
+			continue
+		}
+		if err := insert(runtimePolicyTokenBudgetPrefix+tokenID, budget.String()); err != nil {
+			return fmt.Errorf("set runtime token budget: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit runtime policy update: %w", err)
+	}
+	return nil
+}
+
+// ClearRuntimePolicy removes all runtime overrides so env/default config takes effect.
+func (s *Store) ClearRuntimePolicy(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM runtime_policy`)
+	if err != nil {
+		return fmt.Errorf("clear runtime policy: %w", err)
+	}
+	return nil
+}
+
+func validateRuntimePolicyForPersistence(policy domain.RuntimePolicy) error {
+	if policy.CooldownSeconds < 0 || policy.RateLimitIPPerHour < 0 || policy.RateLimitAddrPerDay < 0 {
+		return fmt.Errorf("invalid runtime policy: integer overrides must be non-negative")
+	}
+	if policy.DailyBudgetWei != nil && policy.DailyBudgetWei.Sign() < 0 {
+		return fmt.Errorf("invalid runtime policy: daily budget must be non-negative")
+	}
+	for tokenID, budget := range policy.TokenDailyBudgetWei {
+		if strings.TrimSpace(tokenID) == "" {
+			return fmt.Errorf("invalid runtime policy: token budget id is required")
+		}
+		if budget != nil && budget.Sign() < 0 {
+			return fmt.Errorf("invalid runtime policy: token budget must be non-negative")
+		}
+	}
+	return nil
+}
+
+func parseRuntimePolicyInt(raw string) int {
+	v, ok := new(big.Int).SetString(strings.TrimSpace(raw), 10)
+	if !ok || !v.IsInt64() || v.Sign() <= 0 {
+		return 0
+	}
+	maxInt := int64(^uint(0) >> 1)
+	if v.Int64() > maxInt {
+		return 0
+	}
+	return int(v.Int64())
+}
+
+func parseRuntimePolicyBig(raw string) *big.Int {
+	v, ok := new(big.Int).SetString(strings.TrimSpace(raw), 10)
+	if !ok || v.Sign() < 0 {
+		return nil
+	}
+	return v
 }

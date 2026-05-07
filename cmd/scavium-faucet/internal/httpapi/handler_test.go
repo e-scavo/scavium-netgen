@@ -1738,6 +1738,119 @@ func TestAdminBlocklistAddListRemove(t *testing.T) {
 	}
 }
 
+func TestAdminRuntimePolicyLifecycle(t *testing.T) {
+	deps := testAdminDeps()
+	handler := NewHandler(deps)
+
+	setRec := httptest.NewRecorder()
+	handler.ServeHTTP(setRec, adminRequest(http.MethodPut, "/api/v1/admin/policy", admin.SetRuntimePolicyRequest{
+		CooldownSeconds:     90,
+		RateLimitIPPerHour:  4,
+		RateLimitAddrPerDay: 2,
+		DailyBudgetWei:      "1000",
+		TokenDailyBudgetWei: map[string]string{"native": "250"},
+	}))
+	if setRec.Code != http.StatusOK {
+		t.Fatalf("set status = %d, want 200: %s", setRec.Code, setRec.Body.String())
+	}
+	var setBody admin.RuntimePolicyResponse
+	if err := json.NewDecoder(setRec.Body).Decode(&setBody); err != nil {
+		t.Fatalf("decode set response: %v", err)
+	}
+	if setBody.Source != "runtime" || setBody.CooldownSeconds != 90 || setBody.RateLimitIPPerHour != 4 || setBody.RateLimitAddrPerDay != 2 || setBody.DailyBudgetWei != "1000" || setBody.TokenDailyBudgetWei["native"] != "250" {
+		t.Fatalf("set response = %#v", setBody)
+	}
+
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, adminRequest(http.MethodGet, "/api/v1/admin/policy", nil))
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want 200: %s", getRec.Code, getRec.Body.String())
+	}
+	var getBody admin.RuntimePolicyResponse
+	if err := json.NewDecoder(getRec.Body).Decode(&getBody); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if getBody.Source != "runtime" || getBody.CooldownSeconds != 90 || getBody.TokenDailyBudgetWei["native"] != "250" {
+		t.Fatalf("get response = %#v", getBody)
+	}
+
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, adminRequest(http.MethodDelete, "/api/v1/admin/policy", nil))
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	clearedRec := httptest.NewRecorder()
+	handler.ServeHTTP(clearedRec, adminRequest(http.MethodGet, "/api/v1/admin/policy", nil))
+	if clearedRec.Code != http.StatusOK {
+		t.Fatalf("cleared get status = %d, want 200: %s", clearedRec.Code, clearedRec.Body.String())
+	}
+	var cleared admin.RuntimePolicyResponse
+	if err := json.NewDecoder(clearedRec.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared response: %v", err)
+	}
+	if cleared.Source != "env" || cleared.CooldownSeconds != 0 || cleared.DailyBudgetWei != "" || len(cleared.TokenDailyBudgetWei) != 0 {
+		t.Fatalf("cleared response = %#v", cleared)
+	}
+}
+
+func TestAdminRuntimePolicyRequiresAuthAndValidJSON(t *testing.T) {
+	handler := NewHandler(testAdminDeps())
+
+	unauthRec := httptest.NewRecorder()
+	handler.ServeHTTP(unauthRec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/policy", nil))
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want 401", unauthRec.Code)
+	}
+
+	wrongContentTypeReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/policy", strings.NewReader(`{"cooldown_seconds":1}`))
+	wrongContentTypeReq.Header.Set("Authorization", "Bearer "+testAdminToken)
+	wrongContentTypeReq.Header.Set("Content-Type", "text/plain")
+	wrongContentTypeRec := httptest.NewRecorder()
+	handler.ServeHTTP(wrongContentTypeRec, wrongContentTypeReq)
+	if wrongContentTypeRec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("wrong content-type status = %d, want 415", wrongContentTypeRec.Code)
+	}
+
+	malformedReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/policy", strings.NewReader(`{"cooldown_seconds":`))
+	malformedReq.Header.Set("Authorization", "Bearer "+testAdminToken)
+	malformedReq.Header.Set("Content-Type", "application/json")
+	malformedRec := httptest.NewRecorder()
+	handler.ServeHTTP(malformedRec, malformedReq)
+	if malformedRec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed JSON status = %d, want 400", malformedRec.Code)
+	}
+	var malformedBody ErrorEnvelope
+	if err := json.NewDecoder(malformedRec.Body).Decode(&malformedBody); err != nil {
+		t.Fatalf("decode malformed response: %v", err)
+	}
+	if malformedBody.Code != "invalid_json" {
+		t.Fatalf("malformed code = %q, want invalid_json", malformedBody.Code)
+	}
+
+	invalidRec := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRec, adminRequest(http.MethodPut, "/api/v1/admin/policy", admin.SetRuntimePolicyRequest{CooldownSeconds: -1}))
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid policy status = %d, want 400", invalidRec.Code)
+	}
+	var body ErrorEnvelope
+	if err := json.NewDecoder(invalidRec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode invalid response: %v", err)
+	}
+	if body.Code != "invalid_runtime_policy" {
+		t.Fatalf("code = %q, want invalid_runtime_policy", body.Code)
+	}
+
+	methodRec := httptest.NewRecorder()
+	handler.ServeHTTP(methodRec, adminRequest(http.MethodPost, "/api/v1/admin/policy", nil))
+	if methodRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("method status = %d, want 405", methodRec.Code)
+	}
+	if got := methodRec.Header().Get("Allow"); got != "GET, PUT, DELETE" {
+		t.Fatalf("allow = %q, want GET, PUT, DELETE", got)
+	}
+}
+
 func TestAdminAuditLog(t *testing.T) {
 	deps := testAdminDeps()
 	svc := deps.AdminService.(*admin.InMemoryAdminService)

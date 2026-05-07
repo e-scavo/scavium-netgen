@@ -138,6 +138,32 @@ paths:
       summary: Admin runtime summary
       responses:
         '200': { description: Dashboard, readiness, metrics, and wallet summary }
+  /api/v1/admin/policy:
+    get:
+      security: [ { bearerAuth: [] } ]
+      summary: Admin runtime policy override view
+      responses:
+        '200':
+          description: Runtime policy overrides
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuntimePolicy' }
+    put:
+      security: [ { bearerAuth: [] } ]
+      summary: Replace admin runtime policy overrides
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RuntimePolicy' }
+      responses:
+        '200': { description: Runtime policy updated }
+        '400': { description: Invalid runtime policy }
+    delete:
+      security: [ { bearerAuth: [] } ]
+      summary: Clear admin runtime policy overrides
+      responses:
+        '200': { description: Runtime policy cleared }
   /api/v1/admin/wallet:
     get:
       security: [ { bearerAuth: [] } ]
@@ -181,6 +207,17 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   schemas:
+    RuntimePolicy:
+      type: object
+      properties:
+        cooldown_seconds: { type: integer, minimum: 0 }
+        rate_limit_ip_per_hour: { type: integer, minimum: 0 }
+        rate_limit_addr_per_day: { type: integer, minimum: 0 }
+        daily_budget_wei: { type: string }
+        token_daily_budget_wei:
+          type: object
+          additionalProperties: { type: string }
+        source: { type: string }
     ErrorEnvelope:
       type: object
       required: [code, message, details, request_id]
