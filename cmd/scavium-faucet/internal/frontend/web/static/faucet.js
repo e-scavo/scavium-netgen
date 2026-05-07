@@ -822,6 +822,7 @@
       var data = await readJSON(response);
       setBusy(btn, false);
       if (!response.ok) {
+        setStatus(el("address-history-status"), "Address history unavailable. Please retry shortly.", "error");
         renderClaimError(data);
         return;
       }
@@ -829,6 +830,7 @@
       setStatus(el("msg"), "Address history loaded.", "success");
     } catch (_) {
       setBusy(btn, false);
+      setStatus(el("address-history-status"), "Address history unavailable. Please retry shortly.", "error");
       setStatus(el("msg"), "Unable to load address history.", "error");
     }
   }

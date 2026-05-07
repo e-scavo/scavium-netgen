@@ -83,7 +83,7 @@ func TestHandlerServesStaticJS(t *testing.T) {
 	if !strings.Contains(body, "formatDecimalAmount") {
 		t.Fatal("faucet.js missing token amount display formatting")
 	}
-	for _, want := range []string{"/api/v1/address/", "loadAddressStatus", "loadAddressHistory", "txExplorerHref", "validExplorerTemplate", "isAbsoluteHTTPURLTemplate", "Loading address history", "data.status || data.mode"} {
+	for _, want := range []string{"/api/v1/address/", "loadAddressStatus", "loadAddressHistory", "txExplorerHref", "validExplorerTemplate", "isAbsoluteHTTPURLTemplate", "Loading address history", "Address history unavailable", "data.status || data.mode"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("faucet.js missing Phase 26 UX logic %q", want)
 		}

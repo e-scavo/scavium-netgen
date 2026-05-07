@@ -10,7 +10,7 @@ Closed items:
 - The embedded frontend serves `index.html` plus external `/static/faucet.js`; no inline event handlers or inline JavaScript are introduced.
 - Public faucet mode UX consumes `GET /api/v1/status`, using the documented `status` field and keeping a fallback for older `mode` payloads.
 - Address eligibility UX calls `GET /api/v1/address/{address}/status` from the existing address input and renders only public-safe fields, including token-aware and daily-budget status when present.
-- Address history UX calls `GET /api/v1/address/{address}/history?limit=10&offset=0`, announces loading/empty/error states, moves focus to the history panel, and displays bounded public claim history only.
+- Address history UX calls `GET /api/v1/address/{address}/history?limit=10&offset=0`, announces loading/empty/error states in the history panel itself, moves focus to the history panel, and displays bounded public claim history only.
 - Transaction explorer actions render only when the configured explorer transaction template is absolute HTTP(S), contains `{txHash}`, and the returned transaction hash is a syntactically valid 32-byte EVM hash.
 - Privacy and terms links are present as in-page, safe testnet defaults; operators that require jurisdiction-specific copy can replace the static HTML or serve reviewed pages through nginx.
 - Accessibility and responsive polish cover labels, semantic sections, live status areas, busy button states, keyboard-reachable controls, focus-visible styling, focus movement for status/history panels, and small-screen stacking.
