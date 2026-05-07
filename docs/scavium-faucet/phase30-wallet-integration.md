@@ -35,7 +35,7 @@ The following remain outside Phase 30 and should be scheduled explicitly later:
 
 ## Validation notes
 
-Phase 30 has been closure-audited through fix 4. The latest operator baseline supplied with the Phase 30 fix series reports `go test ./...` passing on Go 1.24. Static review in this environment also rechecked formatting, script syntax, OpenAPI YAML parsing, backup plan wiring, runtime/API compatibility, SQLite persistence, in-memory fallback behavior, and wallet-origin semantics. Local `go test`/`go build` execution remains blocked in this ChatGPT environment because the module requires Go 1.24 and the toolchain download from `proxy.golang.org` is unavailable.
+Phase 30 has been closure-audited through fix 5. The latest operator baseline supplied with the Phase 30 fix series reports `go test ./...` passing on Go 1.24. Static review in this environment also rechecked formatting, script syntax, OpenAPI YAML parsing, backup plan wiring, runtime/API compatibility, SQLite persistence, in-memory fallback behavior, and wallet-origin semantics. Local `go test`/`go build` execution remains blocked in this ChatGPT environment because the module requires Go 1.24 and the toolchain download from `proxy.golang.org` is unavailable.
 
 ## Post-implementation audit fixes
 
@@ -44,3 +44,4 @@ Phase 30 has been closure-audited through fix 4. The latest operator baseline su
 - Fix 3: wallet allowed-origin enforcement on `POST /api/v1/claim` was narrowed to requests that actually include wallet proof fields. Legacy claims without `wallet_challenge_id` and `wallet_signature` remain compatible even when `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` is configured, while challenge issuance and proof-bearing claims remain protected by the wallet origin policy.
 
 - Fix 4: closure documentation was refreshed after the fix 3 compatibility audit so the roadmap and Phase 30 notes accurately reflect the current implementation baseline and do not leave stale validation language behind.
+- Fix 5: the post-fix documentation baseline was refreshed again after the full Phase 30 implementation bundle was re-applied, ensuring roadmap status and closure notes consistently describe the current operator-validated implementation with `go test ./...` passing on Go 1.24.

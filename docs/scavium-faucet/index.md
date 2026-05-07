@@ -8,7 +8,7 @@ This directory documents the **implemented project surface**, not the full roadm
 
 `scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
 
-Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility.
+Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility. Phase 30 Wallet Integration is CLOSED through fix 5, adding optional wallet challenges/proofs with SQLite persistence, replay resistance, fallback parity, and legacy claim compatibility.
 
 The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin-protected Prometheus-compatible metrics text export, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, alerting guidance, local smoke tests, and enriched health/readiness probes, review-first SQLite/config backup and restore scripts, and wallet refill/rotation runbooks.
 
@@ -31,13 +31,14 @@ The service is production-ready for the current testnet scope, including validat
 | [phase26-public-frontend-closure-audit.md](phase26-public-frontend-closure-audit.md) | Phase 26 closure audit and deferred-work boundary |
 | [phase27-advanced-anti-abuse-closure-audit.md](phase27-advanced-anti-abuse-closure-audit.md) | Phase 27 advanced anti-abuse implementation and closure audit |
 | [phase27-fix4-completion.md](phase27-fix4-completion.md) | Phase 27 Fix4 completion note for manual-review/risk-rejection ordering |
+| [phase30-wallet-integration.md](phase30-wallet-integration.md) | Phase 30 wallet challenge/proof closure note and deferred wallet backlog |
 
 ## Current implementation snapshot
 
 - The binary loads environment config and listens on `127.0.0.1:18080` by default.
 - Non-API paths serve the embedded frontend; `/api/*` paths return JSON.
-- Public endpoints support health, readiness, status, config, token catalog discovery, claim creation, claim lookup, address eligibility, and version.
-- Claim data and abuse-signal observations are persisted in SQLite (WAL mode). Restarting the process does not lose queued or in-flight claims or recorded claim-intake signals.
+- Public endpoints support health, readiness, status, config, token catalog discovery, wallet challenge issuance, claim creation, claim lookup, address eligibility, and version.
+- Claim data, wallet challenges, and abuse-signal observations are persisted in SQLite (WAL mode). Restarting the process does not lose queued or in-flight claims, short-lived wallet challenges, or recorded claim-intake signals.
 - The background worker processes the SQLite claim queue and dispatches the configured sender (dry-run or real).
 - Readiness checks are real probes against the database and queue; RPC and wallet checks activate when not in dry-run mode.
 - `AdminToken` is wired from config into the HTTP handler; setting `SCAVIUM_FAUCET_ADMIN_TOKEN` enables the `/api/v1/admin/*` endpoints.
