@@ -213,3 +213,38 @@ func IsValidFaucetStatus(status FaucetStatus) bool {
 		return false
 	}
 }
+
+// CampaignScope identifies how campaign eligibility is enforced.
+type CampaignScope string
+
+const (
+	CampaignScopePublic    CampaignScope = "public"
+	CampaignScopeInvite    CampaignScope = "invite"
+	CampaignScopeAllowlist CampaignScope = "allowlist"
+)
+
+// Campaign represents a bounded faucet distribution campaign.
+type Campaign struct {
+	ID         string
+	Name       string
+	TokenID    string
+	Scope      CampaignScope
+	BudgetWei  *big.Int
+	ClaimCount int64
+	Enabled    bool
+	StartsAt   *time.Time
+	EndsAt     *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// InvitationCode represents a reusable invite/access code.
+type InvitationCode struct {
+	Code       string
+	CampaignID string
+	MaxUses    int
+	Uses       int
+	Enabled    bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}

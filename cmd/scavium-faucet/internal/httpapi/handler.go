@@ -47,11 +47,13 @@ type ErrorEnvelope struct {
 }
 
 type claimRequest struct {
-	Address      string `json:"address"`
-	TokenID      string `json:"token_id"`
-	CaptchaToken string `json:"captcha_token"`
-	Fingerprint  string `json:"fingerprint"`
-	Honeypot     string `json:"website,omitempty"`
+	Address        string `json:"address"`
+	TokenID        string `json:"token_id"`
+	CampaignID     string `json:"campaign_id,omitempty"`
+	InvitationCode string `json:"invitation_code,omitempty"`
+	CaptchaToken   string `json:"captcha_token"`
+	Fingerprint    string `json:"fingerprint"`
+	Honeypot       string `json:"website,omitempty"`
 }
 
 // adminRuntimeResponse aggregates admin-plane runtime visibility without

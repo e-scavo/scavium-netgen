@@ -148,3 +148,13 @@ type RiskDecision struct {
 	Reason  string
 	Review  bool
 }
+
+// CampaignStore exposes durable campaign and invitation operations.
+type CampaignStore interface {
+	CreateCampaign(ctx context.Context, campaign Campaign) (Campaign, error)
+	GetCampaign(ctx context.Context, id string) (Campaign, error)
+	ListCampaigns(ctx context.Context, limit, offset int) ([]Campaign, error)
+	DisableCampaign(ctx context.Context, id string) error
+	GetInvitationCode(ctx context.Context, code string) (InvitationCode, error)
+	ConsumeInvitationCode(ctx context.Context, code string) error
+}
