@@ -736,3 +736,48 @@ func TestSQLiteReadAdminServiceRollsBackRuntimePolicyClearWhenAuditFails(t *test
 		t.Fatalf("policy after failed audited clear = %#v, want original", store.policy)
 	}
 }
+
+func TestInMemoryAdminServicePersistsRuntimePolicyView(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	initial, err := svc.RuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("initial runtime policy: %v", err)
+	}
+	if initial.Source != "env" {
+		t.Fatalf("initial source = %q, want env", initial.Source)
+	}
+
+	updated, err := svc.SetRuntimePolicy(context.Background(), SetRuntimePolicyRequest{
+		CooldownSeconds:     45,
+		RateLimitIPPerHour:  7,
+		RateLimitAddrPerDay: 3,
+		DailyBudgetWei:      "1000",
+		TokenDailyBudgetWei: map[string]string{"native": "250"},
+	}, "operator")
+	if err != nil {
+		t.Fatalf("set runtime policy: %v", err)
+	}
+	if updated.Source != "runtime" || updated.CooldownSeconds != 45 || updated.DailyBudgetWei != "1000" || updated.TokenDailyBudgetWei["native"] != "250" {
+		t.Fatalf("updated runtime policy = %#v", updated)
+	}
+
+	got, err := svc.RuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("get runtime policy: %v", err)
+	}
+	if got.Source != "runtime" || got.RateLimitIPPerHour != 7 || got.RateLimitAddrPerDay != 3 || got.TokenDailyBudgetWei["native"] != "250" {
+		t.Fatalf("persisted runtime policy = %#v", got)
+	}
+
+	if err := svc.ClearRuntimePolicy(context.Background(), "operator"); err != nil {
+		t.Fatalf("clear runtime policy: %v", err)
+	}
+	cleared, err := svc.RuntimePolicy(context.Background())
+	if err != nil {
+		t.Fatalf("cleared runtime policy: %v", err)
+	}
+	if cleared.Source != "env" || cleared.CooldownSeconds != 0 || cleared.DailyBudgetWei != "" || len(cleared.TokenDailyBudgetWei) != 0 {
+		t.Fatalf("cleared runtime policy = %#v", cleared)
+	}
+}

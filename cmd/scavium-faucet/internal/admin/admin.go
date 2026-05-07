@@ -244,13 +244,14 @@ type ModeController interface {
 
 // InMemoryAdminService is a standalone in-memory implementation of AdminService.
 type InMemoryAdminService struct {
-	mu        sync.RWMutex
-	mode      string
-	claims    map[string]domain.Claim
-	blocklist *abuse.Blocklist
-	auditLog  *AuditLog
-	modeCtl   ModeController
-	now       func() time.Time
+	mu            sync.RWMutex
+	mode          string
+	claims        map[string]domain.Claim
+	blocklist     *abuse.Blocklist
+	auditLog      *AuditLog
+	modeCtl       ModeController
+	runtimePolicy domain.RuntimePolicy
+	now           func() time.Time
 }
 
 // SQLiteReadAdminService uses SQLite-backed admin read/control/audit/blocklist
@@ -812,7 +813,10 @@ func TokenAuthMiddleware(token string, next http.Handler) http.Handler {
 }
 
 func (s *InMemoryAdminService) RuntimePolicy(context.Context) (RuntimePolicyResponse, error) {
-	return RuntimePolicyResponse{Source: "env"}, nil
+	s.mu.RLock()
+	policy := domain.CopyRuntimePolicy(s.runtimePolicy)
+	s.mu.RUnlock()
+	return runtimePolicyResponse(policy, runtimePolicySource(policy)), nil
 }
 
 func (s *InMemoryAdminService) SetRuntimePolicy(_ context.Context, req SetRuntimePolicyRequest, actor string) (RuntimePolicyResponse, error) {
@@ -820,12 +824,18 @@ func (s *InMemoryAdminService) SetRuntimePolicy(_ context.Context, req SetRuntim
 	if err != nil {
 		return RuntimePolicyResponse{}, err
 	}
-	resp := runtimePolicyResponse(policy, "runtime")
+	s.mu.Lock()
+	s.runtimePolicy = domain.CopyRuntimePolicy(policy)
+	s.mu.Unlock()
+	resp := runtimePolicyResponse(policy, runtimePolicySource(policy))
 	s.auditLog.Append(AuditEntry{Action: "set_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicySummary(resp), CreatedAt: s.now().UTC().Format(time.RFC3339)})
 	return resp, nil
 }
 
 func (s *InMemoryAdminService) ClearRuntimePolicy(_ context.Context, actor string) error {
+	s.mu.Lock()
+	s.runtimePolicy = domain.RuntimePolicy{}
+	s.mu.Unlock()
 	s.auditLog.Append(AuditEntry{Action: "clear_runtime_policy", Actor: actor, Target: "policy", CreatedAt: s.now().UTC().Format(time.RFC3339)})
 	return nil
 }
@@ -839,7 +849,7 @@ func (s *SQLiteReadAdminService) RuntimePolicy(ctx context.Context) (RuntimePoli
 	if err != nil {
 		return RuntimePolicyResponse{}, err
 	}
-	return runtimePolicyResponse(policy, "runtime"), nil
+	return runtimePolicyResponse(policy, runtimePolicySource(policy)), nil
 }
 
 func (s *SQLiteReadAdminService) SetRuntimePolicy(ctx context.Context, req SetRuntimePolicyRequest, actor string) (RuntimePolicyResponse, error) {
@@ -858,8 +868,8 @@ func (s *SQLiteReadAdminService) SetRuntimePolicy(ctx context.Context, req SetRu
 	if err := store.SetRuntimePolicy(ctx, policy); err != nil {
 		return RuntimePolicyResponse{}, err
 	}
-	after := runtimePolicyResponse(policy, "runtime")
-	if err := s.appendAudit(ctx, AuditEntry{Action: "set_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicyChangeSummary(runtimePolicyResponse(before, "runtime"), after), CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+	after := runtimePolicyResponse(policy, runtimePolicySource(policy))
+	if err := s.appendAudit(ctx, AuditEntry{Action: "set_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicyChangeSummary(runtimePolicyResponse(before, runtimePolicySource(before)), after), CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
 		_ = store.SetRuntimePolicy(ctx, before)
 		return RuntimePolicyResponse{}, err
 	}
@@ -878,7 +888,7 @@ func (s *SQLiteReadAdminService) ClearRuntimePolicy(ctx context.Context, actor s
 	if err := store.ClearRuntimePolicy(ctx); err != nil {
 		return err
 	}
-	if err := s.appendAudit(ctx, AuditEntry{Action: "clear_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicySummary(runtimePolicyResponse(before, "runtime")), CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+	if err := s.appendAudit(ctx, AuditEntry{Action: "clear_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicySummary(runtimePolicyResponse(before, runtimePolicySource(before))), CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
 		_ = store.SetRuntimePolicy(ctx, before)
 		return err
 	}
@@ -912,6 +922,13 @@ func runtimePolicyFromRequest(req SetRuntimePolicyRequest) (domain.RuntimePolicy
 		}
 	}
 	return policy, nil
+}
+
+func runtimePolicySource(policy domain.RuntimePolicy) string {
+	if policy.CooldownSeconds > 0 || policy.RateLimitIPPerHour > 0 || policy.RateLimitAddrPerDay > 0 || policy.DailyBudgetWei != nil || len(policy.TokenDailyBudgetWei) > 0 {
+		return "runtime"
+	}
+	return "env"
 }
 
 func runtimePolicyResponse(policy domain.RuntimePolicy, source string) RuntimePolicyResponse {
