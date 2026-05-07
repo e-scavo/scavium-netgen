@@ -2736,3 +2736,27 @@ func TestAdminWalletReturnsSafeRuntimeVisibility(t *testing.T) {
 		t.Fatalf("wallet response contains sensitive material: %q", raw)
 	}
 }
+
+func TestAdminCampaignUpdateEndpoint(t *testing.T) {
+	deps := testAdminDeps()
+	createBody := bytes.NewBufferString(`{"id":"camp-update","name":"Before","scope":"public","enabled":true}`)
+	createRec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(createRec, adminRequest(http.MethodPost, "/api/v1/admin/campaigns", createBody))
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201", createRec.Code)
+	}
+
+	updateBody := bytes.NewBufferString(`{"name":"After","scope":"invite","budget_wei":"123","enabled":true}`)
+	updateRec := httptest.NewRecorder()
+	NewHandler(deps).ServeHTTP(updateRec, adminRequest(http.MethodPut, "/api/v1/admin/campaigns/camp-update", updateBody))
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want 200 body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	campaigns, err := deps.AdminService.ListCampaigns(context.Background(), 10, 0)
+	if err != nil {
+		t.Fatalf("ListCampaigns error = %v", err)
+	}
+	if len(campaigns) != 1 || campaigns[0].ID != "camp-update" || campaigns[0].Name != "After" || campaigns[0].Scope != domain.CampaignScopeInvite || campaigns[0].BudgetWei.String() != "123" {
+		t.Fatalf("campaigns = %#v", campaigns)
+	}
+}

@@ -181,6 +181,24 @@ paths:
       responses:
         '201': { description: Campaign created }
         '400': { description: Invalid campaign }
+  /api/v1/admin/campaigns/{id}:
+    put:
+      security: [ { bearerAuth: [] } ]
+      summary: Update a durable faucet campaign
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignRequest' }
+      responses:
+        '200': { description: Campaign updated }
+        '400': { description: Invalid campaign }
+        '404': { description: Campaign not found }
   /api/v1/admin/campaigns/{id}/disable:
     post:
       security: [ { bearerAuth: [] } ]
@@ -214,7 +232,7 @@ paths:
   /api/v1/admin/allowlist:
     post:
       security: [ { bearerAuth: [] } ]
-      summary: Add or replace a campaign allowlist entry
+      summary: Add a campaign allowlist entry idempotently
       requestBody:
         required: true
         content:

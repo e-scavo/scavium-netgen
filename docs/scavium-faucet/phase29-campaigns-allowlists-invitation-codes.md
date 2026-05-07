@@ -28,6 +28,7 @@ Phase 29 is implemented as a production-safe, single-instance SQLite increment. 
 - Admin API:
   - `GET /api/v1/admin/campaigns`
   - `POST /api/v1/admin/campaigns`
+  - `PUT /api/v1/admin/campaigns/{id}`
   - `POST /api/v1/admin/campaigns/{id}/disable`
   - `GET /api/v1/admin/campaigns/export.csv`
   - `POST /api/v1/admin/invitations`
@@ -64,6 +65,10 @@ The second Phase 29 fix pass verified durable admin mutation/audit consistency. 
 ## Fix 3 verification notes
 
 The third Phase 29 fix pass verified campaign reference validation and rollback edge cases after the previous audit rollback hardening. SQLite campaign invitation and allowlist writes now explicitly verify that the referenced campaign exists before insertion instead of relying on database foreign-key behavior. Campaign allowlist insertion is idempotent and no longer replaces an existing entry, preventing an unaudited admin retry from changing allowlist metadata if durable audit persistence fails after the mutation. Focused SQLite tests cover missing campaign references and idempotent allowlist insertion.
+
+## Fix 4 verification
+
+The fourth Phase 29 fix pass closed the remaining admin-control gap from the step 29.4 scope: campaigns can now be updated through an audited `PUT /api/v1/admin/campaigns/{id}` path. SQLite and in-memory admin services preserve campaign identity and historical attribution, validate the path/body id consistently, and roll back durable updates if admin audit persistence fails. Tests cover in-memory update behavior, SQLite update persistence, HTTP update wiring, and audit-failure rollback.
 
 ## Deferred items
 

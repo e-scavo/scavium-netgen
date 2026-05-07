@@ -1703,6 +1703,43 @@ func (s *Store) CreateCampaign(ctx context.Context, campaign domain.Campaign) (d
 	return campaign, nil
 }
 
+// UpdateCampaign replaces mutable campaign fields while preserving caller-provided
+// creation metadata. It is used by the admin plane for audited campaign edits.
+func (s *Store) UpdateCampaign(ctx context.Context, campaign domain.Campaign) (domain.Campaign, error) {
+	campaign.ID = strings.TrimSpace(campaign.ID)
+	campaign.Name = strings.TrimSpace(campaign.Name)
+	campaign.TokenID = strings.TrimSpace(campaign.TokenID)
+	if campaign.ID == "" || campaign.Name == "" || !domain.IsValidCampaignScope(campaign.Scope) {
+		return domain.Campaign{}, fmt.Errorf("invalid campaign")
+	}
+	if campaign.CreatedAt.IsZero() {
+		return domain.Campaign{}, fmt.Errorf("invalid campaign created_at")
+	}
+	if campaign.UpdatedAt.IsZero() {
+		campaign.UpdatedAt = time.Now().UTC()
+	}
+	budget := ""
+	if campaign.BudgetWei != nil {
+		if campaign.BudgetWei.Sign() < 0 {
+			return domain.Campaign{}, fmt.Errorf("invalid campaign budget")
+		}
+		budget = campaign.BudgetWei.String()
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE campaigns
+		SET name = ?, token_id = ?, scope = ?, budget_wei = ?, enabled = ?, starts_at = ?, ends_at = ?, created_at = ?, updated_at = ?
+		WHERE id = ?
+	`, campaign.Name, campaign.TokenID, string(campaign.Scope), budget, boolInt(campaign.Enabled), nullableTime(campaign.StartsAt), nullableTime(campaign.EndsAt), formatTime(campaign.CreatedAt), formatTime(campaign.UpdatedAt), campaign.ID)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return domain.Campaign{}, ErrNotFound
+	}
+	return campaign, nil
+}
+
 func (s *Store) GetCampaign(ctx context.Context, id string) (domain.Campaign, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT id, name, token_id, scope, budget_wei, enabled, starts_at, ends_at, created_at, updated_at FROM campaigns WHERE id = ?`, strings.TrimSpace(id))
 	return scanCampaign(row)

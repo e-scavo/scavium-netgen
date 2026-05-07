@@ -879,6 +879,14 @@ func (s *failingCampaignAuditStore) CreateCampaign(_ context.Context, c domain.C
 	return c, nil
 }
 
+func (s *failingCampaignAuditStore) UpdateCampaign(_ context.Context, c domain.Campaign) (domain.Campaign, error) {
+	if _, ok := s.campaigns[c.ID]; !ok {
+		return domain.Campaign{}, domain.ErrNotFound
+	}
+	s.campaigns[c.ID] = c
+	return c, nil
+}
+
 func (s *failingCampaignAuditStore) GetCampaign(_ context.Context, id string) (domain.Campaign, error) {
 	c, ok := s.campaigns[id]
 	if !ok {
@@ -1023,5 +1031,59 @@ func TestSQLiteReadAdminServiceRollsBackInvitationAndAllowlistWhenAuditFails(t *
 	allowed, _ := store.IsAddressAllowlisted(context.Background(), "camp-a", common.HexToAddress(addr))
 	if allowed {
 		t.Fatalf("allowlist entry persisted after failed audit")
+	}
+}
+
+func TestInMemoryAdminServiceUpdatesCampaign(t *testing.T) {
+	svc := NewInMemoryAdminService()
+	if _, err := svc.CreateCampaign(context.Background(), CampaignRequest{ID: "camp-update", Name: "Before", Scope: "public", Enabled: true}, "operator"); err != nil {
+		t.Fatalf("CreateCampaign error = %v", err)
+	}
+	updated, err := svc.UpdateCampaign(context.Background(), "camp-update", CampaignRequest{Name: "After", Scope: "invite", BudgetWei: "123", Enabled: true}, "operator")
+	if err != nil {
+		t.Fatalf("UpdateCampaign error = %v", err)
+	}
+	if updated.Name != "After" || updated.Scope != domain.CampaignScopeInvite || updated.BudgetWei.String() != "123" || !updated.Enabled {
+		t.Fatalf("updated campaign = %#v", updated)
+	}
+	entries, err := svc.RecentAuditLog(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RecentAuditLog error = %v", err)
+	}
+	if len(entries) == 0 || entries[len(entries)-1].Action != "campaign_update" {
+		t.Fatalf("audit entries = %#v", entries)
+	}
+}
+
+func TestSQLiteReadAdminServiceRollsBackCampaignUpdateWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := newFailingCampaignAuditStore(auditErr)
+	store.campaigns["camp-a"] = domain.Campaign{ID: "camp-a", Name: "Before", Scope: domain.CampaignScopePublic, Enabled: true, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	svc := NewSQLiteReadAdminService(store)
+
+	_, err := svc.UpdateCampaign(context.Background(), "camp-a", CampaignRequest{Name: "After", Scope: "invite", Enabled: true}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("UpdateCampaign error = %v, want audit error", err)
+	}
+	if got := store.campaigns["camp-a"]; got.Name != "Before" || got.Scope != domain.CampaignScopePublic {
+		t.Fatalf("campaign after rollback = %#v", got)
+	}
+}
+
+func TestInMemoryAdminServiceAllowlistAddIsIdempotent(t *testing.T) {
+	svc := NewInMemoryAdminService()
+	if _, err := svc.CreateCampaign(context.Background(), CampaignRequest{ID: "camp-allow-idem", Name: "Allow", Scope: "allowlist", Enabled: true}, "operator"); err != nil {
+		t.Fatalf("CreateCampaign error = %v", err)
+	}
+	addr := "0x1111111111111111111111111111111111111111"
+	if err := svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "camp-allow-idem", Address: addr, Note: "first"}, "operator"); err != nil {
+		t.Fatalf("first AddAllowlistEntry error = %v", err)
+	}
+	if err := svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "camp-allow-idem", Address: addr, Note: "second"}, "operator"); err != nil {
+		t.Fatalf("second AddAllowlistEntry error = %v", err)
+	}
+	entry := svc.allowlist["camp-allow-idem"][common.HexToAddress(addr).Hex()]
+	if entry.Note != "first" {
+		t.Fatalf("allowlist note = %q, want first", entry.Note)
 	}
 }

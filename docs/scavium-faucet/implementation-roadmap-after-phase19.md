@@ -183,9 +183,12 @@ Phase 24 is closed. Continue with the remaining features from `docs/scavium_fauc
 
 ### Phase 29 — Campaigns, Allowlists, and Invitation Codes
 
+Status: implemented and closure-audited through fix 5.
+
 - Campaign tables and budgets.
 - Allowlist scopes.
 - Invitation codes.
+- Admin campaign create/update/list/disable controls.
 - Admin CSV export if not already complete.
 
 ### Phase 30 — SCAVIUM Wallet Integration

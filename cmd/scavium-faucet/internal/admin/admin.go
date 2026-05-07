@@ -217,6 +217,7 @@ type AdminService interface {
 	SetRuntimePolicy(ctx context.Context, req SetRuntimePolicyRequest, actor string) (RuntimePolicyResponse, error)
 	ClearRuntimePolicy(ctx context.Context, actor string) error
 	CreateCampaign(ctx context.Context, req CampaignRequest, actor string) (domain.Campaign, error)
+	UpdateCampaign(ctx context.Context, id string, req CampaignRequest, actor string) (domain.Campaign, error)
 	ListCampaigns(ctx context.Context, limit, offset int) ([]domain.Campaign, error)
 	DisableCampaign(ctx context.Context, id, actor string) error
 	CreateInvitationCode(ctx context.Context, req InvitationCodeRequest, actor string) (domain.InvitationCode, error)
@@ -250,6 +251,11 @@ type AuditStore interface {
 // RuntimePolicyStore provides durable runtime policy operations.
 type CampaignStore interface {
 	domain.CampaignStore
+}
+
+// campaignUpdateStore exposes durable campaign replacement for admin updates.
+type campaignUpdateStore interface {
+	UpdateCampaign(ctx context.Context, campaign domain.Campaign) (domain.Campaign, error)
 }
 
 // campaignRollbackStore exposes best-effort rollback primitives for campaign
@@ -1026,6 +1032,34 @@ func (s *InMemoryAdminService) CreateCampaign(_ context.Context, req CampaignReq
 	return copyCampaign(campaign), nil
 }
 
+func (s *InMemoryAdminService) UpdateCampaign(_ context.Context, id string, req CampaignRequest, actor string) (domain.Campaign, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.Campaign{}, ErrInvalidCampaign
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		req.ID = id
+	}
+	if strings.TrimSpace(req.ID) != id {
+		return domain.Campaign{}, ErrInvalidCampaign
+	}
+	campaign, err := campaignFromRequest(req)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous, exists := s.campaigns[id]
+	if !exists {
+		return domain.Campaign{}, ErrNotFound
+	}
+	campaign.CreatedAt = previous.CreatedAt
+	campaign.UpdatedAt = s.now().UTC()
+	s.campaigns[id] = copyCampaign(campaign)
+	s.auditLog.Append(AuditEntry{Action: "campaign_update", Actor: actor, Target: id, CreatedAt: campaign.UpdatedAt.Format(time.RFC3339)})
+	return copyCampaign(campaign), nil
+}
+
 func (s *InMemoryAdminService) ListCampaigns(_ context.Context, limit, offset int) ([]domain.Campaign, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1109,7 +1143,9 @@ func (s *InMemoryAdminService) AddAllowlistEntry(_ context.Context, req Allowlis
 	if s.allowlist[entry.CampaignID] == nil {
 		s.allowlist[entry.CampaignID] = make(map[string]domain.CampaignAllowlistEntry)
 	}
-	s.allowlist[entry.CampaignID][entry.Address.Hex()] = entry
+	if _, exists := s.allowlist[entry.CampaignID][entry.Address.Hex()]; !exists {
+		s.allowlist[entry.CampaignID][entry.Address.Hex()] = entry
+	}
 	s.auditLog.Append(AuditEntry{Action: "campaign_allowlist_add", Actor: actor, Target: entry.CampaignID, CreatedAt: s.now().UTC().Format(time.RFC3339)})
 	return nil
 }
@@ -1134,6 +1170,52 @@ func (s *SQLiteReadAdminService) CreateCampaign(ctx context.Context, req Campaig
 		return domain.Campaign{}, err
 	}
 	return created, nil
+}
+
+func (s *SQLiteReadAdminService) UpdateCampaign(ctx context.Context, id string, req CampaignRequest, actor string) (domain.Campaign, error) {
+	store, ok := s.reads.(CampaignStore)
+	if !ok {
+		return s.fallback.UpdateCampaign(ctx, id, req, actor)
+	}
+	updater, ok := store.(campaignUpdateStore)
+	if !ok {
+		return s.fallback.UpdateCampaign(ctx, id, req, actor)
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.Campaign{}, ErrInvalidCampaign
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		req.ID = id
+	}
+	if strings.TrimSpace(req.ID) != id {
+		return domain.Campaign{}, ErrInvalidCampaign
+	}
+	previous, err := store.GetCampaign(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.Campaign{}, ErrNotFound
+		}
+		return domain.Campaign{}, err
+	}
+	campaign, err := campaignFromRequest(req)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	campaign.CreatedAt = previous.CreatedAt
+	campaign.UpdatedAt = s.now().UTC()
+	updated, err := updater.UpdateCampaign(ctx, campaign)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.Campaign{}, ErrNotFound
+		}
+		return domain.Campaign{}, err
+	}
+	if err := s.appendAudit(ctx, AuditEntry{Action: "campaign_update", Actor: actor, Target: updated.ID, CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+		_, _ = updater.UpdateCampaign(ctx, previous)
+		return domain.Campaign{}, err
+	}
+	return updated, nil
 }
 
 func (s *SQLiteReadAdminService) ListCampaigns(ctx context.Context, limit, offset int) ([]domain.Campaign, error) {

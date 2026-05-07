@@ -1532,3 +1532,33 @@ func TestCampaignAllowlistAddIsIdempotentWithoutReplacingExistingEntry(t *testin
 		t.Fatalf("allowlist note = %q, want first", note)
 	}
 }
+
+func TestCampaignUpdatePersistence(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	created, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "camp-update", Name: "Before", Scope: domain.CampaignScopePublic, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	created.Name = "After"
+	created.Scope = domain.CampaignScopeInvite
+	created.BudgetWei = big.NewInt(99)
+	created.Enabled = false
+	created.UpdatedAt = now.Add(time.Hour)
+	updated, err := store.UpdateCampaign(context.Background(), created)
+	if err != nil {
+		t.Fatalf("update campaign: %v", err)
+	}
+	if updated.Name != "After" || updated.Scope != domain.CampaignScopeInvite || updated.BudgetWei.String() != "99" || updated.Enabled {
+		t.Fatalf("updated = %#v", updated)
+	}
+	got, err := store.GetCampaign(context.Background(), "camp-update")
+	if err != nil {
+		t.Fatalf("get campaign: %v", err)
+	}
+	if got.Name != "After" || got.Scope != domain.CampaignScopeInvite || got.BudgetWei.String() != "99" || got.Enabled {
+		t.Fatalf("got = %#v", got)
+	}
+}

@@ -1245,6 +1245,38 @@ func handleAdminCampaignDispatch(svc admin.AdminService, logger *observability.L
 	return func(w http.ResponseWriter, r *http.Request) {
 		tail := strings.Trim(strings.TrimPrefix(r.URL.Path, prefix), "/")
 		parts := strings.Split(tail, "/")
+		if len(parts) == 1 && parts[0] != "" {
+			if r.Method != http.MethodPut {
+				w.Header().Set("Allow", http.MethodPut)
+				WriteError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
+				return
+			}
+			if !requireJSONContentType(w, r) {
+				return
+			}
+			var body admin.CampaignRequest
+			if err := decodeJSONBody(w, r, &body); err != nil {
+				WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+				return
+			}
+			actor := actorFromRequest(r, trustedProxy)
+			campaign, err := svc.UpdateCampaign(r.Context(), parts[0], body, actor)
+			if err != nil {
+				if errors.Is(err, admin.ErrNotFound) {
+					WriteError(w, r, http.StatusNotFound, "campaign_not_found", "campaign not found", nil)
+					return
+				}
+				if errors.Is(err, admin.ErrInvalidCampaign) {
+					WriteError(w, r, http.StatusBadRequest, "invalid_campaign", "invalid campaign", nil)
+					return
+				}
+				WriteError(w, r, http.StatusInternalServerError, "campaign_update_failed", "campaign update failed", nil)
+				return
+			}
+			logAdminAudit(logger, r, "campaign_update", actor, campaign.ID, map[string]any{"result": "success"})
+			WriteJSON(w, http.StatusOK, campaign)
+			return
+		}
 		if len(parts) != 2 || parts[0] == "" || parts[1] != "disable" {
 			handleNotFound(w, r)
 			return

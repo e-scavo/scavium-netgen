@@ -394,12 +394,13 @@ The following endpoints are protected by the existing admin bearer-token middlew
 
 - `GET /api/v1/admin/campaigns` lists durable campaigns. Query parameters: `limit` (bounded to 500) and `offset`.
 - `POST /api/v1/admin/campaigns` creates a campaign with `id`, `name`, `scope` (`public`, `invite`, or `allowlist`), optional `token_id`, optional `budget_wei`, optional RFC3339 `starts_at` / `ends_at`, and `enabled`.
+- `PUT /api/v1/admin/campaigns/{id}` updates the same mutable campaign fields and preserves historical claim attribution. The path id must match an optional body `id` when one is supplied.
 - `POST /api/v1/admin/campaigns/{id}/disable` disables a campaign without deleting historical attribution.
 - `GET /api/v1/admin/campaigns/export.csv` exports a bounded CSV view of campaigns. User-controlled strings are hardened against spreadsheet formula injection.
 - `POST /api/v1/admin/invitations` creates an invitation code for an existing campaign with `code`, `campaign_id`, `max_uses`, and `enabled`.
-- `POST /api/v1/admin/allowlist` adds or replaces a durable allowlist entry with `campaign_id`, `address`, and optional `note`.
+- `POST /api/v1/admin/allowlist` adds a durable allowlist entry with `campaign_id`, `address`, and optional `note`; duplicate entries are idempotent and preserve the original metadata.
 
-Campaign mutations append durable admin audit entries when SQLite-backed admin storage is available. If durable audit append fails after a campaign create/disable, invitation create, or allowlist insert mutation, the admin service attempts to roll the mutation back so unaudited campaign changes do not remain active. The in-memory fallback preserves the same visible campaign/list/disable behavior for tests and standalone partial-store wiring.
+Campaign mutations append durable admin audit entries when SQLite-backed admin storage is available. If durable audit append fails after a campaign create/update/disable, invitation create, or allowlist insert mutation, the admin service attempts to roll the mutation back so unaudited campaign changes do not remain active. The in-memory fallback preserves the same visible campaign/list/disable behavior for tests and standalone partial-store wiring.
 
 ### `GET /api/v1/admin/metrics`
 
