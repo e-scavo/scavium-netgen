@@ -48,29 +48,23 @@ func (e *ProgressiveEnforcer) Evaluate(ctx context.Context, input domain.RiskInp
 	negativeKinds := []domain.AbuseSignalKind{domain.AbuseSignalCaptchaFailed, domain.AbuseSignalRiskRejected, domain.AbuseSignalRateLimited, domain.AbuseSignalCooldownActive, domain.AbuseSignalDailyBudgetExceeded}
 
 	score := 0
-	if v, err := e.scopeScore(ctx, "ip", strings.TrimSpace(input.RemoteIP), e.cfg.AbuseEnforcementIPThreshold, domain.AbuseSignalFilter{Kinds: negativeKinds, RemoteIP: input.RemoteIP, Since: since}, window); err != nil || v >= riskRejectThreshold(e.cfg) {
+	if v, err := e.scopeScore(ctx, "ip", strings.TrimSpace(input.RemoteIP), e.cfg.AbuseEnforcementIPThreshold, domain.AbuseSignalFilter{Kinds: negativeKinds, RemoteIP: input.RemoteIP, Since: since}, window); err != nil || v > 0 {
 		if err != nil {
 			return domain.RiskDecision{}, err
 		}
 		return rejected(v, "progressive abuse enforcement: ip threshold exceeded"), nil
-	} else {
-		score += v
 	}
-	if v, err := e.scopeScore(ctx, "address", input.Address.Hex(), e.cfg.AbuseEnforcementAddressThreshold, domain.AbuseSignalFilter{Kinds: negativeKinds, Address: input.Address, Since: since}, window); err != nil || v >= riskRejectThreshold(e.cfg) {
+	if v, err := e.scopeScore(ctx, "address", input.Address.Hex(), e.cfg.AbuseEnforcementAddressThreshold, domain.AbuseSignalFilter{Kinds: negativeKinds, Address: input.Address, Since: since}, window); err != nil || v > 0 {
 		if err != nil {
 			return domain.RiskDecision{}, err
 		}
 		return rejected(v, "progressive abuse enforcement: address threshold exceeded"), nil
-	} else {
-		score += v
 	}
-	if v, err := e.scopeScore(ctx, "fingerprint", strings.TrimSpace(input.Fingerprint), e.cfg.AbuseEnforcementFingerprintThreshold, domain.AbuseSignalFilter{Kinds: negativeKinds, Fingerprint: input.Fingerprint, Since: since}, window); err != nil || v >= riskRejectThreshold(e.cfg) {
+	if v, err := e.scopeScore(ctx, "fingerprint", strings.TrimSpace(input.Fingerprint), e.cfg.AbuseEnforcementFingerprintThreshold, domain.AbuseSignalFilter{Kinds: negativeKinds, Fingerprint: input.Fingerprint, Since: since}, window); err != nil || v > 0 {
 		if err != nil {
 			return domain.RiskDecision{}, err
 		}
 		return rejected(v, "progressive abuse enforcement: fingerprint threshold exceeded"), nil
-	} else {
-		score += v
 	}
 
 	advanced, reason, err := e.advancedScore(ctx, input)
@@ -101,7 +95,7 @@ func (e *ProgressiveEnforcer) scopeScore(ctx context.Context, scope, value strin
 	if count < threshold {
 		return 0, nil
 	}
-	return 2 + count/threshold, nil
+	return count, nil
 }
 
 func (e *ProgressiveEnforcer) advancedScore(ctx context.Context, input domain.RiskInput) (int, string, error) {
@@ -178,7 +172,7 @@ func (e *ProgressiveEnforcer) evaluateScope(ctx context.Context, scope, value st
 	if err != nil {
 		return domain.RiskDecision{}, err
 	}
-	if v >= riskRejectThreshold(e.cfg) {
+	if v > 0 {
 		return rejected(v, fmt.Sprintf("progressive abuse enforcement: %s threshold exceeded", scope)), nil
 	}
 	return domain.RiskDecision{Allowed: true, Score: v}, nil
