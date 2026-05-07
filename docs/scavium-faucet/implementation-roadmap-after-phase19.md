@@ -193,7 +193,7 @@ Status: implemented and closure-audited through fix 13 (full SQLite admin disabl
 
 ### Phase 30 — SCAVIUM Wallet Integration — CLOSED
 
-Status: implemented and closure-audited through fix 3.
+Status: implemented and closure-audited through fix 4.
 
 Closure scope:
 
