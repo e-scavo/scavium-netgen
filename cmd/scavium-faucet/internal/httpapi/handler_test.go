@@ -935,6 +935,43 @@ func TestCreateClaim(t *testing.T) {
 	}
 }
 
+func TestCreateClaimWalletOriginPolicyPreservesLegacyClaims(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://legacy.example")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: testClaimService(), WalletAllowedOrigins: []string{"https://wallet.example"}}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+}
+
+func TestCreateClaimWalletOriginPolicyProtectsProofClaims(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/claim", bytes.NewBufferString(`{
+		"address":"0x52908400098527886E0F7030069857D2E4169EE7",
+		"wallet_challenge_id":"wch_test",
+		"wallet_signature":"0xabc"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+
+	NewHandler(Dependencies{ReadService: &recordingClaimService{}, WalletAllowedOrigins: []string{"https://wallet.example"}}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status code = %d, want %d body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	var body ErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "origin_not_allowed" {
+		t.Fatalf("code = %q, want origin_not_allowed", body.Code)
+	}
+}
+
 func TestCreateClaimWalletAlias(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/faucet/claim", bytes.NewBufferString(`{"address":"0x52908400098527886E0F7030069857D2E4169EE7"}`))
 	req.Header.Set("Content-Type", "application/json")

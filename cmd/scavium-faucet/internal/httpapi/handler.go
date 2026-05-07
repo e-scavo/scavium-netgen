@@ -476,10 +476,6 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, wall
 			return
 		}
 
-		if !allowWalletOrigin(w, r, walletAllowedOrigins) {
-			return
-		}
-
 		if !requireJSONContentType(w, r) {
 			return
 		}
@@ -487,6 +483,10 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, wall
 		var body claimRequest
 		if err := decodeJSONBody(w, r, &body); err != nil {
 			WriteError(w, r, http.StatusBadRequest, "invalid_json", "invalid JSON body", nil)
+			return
+		}
+
+		if walletProofRequested(body) && !allowWalletOrigin(w, r, walletAllowedOrigins) {
 			return
 		}
 
@@ -526,6 +526,10 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, wall
 		logClaimAccepted(logger, r, claimRequest, claim)
 		WriteJSON(w, http.StatusAccepted, claim)
 	}
+}
+
+func walletProofRequested(body claimRequest) bool {
+	return strings.TrimSpace(body.WalletChallengeID) != "" || strings.TrimSpace(body.WalletSignature) != ""
 }
 
 func handleCreateClaimError(w http.ResponseWriter, r *http.Request, err error) {
