@@ -263,13 +263,15 @@ Request body:
 {
   "address": "0x52908400098527886E0F7030069857D2E4169EE7",
   "token_id": "native",
+  "campaign_id": "launch-campaign",
+  "invitation_code": "INVITE-001",
   "captcha_token": "<provider-token>",
   "fingerprint": "<client-fingerprint>",
   "website": ""
 }
 ```
 
-`token_id` is optional; when omitted, the configured default token is used. All fields except `address` remain optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting and Phase 27 clustering when provided. `website` is an optional compatibility-safe honeypot field: legitimate clients should omit it or send an empty string, and it is evaluated only when `SCAVIUM_FAUCET_ABUSE_HONEYPOT_ENABLED=true`.
+`token_id` is optional; when omitted, the configured default token is used. `campaign_id` and `invitation_code` are optional Phase 29 campaign controls; legacy clients can omit both and continue through the normal faucet policy path. Invite-scoped campaigns require a valid invitation code, allowlist-scoped campaigns require the claimant address to be present in the durable allowlist, and private campaign failures return the generic `invalid_campaign` rejection reason. All fields except `address` remain optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting and Phase 27 clustering when provided. `website` is an optional compatibility-safe honeypot field: legitimate clients should omit it or send an empty string, and it is evaluated only when `SCAVIUM_FAUCET_ABUSE_HONEYPOT_ENABLED=true`.
 
 Optional request header:
 
@@ -290,6 +292,7 @@ Accepted response:
   "token_decimals": 18,
   "status": "queued",
   "idempotency_key": "same-key-for-retries",
+  "campaign_id": "launch-campaign",
   "created_at": "2026-05-03T12:00:00Z",
   "updated_at": "2026-05-03T12:00:00Z"
 }
@@ -297,12 +300,13 @@ Accepted response:
 
 Current behavior:
 
-- `address`, optional `token_id`, `captcha_token`, `fingerprint`, and disabled-by-default honeypot field `website` are decoded from the body
+- `address`, optional `token_id`, optional `campaign_id`, optional `invitation_code`, `captcha_token`, `fingerprint`, and disabled-by-default honeypot field `website` are decoded from the body
 - the body is capped at `1 MiB`; requests declaring a larger `Content-Length` are rejected before claim handling
 - `RemoteIP` is extracted from the request (trusting `X-Forwarded-For` / `X-Real-IP` when `SCAVIUM_FAUCET_TRUSTED_PROXY` is set)
 - `UserAgent` is forwarded from the request header
 - the address cooldown is checked against the SQLite store
 - persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided); empty scope values are skipped, fingerprint values are trimmed/lowercased for keying, and denial reasons remain generic rather than exposing raw limiter keys
+- campaign validation runs after token/blocklist validation and before captcha/risk/cooldown/rate-limit work; campaign budgets are enforced against durable claim usage and invite codes are consumed only after successful durable claim creation
 - the daily budget is enforced for the selected token when token-scoped configuration is available; legacy deployments keep the existing faucet-wide budget behavior
 - captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; missing or failed verification returns `422 captcha_failed`
 - risk evaluation runs when a risk engine is configured; Phase 27 composes persisted negative-signal counts, same-IP bursts across successful and failed intake records, rotating-IP fingerprint behavior, address clustering, optional honeypot state, and bounded manual-review hints into deterministic operator diagnostics
@@ -317,7 +321,7 @@ Common errors:
 | 400 | `invalid_address` | Address failed validation |
 | 413 | `request_body_too_large` | Declared JSON request body exceeds `1 MiB` |
 | 422 | `captcha_failed` | Captcha verification failed |
-| 403 | `claim_rejected` | Claim rejected by abuse or risk policy |
+| 403 | `claim_rejected` | Claim rejected by abuse, risk, or invalid campaign policy |
 | 429 | `rate_limited` | IP, address, fingerprint, or cooldown limit exceeded |
 | 429 | `daily_budget_exceeded` | Global daily faucet budget exceeded |
 | 503 | `faucet_unavailable` | Faucet is paused, in maintenance, or unavailable |
@@ -383,6 +387,19 @@ Authorization: Bearer <SCAVIUM_FAUCET_ADMIN_TOKEN>
 ```
 
 Wrong or missing token returns `401`. Empty configured token returns `503`.
+
+### Phase 29 campaign administration endpoints
+
+The following endpoints are protected by the existing admin bearer-token middleware and use the same JSON error envelope as the rest of the admin plane.
+
+- `GET /api/v1/admin/campaigns` lists durable campaigns. Query parameters: `limit` (bounded to 500) and `offset`.
+- `POST /api/v1/admin/campaigns` creates a campaign with `id`, `name`, `scope` (`public`, `invite`, or `allowlist`), optional `token_id`, optional `budget_wei`, optional RFC3339 `starts_at` / `ends_at`, and `enabled`.
+- `POST /api/v1/admin/campaigns/{id}/disable` disables a campaign without deleting historical attribution.
+- `GET /api/v1/admin/campaigns/export.csv` exports a bounded CSV view of campaigns. User-controlled strings are hardened against spreadsheet formula injection.
+- `POST /api/v1/admin/invitations` creates an invitation code for an existing campaign with `code`, `campaign_id`, `max_uses`, and `enabled`.
+- `POST /api/v1/admin/allowlist` adds or replaces a durable allowlist entry with `campaign_id`, `address`, and optional `note`.
+
+Campaign mutations append durable admin audit entries when SQLite-backed admin storage is available; the in-memory fallback preserves the same visible campaign/list/disable behavior for tests and standalone partial-store wiring.
 
 ### `GET /api/v1/admin/metrics`
 

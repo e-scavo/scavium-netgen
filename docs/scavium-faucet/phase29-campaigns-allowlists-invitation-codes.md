@@ -53,6 +53,10 @@ Campaign validation runs after token and blocklist validation and before captcha
 - Campaign IDs and token IDs are sanitized at service boundaries and never used as unbounded metric labels.
 - CSV export prefixes dangerous leading spreadsheet characters with a single quote.
 
+## Fix 1 verification notes
+
+The Phase 29 fix pass verified the runtime/admin fallback path in addition to the SQLite-backed production path. `InMemoryAdminService` now preserves campaign state across create/list/disable calls, validates invitation and allowlist references against known campaigns, stores invitation codes and allowlist entries for standalone/test wiring, and keeps the same audit actions as the durable admin service. This prevents fallback behavior from appearing successful while losing Phase 29 campaign controls.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:

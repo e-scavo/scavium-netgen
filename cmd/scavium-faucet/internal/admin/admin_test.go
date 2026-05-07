@@ -793,3 +793,67 @@ func TestInMemoryAdminServicePersistsRuntimePolicyView(t *testing.T) {
 		t.Fatalf("cleared runtime policy = %#v", cleared)
 	}
 }
+
+func TestInMemoryAdminServicePersistsCampaignControls(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	created, err := svc.CreateCampaign(context.Background(), CampaignRequest{
+		ID:        "camp1",
+		Name:      "Launch",
+		TokenID:   "native",
+		Scope:     "invite",
+		BudgetWei: "1000",
+		Enabled:   true,
+	}, "operator")
+	if err != nil {
+		t.Fatalf("CreateCampaign error = %v", err)
+	}
+	if created.ID != "camp1" || created.BudgetWei == nil || created.BudgetWei.String() != "1000" {
+		t.Fatalf("created campaign = %#v", created)
+	}
+
+	campaigns, err := svc.ListCampaigns(context.Background(), 100, 0)
+	if err != nil {
+		t.Fatalf("ListCampaigns error = %v", err)
+	}
+	if len(campaigns) != 1 || campaigns[0].ID != "camp1" || !campaigns[0].Enabled {
+		t.Fatalf("campaigns = %#v", campaigns)
+	}
+
+	code, err := svc.CreateInvitationCode(context.Background(), InvitationCodeRequest{Code: "CODE1", CampaignID: "camp1", MaxUses: 1, Enabled: true}, "operator")
+	if err != nil {
+		t.Fatalf("CreateInvitationCode error = %v", err)
+	}
+	if code.Code != "CODE1" || code.CampaignID != "camp1" || !code.Enabled {
+		t.Fatalf("invitation code = %#v", code)
+	}
+
+	if err := svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "camp1", Address: "0x1111111111111111111111111111111111111111", Note: "seed"}, "operator"); err != nil {
+		t.Fatalf("AddAllowlistEntry error = %v", err)
+	}
+
+	if err := svc.DisableCampaign(context.Background(), "camp1", "operator"); err != nil {
+		t.Fatalf("DisableCampaign error = %v", err)
+	}
+	campaigns, err = svc.ListCampaigns(context.Background(), 100, 0)
+	if err != nil {
+		t.Fatalf("ListCampaigns after disable error = %v", err)
+	}
+	if len(campaigns) != 1 || campaigns[0].Enabled {
+		t.Fatalf("campaigns after disable = %#v", campaigns)
+	}
+}
+
+func TestInMemoryAdminServiceRejectsMissingCampaignReferences(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	if _, err := svc.CreateInvitationCode(context.Background(), InvitationCodeRequest{Code: "CODE1", CampaignID: "missing", MaxUses: 1, Enabled: true}, "operator"); !errors.Is(err, ErrInvalidCampaign) {
+		t.Fatalf("CreateInvitationCode error = %v, want ErrInvalidCampaign", err)
+	}
+	if err := svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "missing", Address: "0x1111111111111111111111111111111111111111"}, "operator"); !errors.Is(err, ErrInvalidCampaign) {
+		t.Fatalf("AddAllowlistEntry error = %v, want ErrInvalidCampaign", err)
+	}
+	if err := svc.DisableCampaign(context.Background(), "missing", "operator"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DisableCampaign error = %v, want ErrNotFound", err)
+	}
+}

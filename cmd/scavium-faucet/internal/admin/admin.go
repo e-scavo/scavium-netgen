@@ -289,6 +289,9 @@ type InMemoryAdminService struct {
 	auditLog      *AuditLog
 	modeCtl       ModeController
 	runtimePolicy domain.RuntimePolicy
+	campaigns     map[string]domain.Campaign
+	invitations   map[string]domain.InvitationCode
+	allowlist     map[string]map[string]domain.CampaignAllowlistEntry
 	now           func() time.Time
 }
 
@@ -304,11 +307,14 @@ type SQLiteReadAdminService struct {
 // NewInMemoryAdminService creates an in-memory admin service in "active" mode.
 func NewInMemoryAdminService() *InMemoryAdminService {
 	return &InMemoryAdminService{
-		mode:      "active",
-		claims:    make(map[string]domain.Claim),
-		blocklist: abuse.NewBlocklist(),
-		auditLog:  NewAuditLog(500),
-		now:       time.Now,
+		mode:        "active",
+		claims:      make(map[string]domain.Claim),
+		blocklist:   abuse.NewBlocklist(),
+		auditLog:    NewAuditLog(500),
+		campaigns:   make(map[string]domain.Campaign),
+		invitations: make(map[string]domain.InvitationCode),
+		allowlist:   make(map[string]map[string]domain.CampaignAllowlistEntry),
+		now:         time.Now,
 	}
 }
 
@@ -999,12 +1005,43 @@ func (s *InMemoryAdminService) CreateCampaign(_ context.Context, req CampaignReq
 	if err != nil {
 		return domain.Campaign{}, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.campaigns[campaign.ID]; exists {
+		return domain.Campaign{}, ErrInvalidCampaign
+	}
+	s.campaigns[campaign.ID] = copyCampaign(campaign)
 	s.auditLog.Append(AuditEntry{Action: "campaign_create", Actor: actor, Target: campaign.ID, CreatedAt: s.now().UTC().Format(time.RFC3339)})
-	return campaign, nil
+	return copyCampaign(campaign), nil
 }
 
-func (s *InMemoryAdminService) ListCampaigns(context.Context, int, int) ([]domain.Campaign, error) {
-	return nil, nil
+func (s *InMemoryAdminService) ListCampaigns(_ context.Context, limit, offset int) ([]domain.Campaign, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	campaigns := make([]domain.Campaign, 0, len(s.campaigns))
+	for _, c := range s.campaigns {
+		campaigns = append(campaigns, copyCampaign(c))
+	}
+	sort.SliceStable(campaigns, func(i, j int) bool {
+		if campaigns[i].CreatedAt.Equal(campaigns[j].CreatedAt) {
+			return campaigns[i].ID < campaigns[j].ID
+		}
+		return campaigns[i].CreatedAt.After(campaigns[j].CreatedAt)
+	})
+	if offset >= len(campaigns) {
+		return []domain.Campaign{}, nil
+	}
+	end := offset + limit
+	if end > len(campaigns) {
+		end = len(campaigns)
+	}
+	return campaigns[offset:end], nil
 }
 
 func (s *InMemoryAdminService) DisableCampaign(_ context.Context, id, actor string) error {
@@ -1012,24 +1049,57 @@ func (s *InMemoryAdminService) DisableCampaign(_ context.Context, id, actor stri
 	if id == "" {
 		return ErrInvalidCampaign
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	campaign, ok := s.campaigns[id]
+	if !ok {
+		return ErrNotFound
+	}
+	campaign.Enabled = false
+	campaign.UpdatedAt = s.now().UTC()
+	s.campaigns[id] = campaign
 	s.auditLog.Append(AuditEntry{Action: "campaign_disable", Actor: actor, Target: id, CreatedAt: s.now().UTC().Format(time.RFC3339)})
 	return nil
 }
 
 func (s *InMemoryAdminService) CreateInvitationCode(_ context.Context, req InvitationCodeRequest, actor string) (domain.InvitationCode, error) {
-	code := domain.InvitationCode{Code: strings.TrimSpace(req.Code), CampaignID: strings.TrimSpace(req.CampaignID), MaxUses: req.MaxUses, Enabled: req.Enabled, CreatedAt: s.now().UTC(), UpdatedAt: s.now().UTC()}
+	now := s.now().UTC()
+	code := domain.InvitationCode{Code: strings.TrimSpace(req.Code), CampaignID: strings.TrimSpace(req.CampaignID), MaxUses: req.MaxUses, Enabled: req.Enabled, CreatedAt: now, UpdatedAt: now}
 	if code.Code == "" || code.CampaignID == "" || code.MaxUses < 0 {
 		return domain.InvitationCode{}, ErrInvalidCampaign
 	}
-	s.auditLog.Append(AuditEntry{Action: "invitation_create", Actor: actor, Target: code.Code, Detail: code.CampaignID, CreatedAt: s.now().UTC().Format(time.RFC3339)})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.campaigns[code.CampaignID]; !ok {
+		return domain.InvitationCode{}, ErrInvalidCampaign
+	}
+	if _, exists := s.invitations[code.Code]; exists {
+		return domain.InvitationCode{}, ErrInvalidCampaign
+	}
+	s.invitations[code.Code] = code
+	s.auditLog.Append(AuditEntry{Action: "invitation_create", Actor: actor, Target: code.Code, Detail: code.CampaignID, CreatedAt: now.Format(time.RFC3339)})
 	return code, nil
 }
 
 func (s *InMemoryAdminService) AddAllowlistEntry(_ context.Context, req AllowlistAddRequest, actor string) error {
-	if strings.TrimSpace(req.CampaignID) == "" || strings.TrimSpace(req.Address) == "" {
+	addr, err := domain.ValidateAddress(req.Address)
+	if err != nil {
 		return ErrInvalidCampaign
 	}
-	s.auditLog.Append(AuditEntry{Action: "campaign_allowlist_add", Actor: actor, Target: strings.TrimSpace(req.CampaignID), CreatedAt: s.now().UTC().Format(time.RFC3339)})
+	entry := domain.CampaignAllowlistEntry{CampaignID: strings.TrimSpace(req.CampaignID), Address: addr, Note: strings.TrimSpace(req.Note), CreatedAt: s.now().UTC()}
+	if entry.CampaignID == "" {
+		return ErrInvalidCampaign
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.campaigns[entry.CampaignID]; !ok {
+		return ErrInvalidCampaign
+	}
+	if s.allowlist[entry.CampaignID] == nil {
+		s.allowlist[entry.CampaignID] = make(map[string]domain.CampaignAllowlistEntry)
+	}
+	s.allowlist[entry.CampaignID][entry.Address.Hex()] = entry
+	s.auditLog.Append(AuditEntry{Action: "campaign_allowlist_add", Actor: actor, Target: entry.CampaignID, CreatedAt: s.now().UTC().Format(time.RFC3339)})
 	return nil
 }
 
@@ -1115,6 +1185,21 @@ func (s *SQLiteReadAdminService) AddAllowlistEntry(ctx context.Context, req Allo
 		return err
 	}
 	return s.appendAudit(ctx, AuditEntry{Action: "campaign_allowlist_add", Actor: actor, Target: entry.CampaignID, CreatedAt: s.now().UTC().Format(time.RFC3339)})
+}
+
+func copyCampaign(c domain.Campaign) domain.Campaign {
+	if c.BudgetWei != nil {
+		c.BudgetWei = new(big.Int).Set(c.BudgetWei)
+	}
+	if c.StartsAt != nil {
+		t := c.StartsAt.UTC()
+		c.StartsAt = &t
+	}
+	if c.EndsAt != nil {
+		t := c.EndsAt.UTC()
+		c.EndsAt = &t
+	}
+	return c
 }
 
 func campaignFromRequest(req CampaignRequest) (domain.Campaign, error) {
