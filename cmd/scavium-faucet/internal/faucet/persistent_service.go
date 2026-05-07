@@ -152,7 +152,7 @@ func (s *PersistentReadService) Config(ctx context.Context) (ConfigResponse, err
 		amountWei = s.cfg.AmountWei.String()
 	}
 
-	tokens := tokenResponses(s.cfg.NormalizedTokens())
+	tokens := tokenResponsesWithRuntimePolicy(s.cfg.NormalizedTokens(), policy)
 	return ConfigResponse{
 		NetworkName:         s.cfg.NetworkName,
 		ChainID:             s.cfg.ChainID,
@@ -167,6 +167,20 @@ func (s *PersistentReadService) Config(ctx context.Context) (ConfigResponse, err
 		CaptchaProvider:     s.cfg.CaptchaProvider,
 		CaptchaSiteKey:      s.cfg.CaptchaSiteKey,
 	}, nil
+}
+
+func tokenResponsesWithRuntimePolicy(tokens []config.TokenConfig, policy domain.RuntimePolicy) []TokenResponse {
+	out := tokenResponses(tokens)
+	for i := range out {
+		if budget, ok := policy.TokenDailyBudgetWei[out[i].ID]; ok && budget != nil {
+			out[i].DailyBudgetWei = budget.String()
+			continue
+		}
+		if policy.DailyBudgetWei != nil {
+			out[i].DailyBudgetWei = policy.DailyBudgetWei.String()
+		}
+	}
+	return out
 }
 
 // Tokens returns the public faucet token catalog. It intentionally exposes only

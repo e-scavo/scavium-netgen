@@ -1029,6 +1029,42 @@ func TestPersistentReadServiceAppliesRuntimePolicyAfterRestart(t *testing.T) {
 	}
 }
 
+func TestPersistentReadServiceConfigReportsRuntimeTokenBudgets(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(1000)
+	cfg.Tokens = []config.TokenConfig{
+		{ID: "native", Symbol: "SCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42), DailyBudgetWei: big.NewInt(1000)},
+		{ID: "bonus", Symbol: "BON", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(7), DailyBudgetWei: big.NewInt(800)},
+	}
+	if err := store.SetRuntimePolicy(context.Background(), domain.RuntimePolicy{
+		DailyBudgetWei: big.NewInt(500),
+		TokenDailyBudgetWei: map[string]*big.Int{
+			"bonus": big.NewInt(125),
+		},
+	}); err != nil {
+		t.Fatalf("set runtime policy: %v", err)
+	}
+
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	got, err := service.Config(context.Background())
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	budgets := map[string]string{}
+	for _, token := range got.Tokens {
+		budgets[token.ID] = token.DailyBudgetWei
+	}
+	if budgets["native"] != "500" {
+		t.Fatalf("native runtime budget = %q, want aggregate runtime override 500", budgets["native"])
+	}
+	if budgets["bonus"] != "125" {
+		t.Fatalf("bonus runtime budget = %q, want token runtime override 125", budgets["bonus"])
+	}
+}
+
 func TestPersistentReadServiceRuntimeTokenBudgetOverridesEnv(t *testing.T) {
 	store := openPersistentTestStore(t, "")
 	defer store.Close()

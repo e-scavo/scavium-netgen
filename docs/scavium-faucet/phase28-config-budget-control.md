@@ -44,6 +44,7 @@ All routes are protected by the existing bearer-token admin middleware. Every mu
 `PersistentReadService` reads the runtime policy from the same durable store used for claims. The policy is applied to:
 
 - public `/api/v1/config` cooldown and rate-limit fields
+- public `/api/v1/config` token budget metadata, using the same effective aggregate/token budget overrides as claim enforcement
 - address eligibility cooldown and rate-limit metadata
 - claim-time cooldown enforcement
 - claim-time rate-limit enforcement
