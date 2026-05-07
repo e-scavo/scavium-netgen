@@ -183,7 +183,7 @@ Phase 24 is closed. Continue with the remaining features from `docs/scavium_fauc
 
 ### Phase 29 — Campaigns, Allowlists, and Invitation Codes
 
-Status: implemented and closure-audited through fix 9 (fix 8 package plus final claim-response contract test correction).
+Status: implemented and closure-audited through fix 10 (fix 9 package plus final admin HTTP coverage hardening).
 
 - Campaign tables and budgets.
 - Allowlist scopes.

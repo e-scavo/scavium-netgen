@@ -2737,6 +2737,109 @@ func TestAdminWalletReturnsSafeRuntimeVisibility(t *testing.T) {
 	}
 }
 
+func TestAdminCampaignEndpointsRequireAuth(t *testing.T) {
+	deps := testAdminDeps()
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/api/v1/admin/campaigns", ""},
+		{http.MethodPost, "/api/v1/admin/campaigns", `{"id":"camp-auth","name":"Auth","scope":"public","enabled":true}`},
+		{http.MethodPut, "/api/v1/admin/campaigns/camp-auth", `{"name":"Auth","scope":"public","enabled":true}`},
+		{http.MethodPost, "/api/v1/admin/campaigns/camp-auth/disable", ""},
+		{http.MethodGet, "/api/v1/admin/campaigns/export.csv", ""},
+		{http.MethodPost, "/api/v1/admin/invitations", `{"code":"AUTH","campaign_id":"camp-auth","max_uses":1,"enabled":true}`},
+		{http.MethodPost, "/api/v1/admin/allowlist", `{"campaign_id":"camp-auth","address":"0x1111111111111111111111111111111111111111"}`},
+	}
+	for _, tc := range cases {
+		var body *strings.Reader
+		if tc.body != "" {
+			body = strings.NewReader(tc.body)
+		} else {
+			body = strings.NewReader("")
+		}
+		req := httptest.NewRequest(tc.method, tc.path, body)
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		NewHandler(deps).ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s status = %d, want 401", tc.method, tc.path, rec.Code)
+		}
+	}
+}
+
+func TestAdminCampaignCreateRejectsInvalidContentTypeAndJSON(t *testing.T) {
+	handler := NewHandler(testAdminDeps())
+
+	badType := httptest.NewRequest(http.MethodPost, "/api/v1/admin/campaigns", strings.NewReader(`{"id":"camp"}`))
+	badType.Header.Set("Authorization", "Bearer "+testAdminToken)
+	badType.Header.Set("Content-Type", "text/plain")
+	badTypeRec := httptest.NewRecorder()
+	handler.ServeHTTP(badTypeRec, badType)
+	if badTypeRec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("content-type status = %d, want 415", badTypeRec.Code)
+	}
+
+	badJSON := httptest.NewRequest(http.MethodPost, "/api/v1/admin/campaigns", strings.NewReader(`{"id":`))
+	badJSON.Header.Set("Authorization", "Bearer "+testAdminToken)
+	badJSON.Header.Set("Content-Type", "application/json")
+	badJSONRec := httptest.NewRecorder()
+	handler.ServeHTTP(badJSONRec, badJSON)
+	if badJSONRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid-json status = %d, want 400", badJSONRec.Code)
+	}
+}
+
+func TestAdminCampaignCSVExportIsBoundedAndFormulaSafe(t *testing.T) {
+	deps := testAdminDeps()
+	handler := NewHandler(deps)
+	for _, req := range []admin.CampaignRequest{
+		{ID: "camp-safe-1", Name: "=cmd", Scope: string(domain.CampaignScopePublic), TokenID: "+native", Enabled: true},
+		{ID: "camp-safe-2", Name: "normal", Scope: string(domain.CampaignScopePublic), TokenID: "native", Enabled: true},
+	} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, adminRequest(http.MethodPost, "/api/v1/admin/campaigns", req))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, adminRequest(http.MethodGet, "/api/v1/admin/campaigns/export.csv?limit=2", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/csv; charset=utf-8" {
+		t.Fatalf("content type = %q", got)
+	}
+	body := rec.Body.String()
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("csv lines = %d, want header + 2 rows; body=%q", len(lines), body)
+	}
+	if strings.Contains(body, ",=cmd,") || strings.Contains(body, ",+native,") {
+		t.Fatalf("csv did not neutralize formula-like fields: %q", body)
+	}
+	if !strings.Contains(body, "'=cmd") && !strings.Contains(body, "'+native") {
+		t.Fatalf("csv missing neutralized field: %q", body)
+	}
+}
+
+func TestAdminCampaignDispatchRejectsUnsupportedMethods(t *testing.T) {
+	handler := NewHandler(testAdminDeps())
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, adminRequest(http.MethodDelete, "/api/v1/admin/campaigns/camp-delete", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("campaign update dispatch status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != http.MethodPut {
+		t.Fatalf("allow = %q, want PUT", got)
+	}
+}
+
 func TestAdminCampaignUpdateEndpoint(t *testing.T) {
 	deps := testAdminDeps()
 	createRec := httptest.NewRecorder()

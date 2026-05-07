@@ -87,6 +87,10 @@ The seventh Phase 29 fix pass completed the closure-audit coverage gap left afte
 
 The eighth Phase 29 fix pass corrected the final coverage-test build regression from fix 7. Persistent-service tests now verify invitation-code attribution through the durable stored claim record instead of expecting `ClaimResponse` to expose `invitation_code`; the public response contract intentionally keeps invitation codes out of claim responses while preserving durable attribution for auditing and rollback analysis.
 
+## Fix 9 verification
+
+The ninth Phase 29 fix pass closed the remaining test-coverage gap for the admin HTTP surface. Campaign, invitation, allowlist, update, disable, and CSV export admin endpoints now have focused HTTP tests for bearer-token protection. Campaign create also has explicit invalid content-type and malformed JSON coverage, campaign dispatch verifies unsupported methods, and the campaign CSV export test verifies both bounded output and spreadsheet-formula injection hardening for campaign names/token identifiers. No runtime behavior changed in this pass; the fix makes the Phase 29 admin contract harder to regress.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:
