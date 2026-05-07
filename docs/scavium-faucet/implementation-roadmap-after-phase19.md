@@ -183,7 +183,7 @@ Phase 24 is closed. Continue with the remaining features from `docs/scavium_fauc
 
 ### Phase 29 — Campaigns, Allowlists, and Invitation Codes
 
-Status: implemented and closure-audited through fix 5.
+Status: implemented and closure-audited through fix 6.
 
 - Campaign tables and budgets.
 - Allowlist scopes.

@@ -2739,16 +2739,24 @@ func TestAdminWalletReturnsSafeRuntimeVisibility(t *testing.T) {
 
 func TestAdminCampaignUpdateEndpoint(t *testing.T) {
 	deps := testAdminDeps()
-	createBody := bytes.NewBufferString(`{"id":"camp-update","name":"Before","scope":"public","enabled":true}`)
 	createRec := httptest.NewRecorder()
-	NewHandler(deps).ServeHTTP(createRec, adminRequest(http.MethodPost, "/api/v1/admin/campaigns", createBody))
+	NewHandler(deps).ServeHTTP(createRec, adminRequest(http.MethodPost, "/api/v1/admin/campaigns", admin.CampaignRequest{
+		ID:      "camp-update",
+		Name:    "Before",
+		Scope:   string(domain.CampaignScopePublic),
+		Enabled: true,
+	}))
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", createRec.Code)
 	}
 
-	updateBody := bytes.NewBufferString(`{"name":"After","scope":"invite","budget_wei":"123","enabled":true}`)
 	updateRec := httptest.NewRecorder()
-	NewHandler(deps).ServeHTTP(updateRec, adminRequest(http.MethodPut, "/api/v1/admin/campaigns/camp-update", updateBody))
+	NewHandler(deps).ServeHTTP(updateRec, adminRequest(http.MethodPut, "/api/v1/admin/campaigns/camp-update", admin.CampaignRequest{
+		Name:      "After",
+		Scope:     string(domain.CampaignScopeInvite),
+		BudgetWei: "123",
+		Enabled:   true,
+	}))
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want 200 body=%s", updateRec.Code, updateRec.Body.String())
 	}
