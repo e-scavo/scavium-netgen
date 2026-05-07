@@ -1141,8 +1141,15 @@ func TestPersistentReadServicePublicCampaignClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create public campaign claim: %v", err)
 	}
-	if created.CampaignID != "public-campaign" || created.InvitationCode != "" {
-		t.Fatalf("campaign attribution = %q/%q", created.CampaignID, created.InvitationCode)
+	if created.CampaignID != "public-campaign" {
+		t.Fatalf("campaign id = %q", created.CampaignID)
+	}
+	stored, err := store.GetClaim(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get stored claim: %v", err)
+	}
+	if stored.InvitationCode != "" {
+		t.Fatalf("invitation code = %q, want empty for public campaign", stored.InvitationCode)
 	}
 }
 
@@ -1204,8 +1211,15 @@ func TestPersistentReadServiceCampaignAllowlistClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create allowlist campaign claim: %v", err)
 	}
-	if created.CampaignID != "allow-ok" || created.InvitationCode != "" {
-		t.Fatalf("campaign attribution = %q/%q", created.CampaignID, created.InvitationCode)
+	if created.CampaignID != "allow-ok" {
+		t.Fatalf("campaign id = %q", created.CampaignID)
+	}
+	stored, err := store.GetClaim(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get stored claim: %v", err)
+	}
+	if stored.InvitationCode != "" {
+		t.Fatalf("invitation code = %q, want empty for allowlist campaign", stored.InvitationCode)
 	}
 }
 

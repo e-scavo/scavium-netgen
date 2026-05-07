@@ -83,6 +83,10 @@ The sixth Phase 29 fix pass closed a final invite-claim consistency edge case. I
 
 The seventh Phase 29 fix pass completed the closure-audit coverage gap left after runtime behavior was already passing the full project test suite. Focused persistent-service tests now cover public campaign claims, invalid invitation-code rejection before durable claim creation, exhausted campaign budgets, allowlist-approved campaign claims, and idempotent invite replays that must return the original claim without consuming the invitation code twice.
 
+## Fix 8 verification
+
+The eighth Phase 29 fix pass corrected the final coverage-test build regression from fix 7. Persistent-service tests now verify invitation-code attribution through the durable stored claim record instead of expecting `ClaimResponse` to expose `invitation_code`; the public response contract intentionally keeps invitation codes out of claim responses while preserving durable attribution for auditing and rollback analysis.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:
