@@ -196,3 +196,9 @@ Phase 25 closes public API completion for address history, wallet/address eligib
 
 Phase 24 closes the post-Phase-14 roadmap. The closure audit is recorded in `phase24-post14-closure-audit.md`, and the Copilot/manual re-audit prompt is available at `cmd/scavium-faucet/.agent/phase24-closure-audit-prompt.md`. Future work should begin from Phase 25 or another explicitly scheduled backlog item in `docs/scavium_faucet_public_features.md`; Stage 4 remains deferred until intentionally planned.
 
+
+## Phase 26 closure
+
+Phase 26 is closed as the public frontend completion pass over the Phase 25 API baseline. The embedded browser UI now exposes address eligibility and bounded public address history, keeps explorer links optional and defensively validated, adds in-page privacy and terms links with safe testnet copy, and improves accessibility/mobile behavior without introducing a frontend framework, inline event handlers, backend contract changes, or admin-surface changes.
+
+The closure record is `phase26-public-frontend-completion.md`.

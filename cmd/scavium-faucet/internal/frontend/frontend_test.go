@@ -31,6 +31,11 @@ func TestHandlerServesIndexHTML(t *testing.T) {
 	if strings.Contains(body, "onclick=") {
 		t.Fatal("index.html should not contain inline event handlers")
 	}
+	for _, want := range []string{"Check Eligibility", "View Address History", "#privacy", "#terms", `aria-live="polite"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("index.html missing Phase 26 UX marker %q", want)
+		}
+	}
 }
 
 func TestHandlerUnknownPathFallsBackToIndex(t *testing.T) {
@@ -74,5 +79,10 @@ func TestHandlerServesStaticJS(t *testing.T) {
 	}
 	if !strings.Contains(body, "formatDecimalAmount") {
 		t.Fatal("faucet.js missing token amount display formatting")
+	}
+	for _, want := range []string{"/api/v1/address/", "loadAddressStatus", "loadAddressHistory", "txExplorerHref", "validExplorerTemplate", "data.status || data.mode"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("faucet.js missing Phase 26 UX logic %q", want)
+		}
 	}
 }

@@ -237,3 +237,11 @@ Backup bundles created by `scripts/scavium-faucet-backup.sh` can contain durable
 Restore is intentionally operator-controlled. `scripts/scavium-faucet-restore.sh` defaults to plan mode, rejects unsafe archive paths plus symlink/hardlink entries, verifies the backup checksum manifest before writing, restores verified SQLite WAL/SHM companions when present, requires `SCAVIUM_FAUCET_RESTORE_CONFIRM=yes` for writes, and refuses a live systemd restore unless explicitly overridden. Production restore should be done during a maintenance window with the service stopped, followed by `/ready`, admin runtime, admin wallet, and queue verification.
 
 Wallet refill and rotation remain manual. Phase 23 does not add treasury automation, automatic hot-wallet refill, or scripts that transfer funds. Operators must verify the admin wallet endpoint, send small test transactions first, and keep hot-wallet private keys out of Git, tickets, shell history, and treasury tooling. Rotation is performed by changing the real environment file outside the repository and restarting the service after backup and maintenance-mode preparation.
+
+### Phase 26 frontend safety notes
+
+The public frontend remains dependency-free and CSP-compatible: JavaScript is still served from `/static/faucet.js`, and the HTML does not use inline event handlers. Phase 26 adds address eligibility and public address-history panels that call the existing Phase 25 public APIs with the address already typed by the user. These panels render only public-safe response fields and do not expose raw abuse signals, fingerprints, captcha tokens, idempotency keys, internal queue controls, admin audit data, or private blocklist notes.
+
+Explorer links are rendered defensively. The frontend requires a configured transaction URL template containing `{txHash}` and a syntactically valid EVM transaction hash before emitting an external link. Malformed templates or hashes suppress the link instead of constructing an unsafe URL.
+
+The in-page privacy and terms sections are safe defaults for the testnet faucet. They are not a substitute for legal review; operators with jurisdiction-specific requirements should replace the static copy or serve reviewed legal pages through nginx while preserving the no-secret/no-inline-script frontend posture.
