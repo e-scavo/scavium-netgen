@@ -19,7 +19,7 @@ Closed items:
 
 Phase 26 does not change backend persistence, migrations, admin routes, claim envelopes, public route names, CORS behavior, request IDs, correlation IDs, rate-limit semantics, captcha verification, or token validation. The browser never renders private abuse signals, raw fingerprints, captcha tokens, idempotency keys, blocklist notes, internal queue controls, admin audit entries, bearer tokens, secrets, or unbounded metric labels.
 
-Explorer URLs are treated as optional presentation data. Missing, relative, malformed, or non-HTTP(S) explorer templates suppress links instead of constructing relative or attacker-controlled URLs. Transaction hashes are validated before any explorer anchor is rendered.
+Explorer URLs are treated as optional presentation data derived from runtime status configuration. Missing, relative, malformed, or non-HTTP(S) explorer templates suppress links instead of constructing relative or attacker-controlled URLs. Transaction hashes are validated before any explorer anchor is rendered, and the static HTML does not hardcode an explorer host.
 
 ## Runtime validation notes
 

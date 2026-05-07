@@ -31,6 +31,9 @@ func TestHandlerServesIndexHTML(t *testing.T) {
 	if strings.Contains(body, "onclick=") {
 		t.Fatal("index.html should not contain inline event handlers")
 	}
+	if strings.Contains(body, "explorer.testnet.scavium.network") {
+		t.Fatal("index.html must not hardcode explorer URLs; explorer actions must come from runtime status config")
+	}
 	for _, want := range []string{"Check Eligibility", "View Address History", "#privacy", "#terms", `aria-live="polite"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("index.html missing Phase 26 UX marker %q", want)

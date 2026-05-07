@@ -18,7 +18,7 @@ Phase 26 does not add account login, wallet signatures, advanced anti-abuse, run
 
 ## Runtime privacy notes
 
-The status and history panels reuse the public-safe backend contracts created in Phase 25. Address history is scoped to the address typed by the user and only displays public claim fields. Explorer links are treated as optional convenience links; malformed templates, relative templates, non-HTTP(S) templates, or malformed transaction hashes suppress link rendering instead of building unsafe URLs.
+The status and history panels reuse the public-safe backend contracts created in Phase 25. Address history is scoped to the address typed by the user and only displays public claim fields. Explorer links are treated as optional convenience links derived from runtime status configuration; malformed templates, relative templates, non-HTTP(S) templates, or malformed transaction hashes suppress link rendering instead of building unsafe URLs. The static HTML intentionally does not hardcode an explorer host.
 
 ## Manual UX checks
 
