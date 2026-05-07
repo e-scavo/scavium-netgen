@@ -857,3 +857,171 @@ func TestInMemoryAdminServiceRejectsMissingCampaignReferences(t *testing.T) {
 		t.Fatalf("DisableCampaign error = %v, want ErrNotFound", err)
 	}
 }
+
+type failingCampaignAuditStore struct {
+	failingRuntimePolicyAuditStore
+	campaigns   map[string]domain.Campaign
+	invitations map[string]domain.InvitationCode
+	allowlist   map[string]map[string]domain.CampaignAllowlistEntry
+}
+
+func newFailingCampaignAuditStore(err error) *failingCampaignAuditStore {
+	return &failingCampaignAuditStore{
+		failingRuntimePolicyAuditStore: failingRuntimePolicyAuditStore{appendErr: err},
+		campaigns:                      make(map[string]domain.Campaign),
+		invitations:                    make(map[string]domain.InvitationCode),
+		allowlist:                      make(map[string]map[string]domain.CampaignAllowlistEntry),
+	}
+}
+
+func (s *failingCampaignAuditStore) CreateCampaign(_ context.Context, c domain.Campaign) (domain.Campaign, error) {
+	s.campaigns[c.ID] = c
+	return c, nil
+}
+
+func (s *failingCampaignAuditStore) GetCampaign(_ context.Context, id string) (domain.Campaign, error) {
+	c, ok := s.campaigns[id]
+	if !ok {
+		return domain.Campaign{}, domain.ErrNotFound
+	}
+	return c, nil
+}
+
+func (s *failingCampaignAuditStore) ListCampaigns(context.Context, int, int) ([]domain.Campaign, error) {
+	return nil, nil
+}
+
+func (s *failingCampaignAuditStore) DisableCampaign(_ context.Context, id string) error {
+	c, ok := s.campaigns[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	c.Enabled = false
+	s.campaigns[id] = c
+	return nil
+}
+
+func (s *failingCampaignAuditStore) SetCampaignEnabled(_ context.Context, id string, enabled bool) error {
+	c, ok := s.campaigns[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	c.Enabled = enabled
+	s.campaigns[id] = c
+	return nil
+}
+
+func (s *failingCampaignAuditStore) DeleteCampaign(_ context.Context, id string) error {
+	if _, ok := s.campaigns[id]; !ok {
+		return domain.ErrNotFound
+	}
+	delete(s.campaigns, id)
+	return nil
+}
+
+func (s *failingCampaignAuditStore) CreateInvitationCode(_ context.Context, code domain.InvitationCode) (domain.InvitationCode, error) {
+	if _, ok := s.campaigns[code.CampaignID]; !ok {
+		return domain.InvitationCode{}, domain.ErrNotFound
+	}
+	s.invitations[code.Code] = code
+	return code, nil
+}
+
+func (s *failingCampaignAuditStore) GetInvitationCode(_ context.Context, code string) (domain.InvitationCode, error) {
+	inv, ok := s.invitations[code]
+	if !ok {
+		return domain.InvitationCode{}, domain.ErrNotFound
+	}
+	return inv, nil
+}
+
+func (s *failingCampaignAuditStore) ConsumeInvitationCode(context.Context, string) error { return nil }
+
+func (s *failingCampaignAuditStore) DeleteInvitationCode(_ context.Context, code string) error {
+	if _, ok := s.invitations[code]; !ok {
+		return domain.ErrNotFound
+	}
+	delete(s.invitations, code)
+	return nil
+}
+
+func (s *failingCampaignAuditStore) AddCampaignAllowlistEntry(_ context.Context, entry domain.CampaignAllowlistEntry) error {
+	if _, ok := s.campaigns[entry.CampaignID]; !ok {
+		return domain.ErrNotFound
+	}
+	if s.allowlist[entry.CampaignID] == nil {
+		s.allowlist[entry.CampaignID] = make(map[string]domain.CampaignAllowlistEntry)
+	}
+	s.allowlist[entry.CampaignID][entry.Address.Hex()] = entry
+	return nil
+}
+
+func (s *failingCampaignAuditStore) IsAddressAllowlisted(_ context.Context, campaignID string, address common.Address) (bool, error) {
+	return s.allowlist[campaignID][address.Hex()] != (domain.CampaignAllowlistEntry{}), nil
+}
+
+func (s *failingCampaignAuditStore) RemoveCampaignAllowlistEntry(_ context.Context, campaignID string, address common.Address) error {
+	if s.allowlist[campaignID] == nil {
+		return domain.ErrNotFound
+	}
+	delete(s.allowlist[campaignID], address.Hex())
+	return nil
+}
+
+func (s *failingCampaignAuditStore) CampaignUsage(context.Context, string, []domain.ClaimStatus) (domain.CampaignUsage, error) {
+	return domain.CampaignUsage{}, nil
+}
+
+func TestSQLiteReadAdminServiceRollsBackCampaignCreateWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := newFailingCampaignAuditStore(auditErr)
+	svc := NewSQLiteReadAdminService(store)
+
+	_, err := svc.CreateCampaign(context.Background(), CampaignRequest{ID: "camp-a", Name: "Campaign A", Scope: string(domain.CampaignScopePublic), Enabled: true}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("CreateCampaign error = %v, want audit error", err)
+	}
+	if _, ok := store.campaigns["camp-a"]; ok {
+		t.Fatalf("campaign persisted after failed audit")
+	}
+}
+
+func TestSQLiteReadAdminServiceRollsBackCampaignDisableWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := newFailingCampaignAuditStore(auditErr)
+	store.campaigns["camp-a"] = domain.Campaign{ID: "camp-a", Name: "Campaign A", Scope: domain.CampaignScopePublic, Enabled: true}
+	svc := NewSQLiteReadAdminService(store)
+
+	err := svc.DisableCampaign(context.Background(), "camp-a", "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("DisableCampaign error = %v, want audit error", err)
+	}
+	if !store.campaigns["camp-a"].Enabled {
+		t.Fatalf("campaign remained disabled after failed audit")
+	}
+}
+
+func TestSQLiteReadAdminServiceRollsBackInvitationAndAllowlistWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := newFailingCampaignAuditStore(auditErr)
+	store.campaigns["camp-a"] = domain.Campaign{ID: "camp-a", Name: "Campaign A", Scope: domain.CampaignScopeInvite, Enabled: true}
+	svc := NewSQLiteReadAdminService(store)
+
+	_, err := svc.CreateInvitationCode(context.Background(), InvitationCodeRequest{Code: "INVITE", CampaignID: "camp-a", MaxUses: 1, Enabled: true}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("CreateInvitationCode error = %v, want audit error", err)
+	}
+	if _, ok := store.invitations["INVITE"]; ok {
+		t.Fatalf("invitation persisted after failed audit")
+	}
+
+	addr := "0x52908400098527886E0F7030069857D2E4169EE7"
+	err = svc.AddAllowlistEntry(context.Background(), AllowlistAddRequest{CampaignID: "camp-a", Address: addr}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("AddAllowlistEntry error = %v, want audit error", err)
+	}
+	allowed, _ := store.IsAddressAllowlisted(context.Background(), "camp-a", common.HexToAddress(addr))
+	if allowed {
+		t.Fatalf("allowlist entry persisted after failed audit")
+	}
+}

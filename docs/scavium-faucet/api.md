@@ -399,7 +399,7 @@ The following endpoints are protected by the existing admin bearer-token middlew
 - `POST /api/v1/admin/invitations` creates an invitation code for an existing campaign with `code`, `campaign_id`, `max_uses`, and `enabled`.
 - `POST /api/v1/admin/allowlist` adds or replaces a durable allowlist entry with `campaign_id`, `address`, and optional `note`.
 
-Campaign mutations append durable admin audit entries when SQLite-backed admin storage is available; the in-memory fallback preserves the same visible campaign/list/disable behavior for tests and standalone partial-store wiring.
+Campaign mutations append durable admin audit entries when SQLite-backed admin storage is available. If durable audit append fails after a campaign create/disable, invitation create, or allowlist insert mutation, the admin service attempts to roll the mutation back so unaudited campaign changes do not remain active. The in-memory fallback preserves the same visible campaign/list/disable behavior for tests and standalone partial-store wiring.
 
 ### `GET /api/v1/admin/metrics`
 

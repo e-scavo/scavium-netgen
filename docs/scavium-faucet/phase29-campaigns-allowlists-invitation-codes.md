@@ -57,6 +57,10 @@ Campaign validation runs after token and blocklist validation and before captcha
 
 The Phase 29 fix pass verified the runtime/admin fallback path in addition to the SQLite-backed production path. `InMemoryAdminService` now preserves campaign state across create/list/disable calls, validates invitation and allowlist references against known campaigns, stores invitation codes and allowlist entries for standalone/test wiring, and keeps the same audit actions as the durable admin service. This prevents fallback behavior from appearing successful while losing Phase 29 campaign controls.
 
+## Fix 2 verification notes
+
+The second Phase 29 fix pass verified durable admin mutation/audit consistency. SQLite-backed campaign create, campaign disable, invitation creation, and allowlist insertion now use best-effort rollback primitives if durable audit append fails after the mutation, mirroring the Phase 28 runtime-policy safety rule that unaudited admin changes must not remain active. Focused admin tests cover rollback for campaign creation, campaign disable, invitation creation, and allowlist insertion, while SQLite store helpers provide the rollback primitives used by the admin service.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:

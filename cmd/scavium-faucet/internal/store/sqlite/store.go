@@ -1743,6 +1743,35 @@ func (s *Store) DisableCampaign(ctx context.Context, id string) error {
 	return nil
 }
 
+// SetCampaignEnabled updates only the enabled flag. It is used by the
+// admin service as a best-effort rollback primitive if durable audit writing
+// fails after a disable operation.
+func (s *Store) SetCampaignEnabled(ctx context.Context, id string, enabled bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE campaigns SET enabled = ?, updated_at = ? WHERE id = ?`, boolInt(enabled), formatTime(time.Now().UTC()), strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteCampaign removes a campaign that has no dependent rows. It is intended
+// for admin rollback after an audit failure immediately following creation.
+func (s *Store) DeleteCampaign(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM campaigns WHERE id = ?`, strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) CreateInvitationCode(ctx context.Context, code domain.InvitationCode) (domain.InvitationCode, error) {
 	code.Code = strings.TrimSpace(code.Code)
 	code.CampaignID = strings.TrimSpace(code.CampaignID)
@@ -1780,6 +1809,20 @@ func (s *Store) ConsumeInvitationCode(ctx context.Context, code string) error {
 	return nil
 }
 
+// DeleteInvitationCode removes an invitation created by an admin operation that
+// could not be durably audited.
+func (s *Store) DeleteInvitationCode(ctx context.Context, code string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM invitation_codes WHERE code = ?`, strings.TrimSpace(code))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) AddCampaignAllowlistEntry(ctx context.Context, entry domain.CampaignAllowlistEntry) error {
 	entry.CampaignID = strings.TrimSpace(entry.CampaignID)
 	if entry.CampaignID == "" || entry.Address == (common.Address{}) {
@@ -1796,6 +1839,19 @@ func (s *Store) IsAddressAllowlisted(ctx context.Context, campaignID string, add
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM campaign_allowlist WHERE campaign_id = ? AND address = ?`, strings.TrimSpace(campaignID), address.Hex()).Scan(&count)
 	return count > 0, err
+}
+
+// RemoveCampaignAllowlistEntry removes one allowlist entry for admin rollback.
+func (s *Store) RemoveCampaignAllowlistEntry(ctx context.Context, campaignID string, address common.Address) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM campaign_allowlist WHERE campaign_id = ? AND address = ?`, strings.TrimSpace(campaignID), address.Hex())
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) CampaignUsage(ctx context.Context, campaignID string, statuses []domain.ClaimStatus) (domain.CampaignUsage, error) {

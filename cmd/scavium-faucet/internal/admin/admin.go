@@ -14,6 +14,8 @@ import (
 
 	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // --- Role ---------------------------------------------------------------
@@ -248,6 +250,15 @@ type AuditStore interface {
 // RuntimePolicyStore provides durable runtime policy operations.
 type CampaignStore interface {
 	domain.CampaignStore
+}
+
+// campaignRollbackStore exposes best-effort rollback primitives for campaign
+// admin writes when durable audit persistence fails after a mutation.
+type campaignRollbackStore interface {
+	DeleteCampaign(ctx context.Context, id string) error
+	SetCampaignEnabled(ctx context.Context, id string, enabled bool) error
+	DeleteInvitationCode(ctx context.Context, code string) error
+	RemoveCampaignAllowlistEntry(ctx context.Context, campaignID string, address common.Address) error
 }
 
 type RuntimePolicyStore interface {
@@ -1117,6 +1128,9 @@ func (s *SQLiteReadAdminService) CreateCampaign(ctx context.Context, req Campaig
 		return domain.Campaign{}, err
 	}
 	if err := s.appendAudit(ctx, AuditEntry{Action: "campaign_create", Actor: actor, Target: created.ID, CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+		if rollback, ok := store.(campaignRollbackStore); ok {
+			_ = rollback.DeleteCampaign(ctx, created.ID)
+		}
 		return domain.Campaign{}, err
 	}
 	return created, nil
@@ -1139,13 +1153,26 @@ func (s *SQLiteReadAdminService) DisableCampaign(ctx context.Context, id, actor 
 	if id == "" {
 		return ErrInvalidCampaign
 	}
+	previous, getErr := store.GetCampaign(ctx, id)
+	if getErr != nil {
+		if errors.Is(getErr, domain.ErrNotFound) {
+			return ErrNotFound
+		}
+		return getErr
+	}
 	if err := store.DisableCampaign(ctx, id); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return ErrNotFound
 		}
 		return err
 	}
-	return s.appendAudit(ctx, AuditEntry{Action: "campaign_disable", Actor: actor, Target: id, CreatedAt: s.now().UTC().Format(time.RFC3339)})
+	if err := s.appendAudit(ctx, AuditEntry{Action: "campaign_disable", Actor: actor, Target: id, CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+		if rollback, ok := store.(campaignRollbackStore); ok {
+			_ = rollback.SetCampaignEnabled(ctx, id, previous.Enabled)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *SQLiteReadAdminService) CreateInvitationCode(ctx context.Context, req InvitationCodeRequest, actor string) (domain.InvitationCode, error) {
@@ -1163,6 +1190,9 @@ func (s *SQLiteReadAdminService) CreateInvitationCode(ctx context.Context, req I
 		return domain.InvitationCode{}, err
 	}
 	if err := s.appendAudit(ctx, AuditEntry{Action: "invitation_create", Actor: actor, Target: created.Code, Detail: created.CampaignID, CreatedAt: now.Format(time.RFC3339)}); err != nil {
+		if rollback, ok := store.(campaignRollbackStore); ok {
+			_ = rollback.DeleteInvitationCode(ctx, created.Code)
+		}
 		return domain.InvitationCode{}, err
 	}
 	return created, nil
@@ -1184,7 +1214,13 @@ func (s *SQLiteReadAdminService) AddAllowlistEntry(ctx context.Context, req Allo
 	if err := store.AddCampaignAllowlistEntry(ctx, entry); err != nil {
 		return err
 	}
-	return s.appendAudit(ctx, AuditEntry{Action: "campaign_allowlist_add", Actor: actor, Target: entry.CampaignID, CreatedAt: s.now().UTC().Format(time.RFC3339)})
+	if err := s.appendAudit(ctx, AuditEntry{Action: "campaign_allowlist_add", Actor: actor, Target: entry.CampaignID, CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+		if rollback, ok := store.(campaignRollbackStore); ok {
+			_ = rollback.RemoveCampaignAllowlistEntry(ctx, entry.CampaignID, entry.Address)
+		}
+		return err
+	}
+	return nil
 }
 
 func copyCampaign(c domain.Campaign) domain.Campaign {
