@@ -647,6 +647,40 @@ func TestPersistentReadServiceProgressiveAbuseEnforcementRejects(t *testing.T) {
 	}
 }
 
+func TestPersistentReadServicePersistsManualReviewHints(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+
+	service := newPersistentTestService(t, store, persistentTestConfig(), persistentTestNow())
+	service.SetAbuseSignalRecorder(store)
+	service.SetRiskEngine(fakeRiskEngine{allowed: true, reason: "risk score below rejection threshold", score: 4, review: true})
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{
+		Address:  persistentTestAddress(),
+		RemoteIP: "203.0.113.99",
+	})
+	if err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	signals, err := store.ListAbuseSignals(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list abuse signals: %v", err)
+	}
+	foundReview := false
+	for _, signal := range signals {
+		if signal.Kind == domain.AbuseSignalManualReview {
+			foundReview = true
+			if signal.Score != 4 || signal.Reason != "risk score below rejection threshold" {
+				t.Fatalf("manual review signal = %+v", signal)
+			}
+		}
+	}
+	if !foundReview {
+		t.Fatalf("manual review signal not found in %+v", signals)
+	}
+}
+
 func openPersistentTestStore(t *testing.T, path string) *sqlite.Store {
 	t.Helper()
 	if path == "" {
@@ -764,10 +798,12 @@ func (v fakeCaptchaVerifier) Verify(context.Context, string, string) (domain.Cap
 type fakeRiskEngine struct {
 	allowed bool
 	reason  string
+	score   int
+	review  bool
 }
 
 func (e fakeRiskEngine) Evaluate(context.Context, domain.RiskInput) (domain.RiskDecision, error) {
-	return domain.RiskDecision{Allowed: e.allowed, Reason: e.reason}, nil
+	return domain.RiskDecision{Allowed: e.allowed, Reason: e.reason, Score: e.score, Review: e.review}, nil
 }
 
 func TestPersistentReadServiceRejectsInvalidTokenBeforeCaptcha(t *testing.T) {

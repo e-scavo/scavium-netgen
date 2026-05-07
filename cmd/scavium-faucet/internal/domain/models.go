@@ -90,6 +90,8 @@ const (
 	AbuseSignalRiskAllowed AbuseSignalKind = "risk_allowed"
 	// AbuseSignalRiskRejected records a reject decision from the risk engine.
 	AbuseSignalRiskRejected AbuseSignalKind = "risk_rejected"
+	// AbuseSignalManualReview records an internal manual-review hint from the risk engine.
+	AbuseSignalManualReview AbuseSignalKind = "manual_review"
 	// AbuseSignalCooldownActive records a claim denied by wallet cooldown.
 	AbuseSignalCooldownActive AbuseSignalKind = "cooldown_active"
 	// AbuseSignalRateLimited records a claim denied by IP/address/fingerprint limits.

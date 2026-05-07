@@ -209,4 +209,4 @@ The implementation narrative is `phase26-public-frontend-completion.md`, and the
 
 ## Phase 27 closure
 
-Phase 27 is closed as an advanced anti-abuse increment over persisted abuse signals. The implementation adds deterministic risk score composition, same-IP burst detection, rotating-IP fingerprint heuristics, address clustering, disabled-by-default honeypot handling, and internal manual-review hints without changing public claim envelopes or introducing new external services.
+Phase 27 is closed as an advanced anti-abuse increment over persisted abuse signals. The implementation adds deterministic risk score composition, same-IP burst detection across successful and failed intake signals, rotating-IP fingerprint heuristics, address clustering, disabled-by-default honeypot handling, and persisted internal manual-review hints without changing public claim envelopes or introducing new external services.

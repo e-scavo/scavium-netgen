@@ -5,11 +5,11 @@ Phase 27 is implemented as a conservative extension of the existing persisted `a
 ## Implemented scope
 
 - Risk score expansion now preserves existing progressive IP/address/fingerprint thresholds as immediate rejection gates and adds bounded score contributions for the new Phase 27 heuristics.
-- Burst detection scores repeated same-IP claim-intake activity over `SCAVIUM_FAUCET_ABUSE_BURST_WINDOW_SECONDS`.
+- Burst detection scores repeated same-IP claim-intake activity over `SCAVIUM_FAUCET_ABUSE_BURST_WINDOW_SECONDS`, including successful, failed, throttled, rejected, and budget-denied intake signals so bot noise is visible even before a successful claim.
 - Rotating-IP heuristics count distinct recent `remote_ip` values for the same fingerprint using a hardcoded safe column selector.
 - Address clustering counts distinct recent addresses for the same fingerprint, or the same IP when no fingerprint is available.
 - Optional honeypot handling is disabled by default through `SCAVIUM_FAUCET_ABUSE_HONEYPOT_ENABLED=false` and uses the request field `website` for compatibility with legacy clients.
-- Manual-review surfacing is internal to `domain.RiskDecision.Review`; public callers still receive only normalized errors.
+- Manual-review surfacing persists a bounded `manual_review` abuse signal whenever `domain.RiskDecision.Review` is set, while public callers still receive only normalized errors.
 
 ## Safety notes
 
