@@ -548,17 +548,26 @@ func (s *Store) UpdateClaimStatus(ctx context.Context, id string, status domain.
 }
 
 func (s *Store) ListClaimsByAddress(ctx context.Context, address common.Address, limit int) ([]domain.Claim, error) {
+	return s.ListClaimsByAddressPage(ctx, address, limit, 0)
+}
+
+// ListClaimsByAddressPage returns persisted claims for one address with bounded
+// offset pagination in reverse creation order.
+func (s *Store) ListClaimsByAddressPage(ctx context.Context, address common.Address, limit, offset int) ([]domain.Claim, error) {
 	if limit <= 0 {
 		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, created_at, updated_at
 		FROM requests
 		WHERE address = ?
-		ORDER BY created_at DESC
-		LIMIT ?
-	`, address.Hex(), limit)
+		ORDER BY created_at DESC, id DESC
+		LIMIT ? OFFSET ?
+	`, address.Hex(), limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -576,6 +585,11 @@ func (s *Store) ListClaimsByAddress(ctx context.Context, address common.Address,
 		return nil, err
 	}
 	return claims, nil
+}
+
+// DailyClaimAmountWeiForToken sums persisted claim amounts for one token in a UTC day window.
+func (s *Store) DailyClaimAmountWeiForToken(ctx context.Context, tokenID string, dayStart, dayEnd time.Time, statuses []domain.ClaimStatus) (*big.Int, error) {
+	return claimAmountWeiForToken(ctx, s.db, tokenID, dayStart, dayEnd, statuses)
 }
 
 // ListAdminClaims returns persisted claims for admin listing in reverse

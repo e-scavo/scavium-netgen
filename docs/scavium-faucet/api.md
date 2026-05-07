@@ -180,11 +180,77 @@ Alias routes for address eligibility.
   "cooldown_seconds": 60,
   "cooldown_remaining_seconds": 0,
   "rate_limit_ip_per_hour": 10,
-  "rate_limit_addr_per_day": 3
+  "rate_limit_addr_per_day": 3,
+  "default_token_id": "native",
+  "daily_budget": {
+    "budget_wei": "100000000000000000000",
+    "used_wei": "0",
+    "remaining_wei": "100000000000000000000"
+  },
+  "tokens": [
+    {
+      "token_id": "native",
+      "symbol": "SCAV",
+      "type": "native",
+      "eligible": true,
+      "reason": "eligible",
+      "amount_wei": "42000000000000000000",
+      "cooldown_remaining_seconds": 0,
+      "daily_budget": {
+        "budget_wei": "100000000000000000000",
+        "used_wei": "0",
+        "remaining_wei": "100000000000000000000"
+      }
+    }
+  ]
 }
 ```
 
+Phase 25 extends this response only with backward-compatible optional fields. Older clients can ignore `default_token_id`, `daily_budget`, and `tokens`. The endpoint remains public and intentionally excludes raw abuse signals, fingerprints, captcha material, internal risk scores, blocklist reasons, and admin-only decisions. Per-token eligibility is derived from the configured token catalog and token-scoped cooldown/budget state when durable storage supports it; the in-memory fallback also emits the optional token/default-token fields for contract consistency. Persisted address blocklist state is reflected as `eligible: false` with public reason `blocked` only; private operator blocklist notes are never exposed. When configured daily budget visibility is available and the remaining public budget is exhausted, address and token status report `eligible: false` with public reason `daily_budget_exceeded`, matching claim-time enforcement without exposing internal accounting beyond the documented budget totals.
+
 An invalid address returns `400` with `code: "invalid_address"`.
+
+### `GET /api/v1/address/{address}/history`
+### `GET /api/v1/faucet/address/{address}/history`
+
+Returns a public, address-scoped claim history with deterministic reverse-creation ordering. The endpoint is intentionally bounded and exposes only the same public-safe claim fields used by claim creation and lookup. It never returns idempotency keys, captcha tokens, fingerprints, raw abuse signals, admin audit data, or internal queue control details.
+
+Query parameters:
+
+| Parameter | Default | Maximum | Description |
+|---|---:|---:|---|
+| `limit` | `25` | `100` | Number of claims to return. Values above the maximum are capped. |
+| `offset` | `0` | n/a | Zero-based offset for pagination. Negative or non-integer values are rejected. |
+
+Example response:
+
+```json
+{
+  "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+  "claims": [
+    {
+      "id": "claim_test",
+      "address": "0x52908400098527886E0F7030069857D2E4169EE7",
+      "amount_wei": "42",
+      "token_id": "native",
+      "token_symbol": "SCAV",
+      "token_type": "native",
+      "token_decimals": 18,
+      "status": "queued",
+      "created_at": "2026-05-03T12:00:00Z",
+      "updated_at": "2026-05-03T12:00:00Z"
+    }
+  ],
+  "pagination": {
+    "limit": 25,
+    "offset": 0,
+    "count": 1,
+    "has_more": false
+  }
+}
+```
+
+Invalid addresses return `400 invalid_address`. Invalid pagination values return `400 invalid_pagination`. Empty history is a successful `200` with an empty `claims` array and `count: 0`.
 
 ### `POST /api/v1/claim`
 ### `POST /api/v1/faucet/claim`
@@ -300,6 +366,10 @@ Returns build metadata from `internal/version`.
   "build_date": "unknown"
 }
 ```
+
+## Pagination conventions
+
+Phase 25 standardizes bounded offset pagination for public list-style endpoints. Public pagination uses `limit`, `offset`, `count`, and `has_more`; returned item order is deterministic and documented per endpoint. Current public usage is `GET /api/v1/address/{address}/history`. Admin list endpoints keep their existing bounded `limit`/`offset` behavior.
 
 ## Admin endpoints
 
@@ -680,3 +750,8 @@ Phase 17.5 post-audit closure note:
 - Runtime metrics now keep accepted and rejected requests that omit `token_id` in the same `default` token bucket, preserving legacy-client observability consistency.
 - Rejection logging and token-scoped metrics defensively sanitize user-supplied token ids before recording them.
 - Public claim, token catalog, status, and metrics endpoint contracts remain unchanged.
+
+
+## Phase 25 — Public API completion and OpenAPI
+
+Phase 25 adds the public address history endpoint, extends wallet/address eligibility status with optional token and daily-budget visibility, and introduces a manually maintained lightweight OpenAPI contract at `openapi.yaml`. All changes are backward-compatible: `POST /api/v1/claim`, normalized error envelopes, request/correlation headers, admin bearer-token protection, and existing alias routes remain intact.

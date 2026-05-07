@@ -18,6 +18,7 @@ The service is production-ready for the current testnet scope, including validat
 |---|---|
 | [architecture.md](architecture.md) | Actual runtime wiring, package roles, and state model |
 | [api.md](api.md) | Public API reference plus the handler-level admin contract |
+| [openapi.yaml](openapi.yaml) | Lightweight Phase 25 OpenAPI contract for implemented stable surfaces |
 | [configuration.md](configuration.md) | Environment variables, defaults, and what is wired today |
 | [deployment.md](deployment.md) | Review-first VPS deployment package with systemd, nginx, env, certbot, firewall, and rollback assets |
 | [deployment-certbot.md](deployment-certbot.md) | Manual ACME and certbot guide for TLS issuance and renewal |
@@ -190,6 +191,8 @@ Phase 22 is closed as the conservative blockchain/runtime resilience layer. The 
 Phase 23 is closed as the operational runbook and backup/restore layer. Operators now have plan-first SQLite/config backup and restore helpers, including verified optional SQLite WAL/SHM companion restoration, documented restore drills, deployment rollback verification commands, and manual wallet refill/rotation procedures. The closure is intentionally non-automatic: no treasury refill, private-key rotation, or fund transfer script was added.
 
 ## Phase 24 closure
+
+Phase 25 closes public API completion for address history, wallet/address eligibility status completion, pagination conventions, and the lightweight OpenAPI baseline.
 
 Phase 24 closes the post-Phase-14 roadmap. The closure audit is recorded in `phase24-post14-closure-audit.md`, and the Copilot/manual re-audit prompt is available at `cmd/scavium-faucet/.agent/phase24-closure-audit-prompt.md`. Future work should begin from Phase 25 or another explicitly scheduled backlog item in `docs/scavium_faucet_public_features.md`; Stage 4 remains deferred until intentionally planned.
 
