@@ -183,7 +183,7 @@ Phase 24 is closed. Continue with the remaining features from `docs/scavium_fauc
 
 ### Phase 29 — Campaigns, Allowlists, and Invitation Codes
 
-Status: implemented and closure-audited through fix 11 (duplicate SQLite admin mutation hardening).
+Status: implemented and closure-audited through fix 13 (full SQLite admin disable audit rollback).
 
 - Campaign tables and budgets.
 - Allowlist scopes.

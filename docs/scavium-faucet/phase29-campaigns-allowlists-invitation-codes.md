@@ -95,6 +95,14 @@ The ninth Phase 29 fix pass closed the remaining test-coverage gap for the admin
 
 The tenth Phase 29 fix pass tightened the production SQLite admin contract for duplicate operator input. SQLite-backed campaign creation now preflights existing campaign IDs and returns `ErrInvalidCampaign` for duplicate IDs instead of surfacing a raw database constraint as an internal failure. SQLite-backed invitation creation does the same for duplicate invitation codes. Campaign create timestamps now use the admin service clock, keeping fallback and SQLite admin audit timing deterministic in tests and aligned with operator-visible audit entries. Focused admin tests cover duplicate campaign and invitation rejection through the SQLite-backed service.
 
+## Fix 12 verification
+
+The twelfth Phase 29 fix pass closed a concurrency-sensitive budget gap that was not exposed by the green baseline suite. Campaign budget checks now participate in the SQLite `BEGIN IMMEDIATE` claim-creation path when the durable store supports combined budget enforcement. This keeps daily budget, campaign budget, idempotency lookup, and claim insertion inside one write transaction for production SQLite stores, while retaining the existing pre-persistence campaign validation as a fast defensive rejection path. A focused SQLite test verifies that an over-budget campaign claim is rejected atomically and is not inserted.
+
+## Fix 13 verification
+
+The thirteenth Phase 29 fix pass closed an audit-rollback metadata gap in the SQLite-backed admin campaign disable path. When a durable audit append fails after disabling a campaign, the service now restores the full previous campaign record through the update primitive when available, including `enabled`, `created_at`, and `updated_at`, rather than only restoring the enabled flag. This keeps the Phase 28/29 safety rule intact: unaudited admin mutations must not leave durable state changes behind. Focused admin tests verify that failed campaign-disable auditing preserves both activation state and timestamps.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:

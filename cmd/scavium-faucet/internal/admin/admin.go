@@ -1247,14 +1247,29 @@ func (s *SQLiteReadAdminService) DisableCampaign(ctx context.Context, id, actor 
 		}
 		return getErr
 	}
-	if err := store.DisableCampaign(ctx, id); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return ErrNotFound
+	updater, hasUpdater := store.(campaignUpdateStore)
+	if hasUpdater {
+		disabled := copyCampaign(previous)
+		disabled.Enabled = false
+		disabled.UpdatedAt = s.now().UTC()
+		if _, err := updater.UpdateCampaign(ctx, disabled); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return ErrNotFound
+			}
+			return err
 		}
-		return err
+	} else {
+		if err := store.DisableCampaign(ctx, id); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
 	}
 	if err := s.appendAudit(ctx, AuditEntry{Action: "campaign_disable", Actor: actor, Target: id, CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
-		if rollback, ok := store.(campaignRollbackStore); ok {
+		if hasUpdater {
+			_, _ = updater.UpdateCampaign(ctx, previous)
+		} else if rollback, ok := store.(campaignRollbackStore); ok {
 			_ = rollback.SetCampaignEnabled(ctx, id, previous.Enabled)
 		}
 		return err

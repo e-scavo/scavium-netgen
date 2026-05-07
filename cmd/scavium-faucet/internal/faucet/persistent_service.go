@@ -44,6 +44,10 @@ type tokenBudgetedClaimStore interface {
 	CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error)
 }
 
+type combinedBudgetedClaimStore interface {
+	CreateClaimWithIdempotencyAndBudgets(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, dailyBudgetWei *big.Int, campaignID string, campaignBudgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, string, error)
+}
+
 type tokenScopedClaimStore interface {
 	LastClaimByAddressAndToken(ctx context.Context, address common.Address, tokenID string) (domain.Claim, error)
 }
@@ -466,7 +470,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 		UpdatedAt:      now,
 	}
 
-	created, err := s.createClaim(ctx, claim, idempotencyKey)
+	created, err := s.createClaim(ctx, claim, idempotencyKey, campaign.BudgetWei)
 	if err != nil {
 		if errors.Is(err, ErrDailyBudgetExceeded) {
 			var claimErr *ClaimError
@@ -512,8 +516,25 @@ func (s *PersistentReadService) GetClaim(ctx context.Context, id string) (ClaimR
 	return claimResponse(claim, ""), true, nil
 }
 
-func (s *PersistentReadService) createClaim(ctx context.Context, claim domain.Claim, idempotencyKey string) (domain.Claim, error) {
-	if budget := s.dailyBudgetForClaim(ctx, claim); budget != nil && budget.Sign() > 0 {
+func (s *PersistentReadService) createClaim(ctx context.Context, claim domain.Claim, idempotencyKey string, campaignBudgetWei *big.Int) (domain.Claim, error) {
+	dailyBudget := s.dailyBudgetForClaim(ctx, claim)
+	if store, ok := s.claims.(combinedBudgetedClaimStore); ok && ((dailyBudget != nil && dailyBudget.Sign() > 0) || (campaignBudgetWei != nil && campaignBudgetWei.Sign() > 0)) {
+		dayStart, dayEnd := utcDayWindow(s.now())
+		created, used, exceededReason, err := store.CreateClaimWithIdempotencyAndBudgets(ctx, claim, idempotencyKey, claim.TokenID, dayStart, dayEnd, copyBigInt(dailyBudget), strings.TrimSpace(claim.CampaignID), copyBigInt(campaignBudgetWei), dailyBudgetStatuses())
+		if err != nil {
+			return domain.Claim{}, err
+		}
+		switch exceededReason {
+		case "":
+			return created, nil
+		case "campaign_budget_exceeded":
+			return domain.Claim{}, claimError(ErrDailyBudgetExceeded, "campaign_budget_exceeded")
+		default:
+			return domain.Claim{}, dailyBudgetExceededError(used, copyBigInt(claim.AmountWei), copyBigInt(dailyBudget))
+		}
+	}
+
+	if budget := dailyBudget; budget != nil && budget.Sign() > 0 {
 		dayStart, dayEnd := utcDayWindow(s.now())
 		if store, ok := s.claims.(tokenBudgetedClaimStore); ok {
 			created, used, exceeded, err := store.CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx, claim, idempotencyKey, claim.TokenID, dayStart, dayEnd, copyBigInt(budget), dailyBudgetStatuses())

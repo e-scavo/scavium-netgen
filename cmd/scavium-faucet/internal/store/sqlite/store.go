@@ -432,6 +432,125 @@ func (s *Store) CreateClaimWithIdempotencyAndDailyBudgetForToken(ctx context.Con
 	return s.createClaimWithBudget(ctx, claim, idempotencyKey, tokenID, dayStart, dayEnd, budgetWei, statuses)
 }
 
+// CreateClaimWithIdempotencyAndBudgets checks daily and campaign budgets in one
+// SQLite write transaction before inserting a claim. It returns exceededReason
+// as "daily_budget_exceeded" or "campaign_budget_exceeded" when a budget blocks
+// insertion; an empty reason means the returned claim was inserted or reused via
+// idempotency.
+func (s *Store) CreateClaimWithIdempotencyAndBudgets(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, dailyBudgetWei *big.Int, campaignID string, campaignBudgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, string, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return domain.Claim{}, nil, "", err
+	}
+	defer conn.Close() //nolint:errcheck
+
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return domain.Claim{}, nil, "", fmt.Errorf("begin budget tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	if idempotencyKey != "" {
+		row := conn.QueryRowContext(ctx, `
+			SELECT id, address, token_id, token_symbol, token_type, token_address, token_decimals, amount_wei, status, reason, retry_count, next_attempt_at, campaign_id, invitation_code, created_at, updated_at
+			FROM requests
+			WHERE idempotency_key = NULLIF(?, '')
+		`, idempotencyKey)
+		existing, err := scanClaim(row)
+		if err == nil {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return domain.Claim{}, nil, "", fmt.Errorf("commit existing idempotent claim: %w", err)
+			}
+			committed = true
+			return existing, big.NewInt(0), "", nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return domain.Claim{}, nil, "", err
+		}
+	}
+
+	claimAmount := big.NewInt(0)
+	if claim.AmountWei != nil {
+		claimAmount = new(big.Int).Set(claim.AmountWei)
+	}
+
+	var dailyUsed *big.Int
+	if dailyBudgetWei != nil && dailyBudgetWei.Sign() > 0 {
+		dailyUsed, err = claimAmountWeiForToken(ctx, conn, tokenID, dayStart, dayEnd, statuses)
+		if err != nil {
+			return domain.Claim{}, nil, "", err
+		}
+		if new(big.Int).Add(dailyUsed, claimAmount).Cmp(dailyBudgetWei) > 0 {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return domain.Claim{}, nil, "", fmt.Errorf("commit exceeded daily budget check: %w", err)
+			}
+			committed = true
+			return domain.Claim{}, dailyUsed, "daily_budget_exceeded", nil
+		}
+	}
+
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID != "" && campaignBudgetWei != nil && campaignBudgetWei.Sign() > 0 {
+		campaignUsed, err := claimAmountWeiForCampaign(ctx, conn, campaignID, statuses)
+		if err != nil {
+			return domain.Claim{}, nil, "", err
+		}
+		if new(big.Int).Add(campaignUsed, claimAmount).Cmp(campaignBudgetWei) > 0 {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return domain.Claim{}, nil, "", fmt.Errorf("commit exceeded campaign budget check: %w", err)
+			}
+			committed = true
+			return domain.Claim{}, campaignUsed, "campaign_budget_exceeded", nil
+		}
+	}
+
+	if claim.AmountWei == nil {
+		claim.AmountWei = big.NewInt(0)
+	}
+	if claim.CreatedAt.IsZero() {
+		claim.CreatedAt = time.Now().UTC()
+	}
+	if claim.UpdatedAt.IsZero() {
+		claim.UpdatedAt = claim.CreatedAt
+	}
+
+	_, err = conn.ExecContext(ctx, `
+		INSERT INTO requests (
+			id, address, token_id, token_symbol, token_type, token_address, token_decimals,
+			amount_wei, status, reason, idempotency_key, campaign_id, invitation_code, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
+	`,
+		claim.ID,
+		claim.Address.Hex(),
+		claim.TokenID,
+		claim.TokenSymbol,
+		string(claim.TokenType),
+		tokenAddressHex(claim.TokenAddress),
+		claim.TokenDecimals,
+		claim.AmountWei.String(),
+		string(claim.Status),
+		claim.Reason,
+		idempotencyKey,
+		strings.TrimSpace(claim.CampaignID),
+		strings.TrimSpace(claim.InvitationCode),
+		formatTime(claim.CreatedAt),
+		formatTime(claim.UpdatedAt),
+	)
+	if err != nil {
+		return domain.Claim{}, nil, "", err
+	}
+
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return domain.Claim{}, nil, "", fmt.Errorf("commit budget claim create: %w", err)
+	}
+	committed = true
+	return claim, dailyUsed, "", nil
+}
+
 func (s *Store) createClaimWithBudget(ctx context.Context, claim domain.Claim, idempotencyKey string, tokenID string, dayStart, dayEnd time.Time, budgetWei *big.Int, statuses []domain.ClaimStatus) (domain.Claim, *big.Int, bool, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -1895,6 +2014,36 @@ func (s *Store) RemoveCampaignAllowlistEntry(ctx context.Context, campaignID str
 		return ErrNotFound
 	}
 	return nil
+}
+
+func claimAmountWeiForCampaign(ctx context.Context, q claimAmountQuerier, campaignID string, statuses []domain.ClaimStatus) (*big.Int, error) {
+	used := big.NewInt(0)
+	if campaignID == "" || len(statuses) == 0 {
+		return used, nil
+	}
+	placeholders := make([]string, 0, len(statuses))
+	args := []any{campaignID}
+	for _, st := range statuses {
+		placeholders = append(placeholders, "?")
+		args = append(args, string(st))
+	}
+	rows, err := q.QueryContext(ctx, `SELECT amount_wei FROM requests WHERE campaign_id = ? AND status IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		v, ok := new(big.Int).SetString(raw, 10)
+		if !ok {
+			return nil, fmt.Errorf("invalid campaign amount wei: %s", raw)
+		}
+		used.Add(used, v)
+	}
+	return used, rows.Err()
 }
 
 func (s *Store) CampaignUsage(ctx context.Context, campaignID string, statuses []domain.ClaimStatus) (domain.CampaignUsage, error) {

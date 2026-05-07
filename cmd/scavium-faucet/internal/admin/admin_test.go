@@ -1022,15 +1022,21 @@ func TestSQLiteReadAdminServiceRollsBackCampaignCreateWhenAuditFails(t *testing.
 func TestSQLiteReadAdminServiceRollsBackCampaignDisableWhenAuditFails(t *testing.T) {
 	auditErr := errors.New("audit unavailable")
 	store := newFailingCampaignAuditStore(auditErr)
-	store.campaigns["camp-a"] = domain.Campaign{ID: "camp-a", Name: "Campaign A", Scope: domain.CampaignScopePublic, Enabled: true}
+	createdAt := time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 5, 7, 10, 5, 0, 0, time.UTC)
+	store.campaigns["camp-a"] = domain.Campaign{ID: "camp-a", Name: "Campaign A", Scope: domain.CampaignScopePublic, Enabled: true, CreatedAt: createdAt, UpdatedAt: updatedAt}
 	svc := NewSQLiteReadAdminService(store)
 
 	err := svc.DisableCampaign(context.Background(), "camp-a", "operator")
 	if !errors.Is(err, auditErr) {
 		t.Fatalf("DisableCampaign error = %v, want audit error", err)
 	}
-	if !store.campaigns["camp-a"].Enabled {
+	got := store.campaigns["camp-a"]
+	if !got.Enabled {
 		t.Fatalf("campaign remained disabled after failed audit")
+	}
+	if !got.CreatedAt.Equal(createdAt) || !got.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("campaign timestamps changed after failed audit: created_at=%s updated_at=%s", got.CreatedAt, got.UpdatedAt)
 	}
 }
 

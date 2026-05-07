@@ -1457,6 +1457,43 @@ func TestCampaignPersistenceAndUsage(t *testing.T) {
 	}
 }
 
+func TestCreateClaimWithIdempotencyAndBudgetsRejectsCampaignBudgetAtomically(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	now := time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC)
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "atomic-budget", Name: "Atomic Budget", Scope: domain.CampaignScopePublic, BudgetWei: big.NewInt(50), Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	existing := testClaim("atomic_existing")
+	existing.CampaignID = "atomic-budget"
+	existing.AmountWei = big.NewInt(40)
+	if _, err := store.CreateClaim(context.Background(), existing); err != nil {
+		t.Fatalf("create existing claim: %v", err)
+	}
+
+	blocked := testClaim("atomic_blocked")
+	blocked.CampaignID = "atomic-budget"
+	blocked.AmountWei = big.NewInt(20)
+	created, used, reason, err := store.CreateClaimWithIdempotencyAndBudgets(context.Background(), blocked, "", blocked.TokenID, now.Add(-time.Hour), now.Add(time.Hour), nil, "atomic-budget", big.NewInt(50), []domain.ClaimStatus{domain.ClaimStatusQueued})
+	if err != nil {
+		t.Fatalf("create with campaign budget: %v", err)
+	}
+	if reason != "campaign_budget_exceeded" {
+		t.Fatalf("reason = %q, want campaign_budget_exceeded", reason)
+	}
+	if used == nil || used.Cmp(big.NewInt(40)) != 0 {
+		t.Fatalf("used = %v, want 40", used)
+	}
+	if created.ID != "" {
+		t.Fatalf("created = %#v, want zero claim", created)
+	}
+	if _, err := store.GetClaim(context.Background(), "atomic_blocked"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("blocked claim lookup error = %v, want not found", err)
+	}
+}
+
 func TestInvitationAndAllowlistPersistence(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
