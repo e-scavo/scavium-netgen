@@ -1561,7 +1561,12 @@ func (s *Store) GetRuntimePolicy(ctx context.Context) (domain.RuntimePolicy, err
 }
 
 // SetRuntimePolicy atomically replaces persisted runtime policy overrides.
+// Invalid negative values are rejected at the persistence boundary as a final
+// defense even when callers normally validate through the admin/domain layer.
 func (s *Store) SetRuntimePolicy(ctx context.Context, policy domain.RuntimePolicy) error {
+	if err := validateRuntimePolicyForPersistence(policy); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin runtime policy update: %w", err)
@@ -1615,6 +1620,24 @@ func (s *Store) ClearRuntimePolicy(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM runtime_policy`)
 	if err != nil {
 		return fmt.Errorf("clear runtime policy: %w", err)
+	}
+	return nil
+}
+
+func validateRuntimePolicyForPersistence(policy domain.RuntimePolicy) error {
+	if policy.CooldownSeconds < 0 || policy.RateLimitIPPerHour < 0 || policy.RateLimitAddrPerDay < 0 {
+		return fmt.Errorf("invalid runtime policy: integer overrides must be non-negative")
+	}
+	if policy.DailyBudgetWei != nil && policy.DailyBudgetWei.Sign() < 0 {
+		return fmt.Errorf("invalid runtime policy: daily budget must be non-negative")
+	}
+	for tokenID, budget := range policy.TokenDailyBudgetWei {
+		if strings.TrimSpace(tokenID) == "" {
+			return fmt.Errorf("invalid runtime policy: token budget id is required")
+		}
+		if budget != nil && budget.Sign() < 0 {
+			return fmt.Errorf("invalid runtime policy: token budget must be non-negative")
+		}
 	}
 	return nil
 }

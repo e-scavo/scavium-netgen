@@ -25,7 +25,7 @@ Those values still require environment changes and restart because they affect s
 
 ## Persistence and precedence
 
-Runtime overrides are stored in SQLite table `runtime_policy`, created by migration `007_runtime_policy.sql`. Startup environment configuration remains the default source. When a persisted runtime override is present and valid, claim-time and public config reads use the persisted value. When an override is absent, cleared, unknown, or malformed, the service falls back to environment/default configuration instead of failing closed.
+Runtime overrides are stored in SQLite table `runtime_policy`, created by migration `007_runtime_policy.sql`. Startup environment configuration remains the default source. When a persisted runtime override is present and valid, claim-time and public config reads use the persisted value. When an override is absent, cleared, unknown, or malformed, the service falls back to environment/default configuration instead of failing closed. Mutation paths validate non-negative values in the admin request/service layer and again at the SQLite persistence boundary, so direct store callers cannot persist negative or nameless token-budget overrides.
 
 This precedence keeps rollback simple: `DELETE /api/v1/admin/policy` clears overrides and restores environment-backed behavior immediately.
 

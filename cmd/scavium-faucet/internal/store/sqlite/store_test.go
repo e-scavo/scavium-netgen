@@ -1357,6 +1357,25 @@ func TestListAbuseSignalSummariesGroupsRecentKinds(t *testing.T) {
 	}
 }
 
+func TestRuntimePolicyRejectsInvalidPersistenceInput(t *testing.T) {
+	store := openTempStore(t)
+	defer store.Close()
+
+	cases := []domain.RuntimePolicy{
+		{CooldownSeconds: -1},
+		{RateLimitIPPerHour: -1},
+		{RateLimitAddrPerDay: -1},
+		{DailyBudgetWei: big.NewInt(-1)},
+		{TokenDailyBudgetWei: map[string]*big.Int{"native": big.NewInt(-1)}},
+		{TokenDailyBudgetWei: map[string]*big.Int{"": big.NewInt(1)}},
+	}
+	for _, policy := range cases {
+		if err := store.SetRuntimePolicy(context.Background(), policy); err == nil {
+			t.Fatalf("SetRuntimePolicy(%#v) succeeded, want validation error", policy)
+		}
+	}
+}
+
 func TestRuntimePolicyPersistsClearsAndIgnoresInvalidRows(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
