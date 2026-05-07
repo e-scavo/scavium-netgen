@@ -737,6 +737,18 @@ func TestSQLiteReadAdminServiceRollsBackRuntimePolicyClearWhenAuditFails(t *test
 	}
 }
 
+func TestInMemoryAdminServiceRejectsInvalidRuntimePolicyWithDedicatedError(t *testing.T) {
+	svc := NewInMemoryAdminService()
+
+	_, err := svc.SetRuntimePolicy(context.Background(), SetRuntimePolicyRequest{CooldownSeconds: -1}, "operator")
+	if !errors.Is(err, ErrInvalidRuntimePolicy) {
+		t.Fatalf("SetRuntimePolicy error = %v, want ErrInvalidRuntimePolicy", err)
+	}
+	if errors.Is(err, ErrInvalidMode) {
+		t.Fatalf("SetRuntimePolicy error = %v, must not be ErrInvalidMode", err)
+	}
+}
+
 func TestInMemoryAdminServicePersistsRuntimePolicyView(t *testing.T) {
 	svc := NewInMemoryAdminService()
 

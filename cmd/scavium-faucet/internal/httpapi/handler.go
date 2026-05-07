@@ -1079,7 +1079,7 @@ func handleAdminPolicy(svc admin.AdminService, logger *observability.Logger, tru
 			actor := actorFromRequest(r, trustedProxy)
 			policy, err := svc.SetRuntimePolicy(r.Context(), body, actor)
 			if err != nil {
-				if errors.Is(err, admin.ErrInvalidMode) {
+				if errors.Is(err, admin.ErrInvalidRuntimePolicy) {
 					WriteError(w, r, http.StatusBadRequest, "invalid_runtime_policy", "runtime policy values must be non-negative integers", nil)
 					return
 				}

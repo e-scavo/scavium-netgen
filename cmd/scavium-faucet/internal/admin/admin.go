@@ -155,10 +155,11 @@ type SetModeRequest struct {
 // --- Sentinel errors ----------------------------------------------------
 
 var (
-	ErrNotFound       = errors.New("admin: not found")
-	ErrNotRetryable   = errors.New("admin: claim is not in a retryable state")
-	ErrNotCancellable = errors.New("admin: claim cannot be cancelled in its current state")
-	ErrInvalidMode    = errors.New("admin: invalid faucet mode")
+	ErrNotFound             = errors.New("admin: not found")
+	ErrNotRetryable         = errors.New("admin: claim is not in a retryable state")
+	ErrNotCancellable       = errors.New("admin: claim cannot be cancelled in its current state")
+	ErrInvalidMode          = errors.New("admin: invalid faucet mode")
+	ErrInvalidRuntimePolicy = errors.New("admin: invalid runtime policy")
 )
 
 // --- AdminService interface ---------------------------------------------
@@ -897,13 +898,13 @@ func (s *SQLiteReadAdminService) ClearRuntimePolicy(ctx context.Context, actor s
 
 func runtimePolicyFromRequest(req SetRuntimePolicyRequest) (domain.RuntimePolicy, error) {
 	if req.CooldownSeconds < 0 || req.RateLimitIPPerHour < 0 || req.RateLimitAddrPerDay < 0 {
-		return domain.RuntimePolicy{}, ErrInvalidMode
+		return domain.RuntimePolicy{}, ErrInvalidRuntimePolicy
 	}
 	policy := domain.RuntimePolicy{CooldownSeconds: req.CooldownSeconds, RateLimitIPPerHour: req.RateLimitIPPerHour, RateLimitAddrPerDay: req.RateLimitAddrPerDay}
 	if strings.TrimSpace(req.DailyBudgetWei) != "" {
 		v, ok := new(big.Int).SetString(strings.TrimSpace(req.DailyBudgetWei), 10)
 		if !ok || v.Sign() < 0 {
-			return domain.RuntimePolicy{}, ErrInvalidMode
+			return domain.RuntimePolicy{}, ErrInvalidRuntimePolicy
 		}
 		policy.DailyBudgetWei = v
 	}
@@ -912,11 +913,11 @@ func runtimePolicyFromRequest(req SetRuntimePolicyRequest) (domain.RuntimePolicy
 		for tokenID, raw := range req.TokenDailyBudgetWei {
 			tokenID = strings.TrimSpace(tokenID)
 			if tokenID == "" {
-				return domain.RuntimePolicy{}, ErrInvalidMode
+				return domain.RuntimePolicy{}, ErrInvalidRuntimePolicy
 			}
 			v, ok := new(big.Int).SetString(strings.TrimSpace(raw), 10)
 			if !ok || v.Sign() < 0 {
-				return domain.RuntimePolicy{}, ErrInvalidMode
+				return domain.RuntimePolicy{}, ErrInvalidRuntimePolicy
 			}
 			policy.TokenDailyBudgetWei[tokenID] = v
 		}
