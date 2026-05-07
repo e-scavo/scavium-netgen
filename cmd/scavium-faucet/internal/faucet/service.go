@@ -247,14 +247,25 @@ func (s *InMemoryReadService) AddressStatus(_ context.Context, address common.Ad
 	s.mu.RUnlock()
 
 	response.DailyBudget = inMemoryBudgetStatus(s.cfg.DailyBudgetWei, claims, "", s.now())
+	if budgetExhausted(response.DailyBudget) {
+		response.Eligible = false
+		response.Reason = "daily_budget_exceeded"
+	}
 	for _, token := range tokens {
 		amountWei := ""
 		if token.AmountWei != nil {
 			amountWei = token.AmountWei.String()
 		}
+		budget := inMemoryBudgetStatus(inMemoryDailyBudgetForTokenID(s.cfg, token.ID), claims, token.ID, s.now())
+		eligible := true
+		reason := "eligible"
+		if budgetExhausted(budget) {
+			eligible = false
+			reason = "daily_budget_exceeded"
+		}
 		response.Tokens = append(response.Tokens, TokenStatus{
-			TokenID: token.ID, Symbol: token.Symbol, Type: string(token.Type), Eligible: true, Reason: "eligible",
-			AmountWei: amountWei, DailyBudget: inMemoryBudgetStatus(inMemoryDailyBudgetForTokenID(s.cfg, token.ID), claims, token.ID, s.now()),
+			TokenID: token.ID, Symbol: token.Symbol, Type: string(token.Type), Eligible: eligible, Reason: reason,
+			AmountWei: amountWei, DailyBudget: budget,
 		})
 	}
 	return response, nil
@@ -412,6 +423,10 @@ func inMemoryBudgetStatus(budget *big.Int, claims []domain.Claim, tokenID string
 		remaining = big.NewInt(0)
 	}
 	return &BudgetStatus{BudgetWei: budget.String(), UsedWei: used.String(), RemainingWei: remaining.String()}
+}
+
+func budgetExhausted(budget *BudgetStatus) bool {
+	return budget != nil && budget.RemainingWei == "0"
 }
 
 func claimStatusCountsForDailyBudget(status domain.ClaimStatus) bool {

@@ -123,6 +123,32 @@ func TestInMemoryReadServiceAddressStatusIncludesBudgetUse(t *testing.T) {
 	}
 }
 
+func TestInMemoryReadServiceAddressStatusReflectsExhaustedDailyBudget(t *testing.T) {
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	cfg := testConfig()
+	cfg.DailyBudgetWei = big.NewInt(42)
+	cfg.Tokens = []config.TokenConfig{{ID: "native", Symbol: "tSCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42), DailyBudgetWei: big.NewInt(42)}}
+	service := NewInMemoryReadServiceWithClock(cfg, func() time.Time { return now })
+	address := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address, TokenID: "native"}); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	status, err := service.AddressStatus(context.Background(), address)
+	if err != nil {
+		t.Fatalf("address status: %v", err)
+	}
+	if status.Eligible || status.Reason != "daily_budget_exceeded" {
+		t.Fatalf("eligible/reason = %v/%q, want false/daily_budget_exceeded", status.Eligible, status.Reason)
+	}
+	if status.DailyBudget == nil || status.DailyBudget.RemainingWei != "0" {
+		t.Fatalf("daily budget = %#v, want exhausted", status.DailyBudget)
+	}
+	if len(status.Tokens) != 1 || status.Tokens[0].Eligible || status.Tokens[0].Reason != "daily_budget_exceeded" {
+		t.Fatalf("token status = %#v, want exhausted", status.Tokens)
+	}
+}
+
 func TestInMemoryReadServiceAddressHistoryPagination(t *testing.T) {
 	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 	service := NewInMemoryReadServiceWithClock(testConfig(), func() time.Time { return now })

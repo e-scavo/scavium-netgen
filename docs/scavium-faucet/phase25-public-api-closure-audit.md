@@ -8,7 +8,7 @@ Closed items:
 
 - `GET /api/v1/address/{address}/history` and alias `GET /api/v1/faucet/address/{address}/history` return bounded, deterministic address claim history.
 - Access logs redact both canonical and faucet-prefixed address status/history paths so public wallet addresses are not emitted as high-cardinality/raw path values.
-- Address eligibility/status remains backward-compatible and now includes optional token-aware and daily-budget fields when durable runtime state can support them; the in-memory fallback reports the same optional shape for contract consistency.
+- Address eligibility/status remains backward-compatible and now includes optional token-aware and daily-budget fields when durable runtime state can support them; exhausted configured daily budgets are reflected as public-safe `daily_budget_exceeded` ineligibility; the in-memory fallback reports the same optional shape for contract consistency.
 - Pagination conventions are documented as bounded offset pagination with `limit`, `offset`, `count`, and `has_more`.
 - `docs/scavium-faucet/openapi.yaml` records the lightweight manually maintained OpenAPI baseline for implemented public and admin-safe surfaces.
 

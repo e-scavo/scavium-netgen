@@ -218,6 +218,34 @@ func TestPersistentReadServiceAddressStatusIncludesTokenAndBudgetState(t *testin
 	}
 }
 
+func TestPersistentReadServiceAddressStatusReflectsExhaustedDailyBudget(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(42)
+	cfg.Tokens = []config.TokenConfig{
+		{ID: "native", Symbol: "SCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42), DailyBudgetWei: big.NewInt(42)},
+	}
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), TokenID: "native"}); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+
+	status, err := service.AddressStatus(context.Background(), persistentTestAddress())
+	if err != nil {
+		t.Fatalf("address status: %v", err)
+	}
+	if status.Eligible || status.Reason != "daily_budget_exceeded" {
+		t.Fatalf("eligible/reason = %v/%q, want false/daily_budget_exceeded", status.Eligible, status.Reason)
+	}
+	if status.DailyBudget == nil || status.DailyBudget.RemainingWei != "0" {
+		t.Fatalf("daily budget = %#v, want exhausted", status.DailyBudget)
+	}
+	if len(status.Tokens) != 1 || status.Tokens[0].Eligible || status.Tokens[0].Reason != "daily_budget_exceeded" {
+		t.Fatalf("token status = %#v, want exhausted", status.Tokens)
+	}
+}
+
 func TestPersistentReadServiceAddressHistoryReturnsBoundedPage(t *testing.T) {
 	store := openPersistentTestStore(t, "")
 	defer store.Close()

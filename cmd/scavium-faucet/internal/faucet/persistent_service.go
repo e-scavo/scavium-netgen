@@ -201,6 +201,11 @@ func (s *PersistentReadService) AddressStatus(ctx context.Context, address commo
 		return AddressStatusResponse{}, err
 	}
 	response.DailyBudget = budget
+	if !blocked && budgetExhausted(response.DailyBudget) {
+		response.Eligible = false
+		response.Reason = "daily_budget_exceeded"
+		response.NextEligibleTime = ""
+	}
 
 	tokens, err := s.tokenStatuses(ctx, address)
 	if err != nil {
@@ -300,6 +305,11 @@ func (s *PersistentReadService) tokenStatuses(ctx context.Context, address commo
 		if remaining > 0 {
 			reason = "cooldown_active"
 			next = nextEligible.UTC().Format(time.RFC3339)
+		}
+		if budgetExhausted(budget) {
+			eligible = false
+			reason = "daily_budget_exceeded"
+			next = ""
 		}
 		amountWei := ""
 		if token.AmountWei != nil {
