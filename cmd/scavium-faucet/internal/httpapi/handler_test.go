@@ -1803,6 +1803,31 @@ func TestAdminRuntimePolicyRequiresAuthAndValidJSON(t *testing.T) {
 		t.Fatalf("unauthorized status = %d, want 401", unauthRec.Code)
 	}
 
+	wrongContentTypeReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/policy", strings.NewReader(`{"cooldown_seconds":1}`))
+	wrongContentTypeReq.Header.Set("Authorization", "Bearer test-admin-token")
+	wrongContentTypeReq.Header.Set("Content-Type", "text/plain")
+	wrongContentTypeRec := httptest.NewRecorder()
+	handler.ServeHTTP(wrongContentTypeRec, wrongContentTypeReq)
+	if wrongContentTypeRec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("wrong content-type status = %d, want 415", wrongContentTypeRec.Code)
+	}
+
+	malformedReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/policy", strings.NewReader(`{"cooldown_seconds":`))
+	malformedReq.Header.Set("Authorization", "Bearer test-admin-token")
+	malformedReq.Header.Set("Content-Type", "application/json")
+	malformedRec := httptest.NewRecorder()
+	handler.ServeHTTP(malformedRec, malformedReq)
+	if malformedRec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed JSON status = %d, want 400", malformedRec.Code)
+	}
+	var malformedBody ErrorEnvelope
+	if err := json.NewDecoder(malformedRec.Body).Decode(&malformedBody); err != nil {
+		t.Fatalf("decode malformed response: %v", err)
+	}
+	if malformedBody.Code != "invalid_json" {
+		t.Fatalf("malformed code = %q, want invalid_json", malformedBody.Code)
+	}
+
 	invalidRec := httptest.NewRecorder()
 	handler.ServeHTTP(invalidRec, adminRequest(http.MethodPut, "/api/v1/admin/policy", admin.SetRuntimePolicyRequest{CooldownSeconds: -1}))
 	if invalidRec.Code != http.StatusBadRequest {
