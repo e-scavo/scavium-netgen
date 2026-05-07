@@ -193,6 +193,8 @@ Status: implemented and closure-audited through fix 13 (full SQLite admin disabl
 
 ### Phase 30 — SCAVIUM Wallet Integration — CLOSED
 
+Status: implemented and closure-audited through fix 3.
+
 Closure scope:
 
 - Wallet-specific challenge endpoint added at `/api/v1/wallet/challenge` and alias `/api/v1/faucet/wallet/challenge`.
