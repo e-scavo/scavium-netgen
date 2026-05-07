@@ -1804,7 +1804,7 @@ func TestAdminRuntimePolicyRequiresAuthAndValidJSON(t *testing.T) {
 	}
 
 	wrongContentTypeReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/policy", strings.NewReader(`{"cooldown_seconds":1}`))
-	wrongContentTypeReq.Header.Set("Authorization", "Bearer test-admin-token")
+	wrongContentTypeReq.Header.Set("Authorization", "Bearer "+testAdminToken)
 	wrongContentTypeReq.Header.Set("Content-Type", "text/plain")
 	wrongContentTypeRec := httptest.NewRecorder()
 	handler.ServeHTTP(wrongContentTypeRec, wrongContentTypeReq)
@@ -1813,7 +1813,7 @@ func TestAdminRuntimePolicyRequiresAuthAndValidJSON(t *testing.T) {
 	}
 
 	malformedReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/policy", strings.NewReader(`{"cooldown_seconds":`))
-	malformedReq.Header.Set("Authorization", "Bearer test-admin-token")
+	malformedReq.Header.Set("Authorization", "Bearer "+testAdminToken)
 	malformedReq.Header.Set("Content-Type", "application/json")
 	malformedRec := httptest.NewRecorder()
 	handler.ServeHTTP(malformedRec, malformedReq)
