@@ -305,7 +305,7 @@ Current behavior:
 - persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided); empty scope values are skipped, fingerprint values are trimmed/lowercased for keying, and denial reasons remain generic rather than exposing raw limiter keys
 - the daily budget is enforced for the selected token when token-scoped configuration is available; legacy deployments keep the existing faucet-wide budget behavior
 - captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; missing or failed verification returns `422 captcha_failed`
-- risk evaluation runs when a risk engine is configured; Phase 27 composes persisted negative-signal counts, same-IP bursts, rotating-IP fingerprint behavior, address clustering, and the optional honeypot into a bounded deterministic score
+- risk evaluation runs when a risk engine is configured; Phase 27 composes persisted negative-signal counts, same-IP bursts across successful and failed intake records, rotating-IP fingerprint behavior, address clustering, optional honeypot state, and bounded manual-review hints into deterministic operator diagnostics
 - the accepted claim is persisted to SQLite with initial status `received`, then enqueued as `queued`
 - repeated requests with the same `Idempotency-Key` return the same persisted claim without creating a duplicate
 

@@ -30,6 +30,7 @@ The service is production-ready for the current testnet scope, including validat
 | [phase26-public-frontend-completion.md](phase26-public-frontend-completion.md) | Phase 26 public frontend implementation narrative |
 | [phase26-public-frontend-closure-audit.md](phase26-public-frontend-closure-audit.md) | Phase 26 closure audit and deferred-work boundary |
 | [phase27-advanced-anti-abuse-closure-audit.md](phase27-advanced-anti-abuse-closure-audit.md) | Phase 27 advanced anti-abuse implementation and closure audit |
+| [phase27-fix4-completion.md](phase27-fix4-completion.md) | Phase 27 Fix4 completion note for manual-review/risk-rejection ordering |
 
 ## Current implementation snapshot
 
@@ -209,4 +210,4 @@ The implementation narrative is `phase26-public-frontend-completion.md`, and the
 
 ## Phase 27 closure
 
-Phase 27 is closed as an advanced anti-abuse increment over persisted abuse signals. The implementation adds deterministic risk score composition, same-IP burst detection, rotating-IP fingerprint heuristics, address clustering, disabled-by-default honeypot handling, and internal manual-review hints without changing public claim envelopes or introducing new external services.
+Phase 27 is closed as an advanced anti-abuse increment over persisted abuse signals. The implementation adds deterministic risk score composition, same-IP burst detection across successful and failed intake signals, rotating-IP fingerprint heuristics, address clustering, disabled-by-default honeypot handling, and persisted internal manual-review hints without changing public claim envelopes or introducing new external services.

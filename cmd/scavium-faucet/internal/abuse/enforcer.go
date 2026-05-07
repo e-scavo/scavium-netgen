@@ -106,7 +106,7 @@ func (e *ProgressiveEnforcer) advancedScore(ctx context.Context, input domain.Ri
 	if burstWindow <= 0 {
 		burstWindow = 5 * time.Minute
 	}
-	activityKinds := []domain.AbuseSignalKind{domain.AbuseSignalCaptchaPassed, domain.AbuseSignalRiskAllowed, domain.AbuseSignalClaimAccepted, domain.AbuseSignalRateLimited, domain.AbuseSignalCooldownActive}
+	activityKinds := phase27ClaimIntakeKinds()
 	if e.cfg.AbuseBurstThreshold > 0 && strings.TrimSpace(input.RemoteIP) != "" {
 		count, err := e.counter.CountRecentAbuseSignals(ctx, domain.AbuseSignalFilter{Kinds: activityKinds, RemoteIP: input.RemoteIP, Since: now.Add(-burstWindow)})
 		if err != nil {
@@ -148,6 +148,21 @@ func (e *ProgressiveEnforcer) advancedScore(ctx context.Context, input domain.Ri
 		}
 	}
 	return score, reason, nil
+}
+
+func phase27ClaimIntakeKinds() []domain.AbuseSignalKind {
+	return []domain.AbuseSignalKind{
+		domain.AbuseSignalCaptchaPassed,
+		domain.AbuseSignalCaptchaFailed,
+		domain.AbuseSignalRiskAllowed,
+		domain.AbuseSignalRiskRejected,
+		domain.AbuseSignalManualReview,
+		domain.AbuseSignalClaimAccepted,
+		domain.AbuseSignalRateLimited,
+		domain.AbuseSignalCooldownActive,
+		domain.AbuseSignalDailyBudgetExceeded,
+		domain.AbuseSignalInvalidToken,
+	}
 }
 
 func rejected(score int, reason string) domain.RiskDecision {

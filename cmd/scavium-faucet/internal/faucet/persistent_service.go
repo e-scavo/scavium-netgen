@@ -636,11 +636,25 @@ func (s *PersistentReadService) evaluateRisk(ctx context.Context, request ClaimR
 	}
 	if decision.Allowed {
 		s.recordAbuseSignal(ctx, request, domain.AbuseSignalRiskAllowed, "", decision.Reason, decision.Score)
+		if decision.Review {
+			reason := decision.Reason
+			if reason == "" {
+				reason = "manual review suggested by risk engine"
+			}
+			s.recordAbuseSignal(ctx, request, domain.AbuseSignalManualReview, "", reason, decision.Score)
+		}
 		return nil
 	}
 	reason := decision.Reason
 	if reason == "" {
 		reason = "claim rejected by risk engine"
+	}
+	if decision.Review {
+		reviewReason := reason
+		if reviewReason == "" {
+			reviewReason = "manual review suggested by risk engine"
+		}
+		s.recordAbuseSignal(ctx, request, domain.AbuseSignalManualReview, "", reviewReason, decision.Score)
 	}
 	s.recordAbuseSignal(ctx, request, domain.AbuseSignalRiskRejected, "", reason, decision.Score)
 	return claimError(ErrClaimRejected, reason)

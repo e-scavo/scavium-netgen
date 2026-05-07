@@ -133,6 +133,38 @@ func TestProgressiveEnforcerRejectsHoneypotOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestProgressiveEnforcerBurstCountsFailedIntakeSignals(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.AbuseEnforcementIPThreshold = 0
+	cfg.AbuseEnforcementAddressThreshold = 0
+	cfg.AbuseEnforcementFingerprintThreshold = 0
+	cfg.AbuseBurstThreshold = 3
+	cfg.AbuseRiskScoreRejectThreshold = 2
+	counter := &fakeSignalCounter{count: 3}
+	enforcer := NewProgressiveEnforcer(cfg, counter)
+
+	decision, err := enforcer.Evaluate(context.Background(), domain.RiskInput{RemoteIP: "203.0.113.77"})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if decision.Allowed || decision.Reason != "burst detection threshold exceeded" {
+		t.Fatalf("decision = %#v", decision)
+	}
+	foundFailed := false
+	foundRejected := false
+	for _, kind := range counter.last.Kinds {
+		if kind == domain.AbuseSignalCaptchaFailed {
+			foundFailed = true
+		}
+		if kind == domain.AbuseSignalRiskRejected {
+			foundRejected = true
+		}
+	}
+	if !foundFailed || !foundRejected {
+		t.Fatalf("burst activity kinds = %#v, want failed/rejected intake included", counter.last.Kinds)
+	}
+}
+
 func TestProgressiveEnforcerScoresRotatingIPAndAddressCluster(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.AbuseEnforcementIPThreshold = 0
