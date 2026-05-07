@@ -647,3 +647,16 @@ scripts/scavium-faucet-operator-smoke.sh
 ```
 
 If `/ready` is degraded, keep the faucet paused/maintenance and inspect DB, queue, RPC failover selection, wallet balance, and ERC20 contract reachability before accepting public claims.
+
+## Phase 26 public frontend smoke checks
+
+After deploying the Phase 26 frontend, run these browser checks against the public URL:
+
+1. Open the homepage and confirm the request form, token selector, refresh button, eligibility button, history button, privacy link, and terms link are reachable by keyboard.
+2. Enter an invalid address and confirm claim, eligibility, and history actions reject it locally without making a successful claim.
+3. Enter a valid address and click **Check Eligibility**. Confirm the page renders `eligible`, public reason, cooldown, default token, token status, and daily-budget information when those fields are returned by the API.
+4. Click **View Address History**. Confirm an empty-state message appears for addresses with no claims and a capped recent-claims list appears for addresses with claims.
+5. Submit a normal claim and confirm the existing claim result/polling flow still works.
+6. If `SCAVIUM_FAUCET_EXPLORER_TX_URL` is configured, confirm explorer actions appear only after a valid `tx_hash` is returned. Remove or malform the explorer template in a staging environment and confirm the UI suppresses links.
+7. Put the faucet in `paused`, `maintenance`, and `no_funds` modes and confirm the public banner disables submission without hiding read-only status/history actions.
+8. Resize the viewport below 640px and confirm buttons, token details, status cards, and history entries stack without horizontal scrolling.

@@ -755,3 +755,11 @@ Phase 17.5 post-audit closure note:
 ## Phase 25 — Public API completion and OpenAPI
 
 Phase 25 adds the public address history endpoint, extends wallet/address eligibility status with optional token and daily-budget visibility, and introduces a manually maintained lightweight OpenAPI contract at `openapi.yaml`. All changes are backward-compatible: `POST /api/v1/claim`, normalized error envelopes, request/correlation headers, admin bearer-token protection, and existing alias routes remain intact.
+
+## Phase 26 — Public frontend consumption of Phase 25 APIs
+
+The embedded public frontend now consumes the Phase 25 address status and history endpoints directly from the browser. The address typed into the claim form can be used to check `GET /api/v1/address/{address}/status` and to render the first page of `GET /api/v1/address/{address}/history?limit=10&offset=0`.
+
+This is a client-side UX addition only. The backend API contracts remain unchanged: claim creation, claim lookup, status, token catalog, address status, address history, normalized error envelopes, request IDs, admin authentication, and alias routes keep their documented behavior. The frontend renders only the public-safe fields returned by those endpoints and never displays idempotency keys, captcha tokens, fingerprints, raw abuse signals, private blocklist notes, or admin-only queue/audit metadata.
+
+Explorer links in the claim result and history panels are optional. The browser renders them only when `explorer_tx_url` is an absolute HTTP(S) template with a `{txHash}` placeholder and the claim contains a valid 32-byte EVM transaction hash. Missing, relative, non-HTTP(S), or malformed values result in no link.

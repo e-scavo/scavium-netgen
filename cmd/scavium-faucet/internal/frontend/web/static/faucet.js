@@ -11,6 +11,7 @@
     tokens: [],
     selectedTokenID: "",
     tokenCatalogStatus: "loading",
+    explorerURLSafe: false,
   };
 
   function el(id) {
@@ -35,12 +36,66 @@
     if (!text) {
       node.className = "status";
       node.textContent = "";
+      node.setAttribute("aria-hidden", "true");
       return;
     }
     node.className = "status visible " + (kind || "info");
     node.textContent = text;
+    node.removeAttribute("aria-hidden");
   }
 
+  function setBusy(button, busy, text) {
+    if (!button) {
+      return;
+    }
+    if (busy) {
+      button.dataset.defaultText = button.dataset.defaultText || button.textContent;
+      button.textContent = text || "Working...";
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      return;
+    }
+    button.textContent = button.dataset.defaultText || button.textContent;
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+  }
+
+  function isAbsoluteHTTPURLTemplate(template) {
+    return /^https?:\/\//i.test(String(template || ""));
+  }
+
+  function validExplorerTemplate(template) {
+    if (!template || template.indexOf("{txHash}") === -1 || !isAbsoluteHTTPURLTemplate(template)) {
+      return false;
+    }
+    try {
+      var probe = new URL(template.replace("{txHash}", "0x" + "0".repeat(64)));
+      return probe.protocol === "https:" || probe.protocol === "http:";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function txExplorerHref(txHash) {
+    var hash = String(txHash || "");
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash) || !state.explorerURLSafe) {
+      return "";
+    }
+    try {
+      var href = state.explorerTxURL.replace("{txHash}", encodeURIComponent(hash));
+      var url = new URL(href);
+      if ((url.protocol !== "https:" && url.protocol !== "http:") || !isAbsoluteHTTPURLTemplate(href)) {
+        return "";
+      }
+      return url.href;
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function currentAddress() {
+    return (el("address") && el("address").value ? el("address").value.trim() : "");
+  }
 
   function resetCaptchaToken() {
     state.captchaToken = "";
@@ -375,6 +430,7 @@
     var data = await readJSON(response);
 
     state.explorerTxURL = data.explorer_tx_url || "";
+    state.explorerURLSafe = validExplorerTemplate(state.explorerTxURL);
 
     var banner = el("network-banner");
     if (data.network_name) {
@@ -410,7 +466,7 @@
   async function loadPublicStatus() {
     var response = await fetch("/api/v1/status", { headers: { Accept: "application/json" } });
     var data = await readJSON(response);
-    var mode = String(data.mode || "active").toLowerCase();
+    var mode = String(data.status || data.mode || "active").toLowerCase();
 
     var msg = "";
     var kind = "warn";
@@ -478,6 +534,91 @@
     setHidden(summary, false);
   }
 
+  function renderRows(target, rows) {
+    if (!target) {
+      return;
+    }
+    target.innerHTML = rows
+      .map(function (r) {
+        return '<div class="kv"><span class="key">' + esc(r[0]) + '</span><span class="val">' + esc(r[1]) + "</span></div>";
+      })
+      .join("");
+  }
+
+  function budgetLabel(budget) {
+    if (!budget) {
+      return "";
+    }
+    var remaining = budget.remaining_wei != null ? String(budget.remaining_wei) : "";
+    var total = budget.budget_wei != null ? String(budget.budget_wei) : "";
+    if (remaining && total) {
+      return remaining + " of " + total + " wei remaining";
+    }
+    return remaining || total;
+  }
+
+  function renderAddressStatus(data) {
+    var card = el("address-status-card");
+    var summary = el("address-status-summary");
+    var kv = el("address-status-kv");
+    if (!card || !summary || !kv || !data) {
+      return;
+    }
+    var eligible = !!data.eligible;
+    var reason = data.reason || (eligible ? "eligible" : "not eligible");
+    summary.innerHTML =
+      '<strong>' + esc(eligible ? "Eligible to claim" : "Not eligible now") + '</strong>' +
+      '<span>' + esc(reason) + '</span>';
+    var rows = [];
+    if (data.address) rows.push(["Address", data.address]);
+    rows.push(["Eligible", eligible ? "yes" : "no"]);
+    if (data.reason) rows.push(["Reason", data.reason]);
+    if (data.cooldown_remaining_seconds != null) rows.push(["Cooldown Remaining", String(data.cooldown_remaining_seconds) + "s"]);
+    if (data.next_eligible_time) rows.push(["Next Eligible", data.next_eligible_time]);
+    if (data.default_token_id) rows.push(["Default Token", data.default_token_id]);
+    if (data.daily_budget) rows.push(["Daily Budget", budgetLabel(data.daily_budget)]);
+    if (Array.isArray(data.tokens) && data.tokens.length) {
+      rows.push(["Tokens", data.tokens.map(function (token) {
+        var label = token.symbol || token.token_id || "token";
+        return label + ": " + (token.eligible ? "eligible" : (token.reason || "not eligible"));
+      }).join(" | ")]);
+    }
+    renderRows(kv, rows);
+    setHidden(card, false);
+    card.focus && card.focus();
+  }
+
+  function renderHistory(data) {
+    var card = el("address-history-card");
+    var list = el("address-history-list");
+    var status = el("address-history-status");
+    if (!card || !list || !data) {
+      return;
+    }
+    var claims = Array.isArray(data.claims) ? data.claims : [];
+    if (claims.length === 0) {
+      list.innerHTML = "";
+      setStatus(status, "No public claims found for this address.", "info");
+      setHidden(card, false);
+      card.focus && card.focus();
+      return;
+    }
+    setStatus(status, "Showing latest " + claims.length + " public claim" + (claims.length === 1 ? "" : "s") + ".", "info");
+    list.innerHTML = claims.map(function (claim) {
+      var href = txExplorerHref(claim.tx_hash);
+      var tx = href ? '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">Explorer</a>' : esc(claim.tx_hash || "No transaction yet");
+      return '<article class="history-item">' +
+        '<div class="history-item-header"><strong>' + esc(claim.id || "claim") + '</strong><span class="claim-badge">' + esc(claim.status || "unknown") + '</span></div>' +
+        '<div class="history-meta">Token: ' + esc(claimTokenLabel(claim)) + '</div>' +
+        '<div class="history-meta">Amount: ' + esc(claimAmountDisplay(claim) || claim.amount_wei || "configured") + '</div>' +
+        '<div class="history-meta">Created: ' + esc(claim.created_at || "n/a") + '</div>' +
+        '<div class="history-meta">Tx: ' + tx + '</div>' +
+      '</article>';
+    }).join("");
+    setHidden(card, false);
+    card.focus && card.focus();
+  }
+
   function renderClaim(data) {
     renderClaimSummary(data);
     var rows = [];
@@ -491,18 +632,14 @@
     if (data.created_at) rows.push(["Created", data.created_at]);
     if (data.updated_at) rows.push(["Updated", data.updated_at]);
 
-    el("claim-kv").innerHTML = rows
-      .map(function (r) {
-        return '<div class="kv"><span class="key">' + esc(r[0]) + '</span><span class="val">' + esc(r[1]) + "</span></div>";
-      })
-      .join("");
+    renderRows(el("claim-kv"), rows);
     setHidden(el("claim-result"), false);
 
     var link = el("explorer-link");
-    if (data.tx_hash && state.explorerTxURL) {
-      var href = state.explorerTxURL.replace("{txHash}", encodeURIComponent(data.tx_hash));
+    var href = txExplorerHref(data.tx_hash);
+    if (href) {
       link.className = "status visible info";
-      link.innerHTML = '<a href="' + esc(href) + '" target="_blank" rel="noopener">View transaction on explorer</a>';
+      link.innerHTML = '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">View transaction on explorer</a>';
       return;
     }
     link.className = "status hidden";
@@ -607,7 +744,7 @@
     }
 
     var submitBtn = el("btn-send");
-    submitBtn.disabled = true;
+    setBusy(submitBtn, true, "Submitting...");
     setStatus(el("msg"), "Submitting claim...", "info");
 
     try {
@@ -620,7 +757,7 @@
         body: JSON.stringify(body),
       });
       var data = await readJSON(response);
-      submitBtn.disabled = false;
+      setBusy(submitBtn, false);
 
       if (!response.ok) {
         refreshCaptcha();
@@ -639,8 +776,62 @@
       }
       refreshCaptcha();
     } catch (_) {
-      submitBtn.disabled = false;
+      setBusy(submitBtn, false);
       setStatus(el("msg"), "Network error while submitting claim.", "error");
+    }
+  }
+
+  async function loadAddressStatus() {
+    var addr = currentAddress();
+    if (!addr || !isValidAddress(addr)) {
+      setStatus(el("msg"), "Enter a valid address before checking eligibility.", "error");
+      return;
+    }
+    var btn = el("btn-address-status");
+    setBusy(btn, true, "Checking...");
+    setStatus(el("msg"), "Checking address eligibility...", "info");
+    try {
+      var response = await fetch("/api/v1/address/" + encodeURIComponent(addr) + "/status", { headers: { Accept: "application/json" } });
+      var data = await readJSON(response);
+      setBusy(btn, false);
+      if (!response.ok) {
+        renderClaimError(data);
+        return;
+      }
+      renderAddressStatus(data);
+      setStatus(el("msg"), "Eligibility updated.", "success");
+    } catch (_) {
+      setBusy(btn, false);
+      setStatus(el("msg"), "Unable to load address eligibility.", "error");
+    }
+  }
+
+  async function loadAddressHistory() {
+    var addr = currentAddress();
+    if (!addr || !isValidAddress(addr)) {
+      setStatus(el("msg"), "Enter a valid address before viewing history.", "error");
+      return;
+    }
+    var btn = el("btn-address-history");
+    setBusy(btn, true, "Loading...");
+    setStatus(el("address-history-status"), "Loading address history...", "info");
+    setHidden(el("address-history-card"), false);
+    setStatus(el("msg"), "Loading address history...", "info");
+    try {
+      var response = await fetch("/api/v1/address/" + encodeURIComponent(addr) + "/history?limit=10&offset=0", { headers: { Accept: "application/json" } });
+      var data = await readJSON(response);
+      setBusy(btn, false);
+      if (!response.ok) {
+        setStatus(el("address-history-status"), "Address history unavailable. Please retry shortly.", "error");
+        renderClaimError(data);
+        return;
+      }
+      renderHistory(data);
+      setStatus(el("msg"), "Address history loaded.", "success");
+    } catch (_) {
+      setBusy(btn, false);
+      setStatus(el("address-history-status"), "Address history unavailable. Please retry shortly.", "error");
+      setStatus(el("msg"), "Unable to load address history.", "error");
     }
   }
 
@@ -656,6 +847,12 @@
       if (state.currentClaimID) {
         pollClaim(state.currentClaimID);
       }
+    });
+    el("btn-address-status").addEventListener("click", function () {
+      loadAddressStatus();
+    });
+    el("btn-address-history").addEventListener("click", function () {
+      loadAddressHistory();
     });
     var tokenSelect = el("token-id");
     if (tokenSelect) {
