@@ -4,10 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"scavium-netgen/cmd/scavium-faucet/internal/domain"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -16,17 +17,9 @@ import (
 
 const walletChallengeTTL = 5 * time.Minute
 
-var ErrWalletChallengeInvalid = errors.New("wallet challenge invalid")
+type WalletChallenge = domain.WalletChallenge
 
-type WalletChallenge struct {
-	ID         string
-	Address    common.Address
-	Nonce      string
-	Message    string
-	ExpiresAt  time.Time
-	ConsumedAt *time.Time
-	CreatedAt  time.Time
-}
+var ErrWalletChallengeInvalid = domain.ErrWalletChallengeInvalid
 
 type WalletChallengeRequest struct{ Address common.Address }
 

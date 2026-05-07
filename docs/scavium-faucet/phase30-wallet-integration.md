@@ -36,3 +36,7 @@ The following remain outside Phase 30 and should be scheduled explicitly later:
 ## Validation notes
 
 Static formatting and shell/script validation were completed. Go tests/build could not run in this environment because the local Go version is `go1.23.2` and the module requires Go `1.24.0`; the toolchain download from `proxy.golang.org` failed due network/DNS restrictions. The implementation was still reviewed for runtime wiring, persistence, fallback behavior, public API compatibility, defensive validation, documentation, and migration consistency.
+
+## Post-implementation audit fix
+
+The Phase 30 wallet challenge persistence model was adjusted so the SQLite store owns only domain-level wallet challenge records and no longer imports the faucet service package. This keeps the production store wiring intact while removing the Go test import cycle between `internal/faucet` tests and `internal/store/sqlite`.

@@ -14,7 +14,6 @@ import (
 
 	"scavium-netgen/cmd/scavium-faucet/internal/abuse"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
-	"scavium-netgen/cmd/scavium-faucet/internal/faucet"
 	"scavium-netgen/cmd/scavium-faucet/migrations"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -2163,20 +2162,20 @@ func nullableTime(t *time.Time) any {
 }
 
 // CreateWalletChallenge stores a short-lived non-secret wallet challenge.
-func (s *Store) CreateWalletChallenge(ctx context.Context, challenge faucet.WalletChallenge) (faucet.WalletChallenge, error) {
+func (s *Store) CreateWalletChallenge(ctx context.Context, challenge domain.WalletChallenge) (domain.WalletChallenge, error) {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO wallet_challenges (id, address, nonce, message, expires_at, consumed_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, challenge.ID, challenge.Address.Hex(), challenge.Nonce, challenge.Message, formatTime(challenge.ExpiresAt), nullableTime(challenge.ConsumedAt), formatTime(challenge.CreatedAt))
 	if err != nil {
-		return faucet.WalletChallenge{}, fmt.Errorf("create wallet challenge: %w", err)
+		return domain.WalletChallenge{}, fmt.Errorf("create wallet challenge: %w", err)
 	}
 	return challenge, nil
 }
 
 // GetWalletChallenge returns an unexpired, unconsumed challenge without consuming it.
-func (s *Store) GetWalletChallenge(ctx context.Context, id string, address common.Address, now time.Time) (faucet.WalletChallenge, error) {
-	var c faucet.WalletChallenge
+func (s *Store) GetWalletChallenge(ctx context.Context, id string, address common.Address, now time.Time) (domain.WalletChallenge, error) {
+	var c domain.WalletChallenge
 	var addressText, expiresAt, consumedAt, createdAt string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, address, nonce, message, expires_at, COALESCE(consumed_at, ''), created_at
@@ -2184,45 +2183,45 @@ func (s *Store) GetWalletChallenge(ctx context.Context, id string, address commo
 		WHERE id = ?
 	`, strings.TrimSpace(id)).Scan(&c.ID, &addressText, &c.Nonce, &c.Message, &expiresAt, &consumedAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return faucet.WalletChallenge{}, faucet.ErrWalletChallengeInvalid
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
 	}
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	if !common.IsHexAddress(addressText) {
-		return faucet.WalletChallenge{}, faucet.ErrWalletChallengeInvalid
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
 	}
 	c.Address = common.HexToAddress(addressText)
 	c.ExpiresAt, err = parseTime(expiresAt)
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	c.CreatedAt, err = parseTime(createdAt)
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	if consumedAt != "" {
 		t, err := parseTime(consumedAt)
 		if err != nil {
-			return faucet.WalletChallenge{}, err
+			return domain.WalletChallenge{}, err
 		}
 		c.ConsumedAt = &t
 	}
 	if c.Address != address || c.ConsumedAt != nil || !now.UTC().Before(c.ExpiresAt) {
-		return faucet.WalletChallenge{}, faucet.ErrWalletChallengeInvalid
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
 	}
 	return c, nil
 }
 
 // ConsumeWalletChallenge atomically marks an unexpired challenge as consumed.
-func (s *Store) ConsumeWalletChallenge(ctx context.Context, id string, address common.Address, now time.Time) (faucet.WalletChallenge, error) {
+func (s *Store) ConsumeWalletChallenge(ctx context.Context, id string, address common.Address, now time.Time) (domain.WalletChallenge, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	defer tx.Rollback()
 
-	var c faucet.WalletChallenge
+	var c domain.WalletChallenge
 	var addressText, expiresAt, consumedAt, createdAt string
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, address, nonce, message, expires_at, COALESCE(consumed_at, ''), created_at
@@ -2230,32 +2229,32 @@ func (s *Store) ConsumeWalletChallenge(ctx context.Context, id string, address c
 		WHERE id = ?
 	`, strings.TrimSpace(id)).Scan(&c.ID, &addressText, &c.Nonce, &c.Message, &expiresAt, &consumedAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return faucet.WalletChallenge{}, faucet.ErrWalletChallengeInvalid
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
 	}
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	if !common.IsHexAddress(addressText) {
-		return faucet.WalletChallenge{}, faucet.ErrWalletChallengeInvalid
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
 	}
 	c.Address = common.HexToAddress(addressText)
 	c.ExpiresAt, err = parseTime(expiresAt)
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	c.CreatedAt, err = parseTime(createdAt)
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	if consumedAt != "" {
 		t, err := parseTime(consumedAt)
 		if err != nil {
-			return faucet.WalletChallenge{}, err
+			return domain.WalletChallenge{}, err
 		}
 		c.ConsumedAt = &t
 	}
 	if c.Address != address || c.ConsumedAt != nil || !now.UTC().Before(c.ExpiresAt) {
-		return faucet.WalletChallenge{}, faucet.ErrWalletChallengeInvalid
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
 	}
 	consumed := now.UTC()
 	res, err := tx.ExecContext(ctx, `
@@ -2264,17 +2263,17 @@ func (s *Store) ConsumeWalletChallenge(ctx context.Context, id string, address c
 		WHERE id = ? AND consumed_at IS NULL AND expires_at > ?
 	`, formatTime(consumed), c.ID, formatTime(now.UTC()))
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	if n != 1 {
-		return faucet.WalletChallenge{}, faucet.ErrWalletChallengeInvalid
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
 	}
 	if err := tx.Commit(); err != nil {
-		return faucet.WalletChallenge{}, err
+		return domain.WalletChallenge{}, err
 	}
 	c.ConsumedAt = &consumed
 	return c, nil
