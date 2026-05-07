@@ -860,6 +860,7 @@ func (s *SQLiteReadAdminService) SetRuntimePolicy(ctx context.Context, req SetRu
 	}
 	after := runtimePolicyResponse(policy, "runtime")
 	if err := s.appendAudit(ctx, AuditEntry{Action: "set_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicyChangeSummary(runtimePolicyResponse(before, "runtime"), after), CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+		_ = store.SetRuntimePolicy(ctx, before)
 		return RuntimePolicyResponse{}, err
 	}
 	return after, nil
@@ -877,7 +878,11 @@ func (s *SQLiteReadAdminService) ClearRuntimePolicy(ctx context.Context, actor s
 	if err := store.ClearRuntimePolicy(ctx); err != nil {
 		return err
 	}
-	return s.appendAudit(ctx, AuditEntry{Action: "clear_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicySummary(runtimePolicyResponse(before, "runtime")), CreatedAt: s.now().UTC().Format(time.RFC3339)})
+	if err := s.appendAudit(ctx, AuditEntry{Action: "clear_runtime_policy", Actor: actor, Target: "policy", Detail: runtimePolicySummary(runtimePolicyResponse(before, "runtime")), CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
+		_ = store.SetRuntimePolicy(ctx, before)
+		return err
+	}
+	return nil
 }
 
 func runtimePolicyFromRequest(req SetRuntimePolicyRequest) (domain.RuntimePolicy, error) {

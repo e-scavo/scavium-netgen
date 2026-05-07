@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -652,5 +653,66 @@ func TestSQLiteReadAdminServiceUsesPersistedRetryCancel(t *testing.T) {
 		if entry.Detail != string(abuse.KeyTypeIP) {
 			t.Fatalf("blocklist audit detail = %q, want %q", entry.Detail, abuse.KeyTypeIP)
 		}
+	}
+}
+
+type failingRuntimePolicyAuditStore struct {
+	policy    domain.RuntimePolicy
+	appendErr error
+}
+
+func (s *failingRuntimePolicyAuditStore) GetRuntimePolicy(context.Context) (domain.RuntimePolicy, error) {
+	return domain.CopyRuntimePolicy(s.policy), nil
+}
+
+func (s *failingRuntimePolicyAuditStore) SetRuntimePolicy(_ context.Context, policy domain.RuntimePolicy) error {
+	s.policy = domain.CopyRuntimePolicy(policy)
+	return nil
+}
+
+func (s *failingRuntimePolicyAuditStore) ClearRuntimePolicy(context.Context) error {
+	s.policy = domain.RuntimePolicy{}
+	return nil
+}
+
+func (s *failingRuntimePolicyAuditStore) AppendAdminAudit(context.Context, domain.AdminAuditEntry) error {
+	return s.appendErr
+}
+
+func (s *failingRuntimePolicyAuditStore) ListAdminAudit(context.Context, int) ([]domain.AdminAuditEntry, error) {
+	return nil, nil
+}
+
+func TestSQLiteReadAdminServiceRollsBackRuntimePolicyWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := &failingRuntimePolicyAuditStore{
+		policy:    domain.RuntimePolicy{CooldownSeconds: 30, DailyBudgetWei: big.NewInt(100)},
+		appendErr: auditErr,
+	}
+	svc := NewSQLiteReadAdminService(store)
+
+	_, err := svc.SetRuntimePolicy(context.Background(), SetRuntimePolicyRequest{CooldownSeconds: 90, DailyBudgetWei: "200"}, "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("SetRuntimePolicy error = %v, want audit error", err)
+	}
+	if store.policy.CooldownSeconds != 30 || store.policy.DailyBudgetWei == nil || store.policy.DailyBudgetWei.String() != "100" {
+		t.Fatalf("policy after failed audited set = %#v, want original", store.policy)
+	}
+}
+
+func TestSQLiteReadAdminServiceRollsBackRuntimePolicyClearWhenAuditFails(t *testing.T) {
+	auditErr := errors.New("audit unavailable")
+	store := &failingRuntimePolicyAuditStore{
+		policy:    domain.RuntimePolicy{CooldownSeconds: 30, TokenDailyBudgetWei: map[string]*big.Int{"native": big.NewInt(100)}},
+		appendErr: auditErr,
+	}
+	svc := NewSQLiteReadAdminService(store)
+
+	err := svc.ClearRuntimePolicy(context.Background(), "operator")
+	if !errors.Is(err, auditErr) {
+		t.Fatalf("ClearRuntimePolicy error = %v, want audit error", err)
+	}
+	if store.policy.CooldownSeconds != 30 || store.policy.TokenDailyBudgetWei["native"] == nil || store.policy.TokenDailyBudgetWei["native"].String() != "100" {
+		t.Fatalf("policy after failed audited clear = %#v, want original", store.policy)
 	}
 }

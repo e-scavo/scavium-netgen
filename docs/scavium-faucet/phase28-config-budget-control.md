@@ -37,7 +37,7 @@ This precedence keeps rollback simple: `DELETE /api/v1/admin/policy` clears over
 
 `DELETE /api/v1/admin/policy` clears all runtime overrides.
 
-All routes are protected by the existing bearer-token admin middleware. Every mutation writes a durable admin audit entry with a bounded before/after summary and no secrets.
+All routes are protected by the existing bearer-token admin middleware. Every mutation writes a durable admin audit entry with a bounded before/after summary and no secrets. If durable audit persistence fails during a policy update or clear operation, the service rolls the runtime policy back to the previous persisted value and returns an error instead of leaving an unaudited policy change behind.
 
 ## Runtime application
 
