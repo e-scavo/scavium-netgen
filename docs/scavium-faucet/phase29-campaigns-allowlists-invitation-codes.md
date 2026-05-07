@@ -79,6 +79,10 @@ The fifth Phase 29 fix pass closed the HTTP test regression introduced with the 
 
 The sixth Phase 29 fix pass closed a final invite-claim consistency edge case. If invitation validation succeeds before claim persistence but invitation consumption fails after the durable claim is created, the claim is now immediately marked `rejected` with `invalid_campaign` before returning the public rejection. This prevents an unqueued invite claim from remaining in a received/budget-counting state after a race with a max-use invitation code or another durable consume failure. A focused persistent-service test covers the post-create consume-failure path.
 
+## Fix 7 verification
+
+The seventh Phase 29 fix pass completed the closure-audit coverage gap left after runtime behavior was already passing the full project test suite. Focused persistent-service tests now cover public campaign claims, invalid invitation-code rejection before durable claim creation, exhausted campaign budgets, allowlist-approved campaign claims, and idempotent invite replays that must return the original claim without consuming the invitation code twice.
+
 ## Deferred items
 
 The following remain intentionally deferred as Stage 4/professional-scale features:

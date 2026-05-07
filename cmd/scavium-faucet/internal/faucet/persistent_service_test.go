@@ -1128,6 +1128,120 @@ func TestPersistentReadServiceCampaignAllowlistRejectsUnknownAddress(t *testing.
 	}
 }
 
+func TestPersistentReadServicePublicCampaignClaim(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	now := persistentTestNow()
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "public-campaign", Name: "Public", Scope: domain.CampaignScopePublic, TokenID: "native", BudgetWei: big.NewInt(100), Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	service := newPersistentTestService(t, store, persistentTestConfig(), now)
+	created, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), CampaignID: "public-campaign"})
+	if err != nil {
+		t.Fatalf("create public campaign claim: %v", err)
+	}
+	if created.CampaignID != "public-campaign" || created.InvitationCode != "" {
+		t.Fatalf("campaign attribution = %q/%q", created.CampaignID, created.InvitationCode)
+	}
+}
+
+func TestPersistentReadServiceCampaignInviteRejectsInvalidCode(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	now := persistentTestNow()
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "invite-invalid", Name: "Invite", Scope: domain.CampaignScopeInvite, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	service := newPersistentTestService(t, store, persistentTestConfig(), now)
+	_, err = service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), CampaignID: "invite-invalid", InvitationCode: "BAD-CODE"})
+	if !errors.Is(err, ErrClaimRejected) {
+		t.Fatalf("create claim error = %v, want ErrClaimRejected", err)
+	}
+	claims, err := store.ListClaimsByAddress(context.Background(), persistentTestAddress(), 10)
+	if err != nil {
+		t.Fatalf("list claims: %v", err)
+	}
+	if len(claims) != 0 {
+		t.Fatalf("claims len = %d, want 0 before durable claim creation", len(claims))
+	}
+}
+
+func TestPersistentReadServiceCampaignBudgetRejectsExhaustedCampaign(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	now := persistentTestNow()
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "budget-campaign", Name: "Budget", Scope: domain.CampaignScopePublic, TokenID: "native", BudgetWei: big.NewInt(41), Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	service := newPersistentTestService(t, store, persistentTestConfig(), now)
+	_, err = service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), CampaignID: "budget-campaign"})
+	if !errors.Is(err, ErrDailyBudgetExceeded) {
+		t.Fatalf("create claim error = %v, want ErrDailyBudgetExceeded", err)
+	}
+	var claimErr *ClaimError
+	if !errors.As(err, &claimErr) || claimErr.Reason != "campaign_budget_exceeded" {
+		t.Fatalf("claim error = %#v, want campaign_budget_exceeded", err)
+	}
+}
+
+func TestPersistentReadServiceCampaignAllowlistClaim(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	now := persistentTestNow()
+	address := persistentTestAddress()
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "allow-ok", Name: "Allow", Scope: domain.CampaignScopeAllowlist, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	if err := store.AddCampaignAllowlistEntry(context.Background(), domain.CampaignAllowlistEntry{CampaignID: "allow-ok", Address: address, CreatedAt: now}); err != nil {
+		t.Fatalf("add allowlist entry: %v", err)
+	}
+	service := newPersistentTestService(t, store, persistentTestConfig(), now)
+	created, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address, CampaignID: "allow-ok"})
+	if err != nil {
+		t.Fatalf("create allowlist campaign claim: %v", err)
+	}
+	if created.CampaignID != "allow-ok" || created.InvitationCode != "" {
+		t.Fatalf("campaign attribution = %q/%q", created.CampaignID, created.InvitationCode)
+	}
+}
+
+func TestPersistentReadServiceCampaignInviteIdempotencyDoesNotConsumeTwice(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	now := persistentTestNow()
+	_, err := store.CreateCampaign(context.Background(), domain.Campaign{ID: "invite-idem", Name: "Invite Idempotent", Scope: domain.CampaignScopeInvite, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	_, err = store.CreateInvitationCode(context.Background(), domain.InvitationCode{Code: "IDEM1", CampaignID: "invite-idem", MaxUses: 1, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	service := newPersistentTestService(t, store, persistentTestConfig(), now)
+	first, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), CampaignID: "invite-idem", InvitationCode: "IDEM1", IdempotencyKey: "campaign-idem"})
+	if err != nil {
+		t.Fatalf("create invite claim: %v", err)
+	}
+	second, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress(), CampaignID: "invite-idem", InvitationCode: "IDEM1", IdempotencyKey: "campaign-idem"})
+	if err != nil {
+		t.Fatalf("create idempotent invite claim: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("ids differ: %q != %q", first.ID, second.ID)
+	}
+	invite, err := store.GetInvitationCode(context.Background(), "IDEM1")
+	if err != nil {
+		t.Fatalf("get invitation: %v", err)
+	}
+	if invite.Uses != 1 {
+		t.Fatalf("uses = %d, want 1", invite.Uses)
+	}
+}
+
 type failingInviteConsumeCampaignStore struct {
 	campaign domain.Campaign
 	invite   domain.InvitationCode
