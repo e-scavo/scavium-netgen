@@ -36,6 +36,13 @@ type AbuseSignalCounter interface {
 	CountRecentAbuseSignals(ctx context.Context, filter AbuseSignalFilter) (int, error)
 }
 
+// AbuseSignalDistinctCounter exposes bounded distinct counts for conservative
+// Phase 27 clustering heuristics. The field argument must be one of the
+// implementation-defined safe columns, never free-form user input.
+type AbuseSignalDistinctCounter interface {
+	CountDistinctRecentAbuseSignalValues(ctx context.Context, filter AbuseSignalFilter, field string) (int, error)
+}
+
 // AbuseSignalPruner removes old abuse signals according to the configured retention window.
 type AbuseSignalPruner interface {
 	PruneAbuseSignals(ctx context.Context, olderThan time.Time) (int64, error)

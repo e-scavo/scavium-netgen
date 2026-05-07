@@ -72,6 +72,12 @@ func TestFromEnvOverridesValues(t *testing.T) {
 		EnvAbuseEnforcementIPThreshold:          "9",
 		EnvAbuseEnforcementAddressThreshold:     "8",
 		EnvAbuseEnforcementFingerprintThreshold: "7",
+		EnvAbuseRiskScoreRejectThreshold:        "6",
+		EnvAbuseBurstThreshold:                  "11",
+		EnvAbuseBurstWindowSeconds:              "120",
+		EnvAbuseRotatingIPThreshold:             "4",
+		EnvAbuseAddressClusterThreshold:         "5",
+		EnvAbuseHoneypotEnabled:                 "true",
 		EnvAbuseSignalRetentionDays:             "14",
 		EnvTrustedProxy:                         "127.0.0.1",
 		EnvCORSAllowedOrigins:                   "https://faucet.example.test, https://wallet.example.test ",
@@ -150,6 +156,9 @@ func TestFromEnvOverridesValues(t *testing.T) {
 	}
 	if cfg.AbuseEnforcementIPThreshold != 9 || cfg.AbuseEnforcementAddressThreshold != 8 || cfg.AbuseEnforcementFingerprintThreshold != 7 {
 		t.Fatalf("abuse enforcement thresholds = ip:%d address:%d fingerprint:%d", cfg.AbuseEnforcementIPThreshold, cfg.AbuseEnforcementAddressThreshold, cfg.AbuseEnforcementFingerprintThreshold)
+	}
+	if cfg.AbuseRiskScoreRejectThreshold != 6 || cfg.AbuseBurstThreshold != 11 || cfg.AbuseBurstWindowSeconds != 120 || cfg.AbuseRotatingIPThreshold != 4 || cfg.AbuseAddressClusterThreshold != 5 || !cfg.AbuseHoneypotEnabled {
+		t.Fatalf("phase 27 abuse config not applied: %#v", cfg)
 	}
 	if cfg.AbuseSignalRetentionDays != 14 {
 		t.Fatalf("abuse signal retention days = %d", cfg.AbuseSignalRetentionDays)

@@ -29,6 +29,7 @@ The service is production-ready for the current testnet scope, including validat
 | [token-registration.md](token-registration.md) | Phase 17.2 testnet token registration guide for native and ERC20 faucet assets |
 | [phase26-public-frontend-completion.md](phase26-public-frontend-completion.md) | Phase 26 public frontend implementation narrative |
 | [phase26-public-frontend-closure-audit.md](phase26-public-frontend-closure-audit.md) | Phase 26 closure audit and deferred-work boundary |
+| [phase27-advanced-anti-abuse-closure-audit.md](phase27-advanced-anti-abuse-closure-audit.md) | Phase 27 advanced anti-abuse implementation and closure audit |
 
 ## Current implementation snapshot
 
@@ -204,3 +205,8 @@ Phase 24 closes the post-Phase-14 roadmap. The closure audit is recorded in `pha
 Phase 26 is closed as the public frontend completion pass over the Phase 25 API baseline. The embedded browser UI now exposes address eligibility and bounded public address history, keeps explorer links optional and defensively validated, adds in-page privacy and terms links with safe testnet copy, and improves accessibility/mobile behavior without introducing a frontend framework, inline event handlers, backend contract changes, or admin-surface changes.
 
 The implementation narrative is `phase26-public-frontend-completion.md`, and the closure audit is `phase26-public-frontend-closure-audit.md`.
+
+
+## Phase 27 closure
+
+Phase 27 is closed as an advanced anti-abuse increment over persisted abuse signals. The implementation adds deterministic risk score composition, same-IP burst detection, rotating-IP fingerprint heuristics, address clustering, disabled-by-default honeypot handling, and internal manual-review hints without changing public claim envelopes or introducing new external services.

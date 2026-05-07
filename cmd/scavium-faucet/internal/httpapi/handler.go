@@ -51,6 +51,7 @@ type claimRequest struct {
 	TokenID      string `json:"token_id"`
 	CaptchaToken string `json:"captcha_token"`
 	Fingerprint  string `json:"fingerprint"`
+	Honeypot     string `json:"website,omitempty"`
 }
 
 // adminRuntimeResponse aggregates admin-plane runtime visibility without
@@ -425,6 +426,7 @@ func handleCreateClaim(readService faucet.ReadService, trustedProxy string, logg
 			UserAgent:      r.UserAgent(),
 			CaptchaToken:   strings.TrimSpace(body.CaptchaToken),
 			Fingerprint:    strings.TrimSpace(body.Fingerprint),
+			Honeypot:       strings.TrimSpace(body.Honeypot),
 		}
 
 		claim, err := readService.CreateClaim(r.Context(), claimRequest)

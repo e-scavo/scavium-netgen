@@ -197,6 +197,7 @@ components:
         token_id: { type: string }
         captcha_token: { type: string }
         fingerprint: { type: string }
+        website: { type: string, description: "Optional honeypot field; omit or leave empty." }
     Claim:
       type: object
       required: [id, address, amount_wei, status, created_at, updated_at]

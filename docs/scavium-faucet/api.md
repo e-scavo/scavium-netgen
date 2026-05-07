@@ -264,11 +264,12 @@ Request body:
   "address": "0x52908400098527886E0F7030069857D2E4169EE7",
   "token_id": "native",
   "captcha_token": "<provider-token>",
-  "fingerprint": "<client-fingerprint>"
+  "fingerprint": "<client-fingerprint>",
+  "website": ""
 }
 ```
 
-`token_id` is optional; when omitted, the configured default token is used. All fields except `address` remain optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting when provided.
+`token_id` is optional; when omitted, the configured default token is used. All fields except `address` remain optional at the wire-contract level. `captcha_token` is required by policy when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; the public frontend obtains it from the configured provider widget using the public `captcha_site_key` exposed by `/api/v1/config`. `fingerprint` is used for fingerprint-scoped rate limiting and Phase 27 clustering when provided. `website` is an optional compatibility-safe honeypot field: legitimate clients should omit it or send an empty string, and it is evaluated only when `SCAVIUM_FAUCET_ABUSE_HONEYPOT_ENABLED=true`.
 
 Optional request header:
 
@@ -296,7 +297,7 @@ Accepted response:
 
 Current behavior:
 
-- `address`, optional `token_id`, `captcha_token`, and `fingerprint` are decoded from the body
+- `address`, optional `token_id`, `captcha_token`, `fingerprint`, and disabled-by-default honeypot field `website` are decoded from the body
 - the body is capped at `1 MiB`; requests declaring a larger `Content-Length` are rejected before claim handling
 - `RemoteIP` is extracted from the request (trusting `X-Forwarded-For` / `X-Real-IP` when `SCAVIUM_FAUCET_TRUSTED_PROXY` is set)
 - `UserAgent` is forwarded from the request header
@@ -304,7 +305,7 @@ Current behavior:
 - persistent rate limits are enforced per IP (hourly), per address (daily), and per fingerprint (hourly when provided); empty scope values are skipped, fingerprint values are trimmed/lowercased for keying, and denial reasons remain generic rather than exposing raw limiter keys
 - the daily budget is enforced for the selected token when token-scoped configuration is available; legacy deployments keep the existing faucet-wide budget behavior
 - captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; missing or failed verification returns `422 captcha_failed`
-- risk evaluation runs when a risk engine is configured
+- risk evaluation runs when a risk engine is configured; Phase 27 composes persisted negative-signal counts, same-IP bursts, rotating-IP fingerprint behavior, address clustering, and the optional honeypot into a bounded deterministic score
 - the accepted claim is persisted to SQLite with initial status `received`, then enqueued as `queued`
 - repeated requests with the same `Idempotency-Key` return the same persisted claim without creating a duplicate
 

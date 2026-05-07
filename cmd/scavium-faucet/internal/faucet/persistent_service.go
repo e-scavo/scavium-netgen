@@ -628,6 +628,7 @@ func (s *PersistentReadService) evaluateRisk(ctx context.Context, request ClaimR
 		RemoteIP:    strings.TrimSpace(request.RemoteIP),
 		Fingerprint: strings.TrimSpace(request.Fingerprint),
 		UserAgent:   strings.TrimSpace(request.UserAgent),
+		Honeypot:    strings.TrimSpace(request.Honeypot),
 		RequestedAt: s.now(),
 	})
 	if err != nil {

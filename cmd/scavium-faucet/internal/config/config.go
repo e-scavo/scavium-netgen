@@ -40,6 +40,12 @@ const (
 	EnvAbuseEnforcementIPThreshold          = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_IP_THRESHOLD"
 	EnvAbuseEnforcementAddressThreshold     = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ADDRESS_THRESHOLD"
 	EnvAbuseEnforcementFingerprintThreshold = "SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_FINGERPRINT_THRESHOLD"
+	EnvAbuseRiskScoreRejectThreshold        = "SCAVIUM_FAUCET_ABUSE_RISK_SCORE_REJECT_THRESHOLD"
+	EnvAbuseBurstThreshold                  = "SCAVIUM_FAUCET_ABUSE_BURST_THRESHOLD"
+	EnvAbuseBurstWindowSeconds              = "SCAVIUM_FAUCET_ABUSE_BURST_WINDOW_SECONDS"
+	EnvAbuseRotatingIPThreshold             = "SCAVIUM_FAUCET_ABUSE_ROTATING_IP_THRESHOLD"
+	EnvAbuseAddressClusterThreshold         = "SCAVIUM_FAUCET_ABUSE_ADDRESS_CLUSTER_THRESHOLD"
+	EnvAbuseHoneypotEnabled                 = "SCAVIUM_FAUCET_ABUSE_HONEYPOT_ENABLED"
 	EnvAbuseSignalRetentionDays             = "SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS"
 	EnvTrustedProxy                         = "SCAVIUM_FAUCET_TRUSTED_PROXY"
 	EnvCORSAllowedOrigins                   = "SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS"
@@ -114,6 +120,12 @@ type Config struct {
 	AbuseEnforcementIPThreshold          int
 	AbuseEnforcementAddressThreshold     int
 	AbuseEnforcementFingerprintThreshold int
+	AbuseRiskScoreRejectThreshold        int
+	AbuseBurstThreshold                  int
+	AbuseBurstWindowSeconds              int
+	AbuseRotatingIPThreshold             int
+	AbuseAddressClusterThreshold         int
+	AbuseHoneypotEnabled                 bool
 	AbuseSignalRetentionDays             int
 	TrustedProxy                         string
 	CORSAllowedOrigins                   []string
@@ -270,6 +282,48 @@ func FromEnv(lookup func(string) string) (Config, error) {
 		}
 		cfg.AbuseEnforcementFingerprintThreshold = v
 	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseRiskScoreRejectThreshold)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseRiskScoreRejectThreshold, err)
+		}
+		cfg.AbuseRiskScoreRejectThreshold = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseBurstThreshold)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseBurstThreshold, err)
+		}
+		cfg.AbuseBurstThreshold = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseBurstWindowSeconds)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseBurstWindowSeconds, err)
+		}
+		cfg.AbuseBurstWindowSeconds = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseRotatingIPThreshold)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseRotatingIPThreshold, err)
+		}
+		cfg.AbuseRotatingIPThreshold = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseAddressClusterThreshold)); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseAddressClusterThreshold, err)
+		}
+		cfg.AbuseAddressClusterThreshold = v
+	}
+	if raw := strings.TrimSpace(lookup(EnvAbuseHoneypotEnabled)); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", EnvAbuseHoneypotEnabled, err)
+		}
+		cfg.AbuseHoneypotEnabled = v
+	}
 	if raw := strings.TrimSpace(lookup(EnvAbuseSignalRetentionDays)); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil {
@@ -353,6 +407,12 @@ func Defaults() Config {
 		AbuseEnforcementIPThreshold:          20,
 		AbuseEnforcementAddressThreshold:     12,
 		AbuseEnforcementFingerprintThreshold: 15,
+		AbuseRiskScoreRejectThreshold:        5,
+		AbuseBurstThreshold:                  25,
+		AbuseBurstWindowSeconds:              300,
+		AbuseRotatingIPThreshold:             8,
+		AbuseAddressClusterThreshold:         12,
+		AbuseHoneypotEnabled:                 false,
 		AbuseSignalRetentionDays:             30,
 		TrustedProxy:                         "",
 		CORSAllowedOrigins:                   nil,
@@ -418,6 +478,21 @@ func (c Config) Validate() error {
 	}
 	if c.AbuseEnforcementFingerprintThreshold < 0 {
 		errs = append(errs, errors.New("abuse enforcement fingerprint threshold must be zero or positive"))
+	}
+	if c.AbuseRiskScoreRejectThreshold < 0 {
+		errs = append(errs, errors.New("abuse risk score reject threshold must be zero or positive"))
+	}
+	if c.AbuseBurstThreshold < 0 {
+		errs = append(errs, errors.New("abuse burst threshold must be zero or positive"))
+	}
+	if c.AbuseBurstWindowSeconds <= 0 {
+		errs = append(errs, errors.New("abuse burst window seconds must be positive"))
+	}
+	if c.AbuseRotatingIPThreshold < 0 {
+		errs = append(errs, errors.New("abuse rotating IP threshold must be zero or positive"))
+	}
+	if c.AbuseAddressClusterThreshold < 0 {
+		errs = append(errs, errors.New("abuse address cluster threshold must be zero or positive"))
 	}
 	if c.AbuseSignalRetentionDays < 0 {
 		errs = append(errs, errors.New("abuse signal retention days must be zero or positive"))

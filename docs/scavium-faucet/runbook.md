@@ -243,7 +243,7 @@ Captcha verification failed. Check that `SCAVIUM_FAUCET_CAPTCHA_PROVIDER`, `SCAV
 
 ### Claim returns `403 claim_rejected`
 
-The request was blocked by the risk engine. In the current Phase 15 path this usually means progressive abuse enforcement found too many recent negative signals for the source IP, wallet address, or browser fingerprint. The response `details.reason` contains the rejection reason. Review `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_*` thresholds and the recent `abuse_signals` ledger before loosening controls.
+The request was blocked by the risk engine. In the Phase 27 path this can mean progressive negative-signal scoring, same-IP burst detection, same-fingerprint rotating IP behavior, address clustering, or an enabled honeypot challenge. The response `details.reason` contains only a bounded category. Review `SCAVIUM_FAUCET_ABUSE_*` thresholds and recent `abuse_signals` rows before loosening controls; do not copy raw IPs, addresses, fingerprints, or user agents into metric labels or public diagnostics.
 
 ### Claims disappear after restart
 

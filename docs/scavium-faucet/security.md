@@ -92,7 +92,7 @@ Phase 15.3 turns the Phase 15.2 signal ledger into a conservative runtime contro
 
 The default posture is intentionally gradual: enforcement is enabled, the lookback window is one hour, and thresholds are high enough to avoid interfering with ordinary users while still giving operators a production-safe brake during abuse bursts. A rejected request uses the existing `claim_rejected` error contract and records a `risk_rejected` abuse signal with the observed score, preserving API compatibility and extending the audit trail.
 
-Operators can disable the full enforcement layer with `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ENABLED=false`, or disable one scope by setting its threshold to `0`. This keeps Phase 15.3 deployable without schema changes, new external services, or direct backend exposure.
+Operators can disable the full enforcement layer with `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ENABLED=false`, or disable one scope by setting its threshold to `0`. Phase 27 keeps the model deterministic and local: progressive negative-signal scoring, same-IP burst detection, same-fingerprint rotating-IP detection, address clustering, and the optional honeypot all read bounded SQLite abuse signals only. No ASN, geolocation, external reputation service, raw metric label, or public detail leak is introduced.
 
 
 ### Daily budget enforcement
@@ -245,3 +245,8 @@ The public frontend remains dependency-free and CSP-compatible: JavaScript is st
 Explorer links are rendered defensively. The frontend requires an absolute HTTP(S) transaction URL template containing `{txHash}` and a syntactically valid EVM transaction hash before emitting an external link. Relative, non-HTTP(S), malformed templates, or malformed hashes suppress the link instead of constructing an unsafe URL.
 
 The in-page privacy and terms sections are safe defaults for the testnet faucet. They are not a substitute for legal review; operators with jurisdiction-specific requirements should replace the static copy or serve reviewed legal pages through nginx while preserving the no-secret/no-inline-script frontend posture.
+
+
+## Phase 27 advanced anti-abuse closure
+
+Phase 27 expands the risk engine without changing the public claim contract. The risk decision now includes an internal manual-review hint for operator diagnostics, but public callers still receive only normalized errors such as `claim_rejected`. The optional honeypot field is disabled by default and uses a compatibility-safe request body key (`website`); legacy clients that omit it continue to work. Burst, rotating-IP, and address-cluster heuristics are conservative score inputs backed by existing persisted `abuse_signals`, so old databases remain compatible and no migration is required.

@@ -100,6 +100,7 @@ type ClaimRequest struct {
 	UserAgent      string
 	CaptchaToken   string
 	Fingerprint    string
+	Honeypot       string
 }
 
 // TokenResponse is returned by public config and claim endpoints for token-aware clients.

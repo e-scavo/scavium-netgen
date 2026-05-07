@@ -28,6 +28,12 @@ Configuration is loaded from environment variables at startup via `internal/conf
 | `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_IP_THRESHOLD` | `20` | Negative signal threshold for a source IP within the enforcement window; `0` disables this scope |
 | `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_ADDRESS_THRESHOLD` | `12` | Negative signal threshold for a wallet address within the enforcement window; `0` disables this scope |
 | `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_FINGERPRINT_THRESHOLD` | `15` | Negative signal threshold for a browser fingerprint within the enforcement window; `0` disables this scope |
+| `SCAVIUM_FAUCET_ABUSE_RISK_SCORE_REJECT_THRESHOLD` | `5` | Composite Phase 27 score that converts conservative heuristics into `claim_rejected`; `0` falls back to `5` |
+| `SCAVIUM_FAUCET_ABUSE_BURST_THRESHOLD` | `25` | Recent same-IP activity threshold inside the burst window; `0` disables burst scoring |
+| `SCAVIUM_FAUCET_ABUSE_BURST_WINDOW_SECONDS` | `300` | Lookback window for burst detection |
+| `SCAVIUM_FAUCET_ABUSE_ROTATING_IP_THRESHOLD` | `8` | Distinct-IP count for the same fingerprint inside the enforcement window; `0` disables this heuristic |
+| `SCAVIUM_FAUCET_ABUSE_ADDRESS_CLUSTER_THRESHOLD` | `12` | Distinct-address count for the same fingerprint, or same IP when no fingerprint exists; `0` disables this heuristic |
+| `SCAVIUM_FAUCET_ABUSE_HONEYPOT_ENABLED` | `false` | Enables rejection when the optional compatibility-safe honeypot field is populated; disabled by default |
 | `SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS` | `30` | Number of days to retain rows in `abuse_signals`; expired rows are pruned at startup; `0` disables pruning |
 | `SCAVIUM_FAUCET_TRUSTED_PROXY` | empty | When set to the reverse proxy's IP, the handler extracts the real client IP from `X-Forwarded-For` / `X-Real-IP` via `internal/iputil`; used for rate limiting and logging |
 | `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` | empty | Comma-separated exact origins allowed for public API CORS; empty disables CORS headers; wildcard `*` is not allowed |
@@ -150,7 +156,7 @@ See [token-registration.md](token-registration.md) for the full testnet operator
 - Set `SCAVIUM_FAUCET_TRUSTED_PROXY` to the loopback or reverse proxy address so that IP-based rate limiting uses the real client IP rather than `127.0.0.1`.
 - Set `SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS` only to exact public origins that should call the API from browsers. Leave it empty to disable CORS headers; `*` is rejected.
 - `SCAVIUM_FAUCET_DAILY_BUDGET_WEI` is enforced against queued, sent, and confirmed claims and resets at UTC midnight.
-- `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_*` is intentionally conservative: it reads only negative abuse signals from the configured lookback window and rejects new claims only when a configured threshold is reached. Set a threshold to `0` to disable that specific scope while keeping the rest of the enforcement layer active.
+- `SCAVIUM_FAUCET_ABUSE_ENFORCEMENT_*` is intentionally conservative: it reads only negative abuse signals from the configured lookback window and contributes to a bounded risk score. Phase 27 adds burst, rotating-IP, address-cluster, and optional honeypot inputs, all derived from persisted `abuse_signals`; thresholds set to `0` disable the individual scope while keeping the rest of the enforcement layer active. Public responses remain the normalized `claim_rejected` envelope and never expose raw fingerprints, IPs, or cluster details.
 - In dry-run mode (`DRY_RUN=true`), the `PRIVATE_KEY` is not required; `DryRunSender` is used and no on-chain transactions are submitted.
 
 ## Phase 17.2 closure note
