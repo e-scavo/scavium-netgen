@@ -138,6 +138,7 @@ type RiskInput struct {
 	Fingerprint string
 	UserAgent   string
 	RequestedAt time.Time
+	Honeypot    string
 }
 
 // RiskDecision is the risk evaluation result for a request.
@@ -145,4 +146,5 @@ type RiskDecision struct {
 	Allowed bool
 	Score   int
 	Reason  string
+	Review  bool
 }
