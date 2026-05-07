@@ -329,7 +329,7 @@ func (s *InMemoryReadService) CreateClaim(_ context.Context, request ClaimReques
 			return claimResponse(s.claimsByID[claimID], idempotencyKey), nil
 		}
 	}
-	if err := s.verifyOptionalWalletProof(request); err != nil {
+	if err := s.verifyOptionalWalletProofLocked(request); err != nil {
 		return ClaimResponse{}, err
 	}
 
@@ -572,6 +572,12 @@ func randomID(prefix string) (string, error) {
 }
 
 func (s *InMemoryReadService) verifyOptionalWalletProof(request ClaimRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.verifyOptionalWalletProofLocked(request)
+}
+
+func (s *InMemoryReadService) verifyOptionalWalletProofLocked(request ClaimRequest) error {
 	challengeID := strings.TrimSpace(request.WalletChallengeID)
 	sig := strings.TrimSpace(request.WalletSignature)
 	if challengeID == "" && sig == "" {
@@ -580,13 +586,15 @@ func (s *InMemoryReadService) verifyOptionalWalletProof(request ClaimRequest) er
 	if challengeID == "" || sig == "" {
 		return claimError(ErrClaimRejected, "wallet_proof_incomplete")
 	}
-	c, err := s.getWalletChallenge(challengeID, request.Address)
-	if err != nil {
-		return err
+	c, ok := s.walletChallenges[challengeID]
+	if !ok || c.Address != request.Address || c.ConsumedAt != nil || !s.now().Before(c.ExpiresAt) {
+		return claimError(ErrClaimRejected, "invalid_wallet_challenge")
 	}
 	if err := verifyWalletSignature(request.Address, c.Message, sig); err != nil {
 		return err
 	}
-	_, err = s.consumeWalletChallenge(challengeID, request.Address)
-	return err
+	now := s.now()
+	c.ConsumedAt = &now
+	s.walletChallenges[c.ID] = c
+	return nil
 }
