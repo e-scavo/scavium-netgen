@@ -101,15 +101,15 @@ Recommended placeholder mapping:
 | `deployment-firewall.md` | VPS and edge firewall guide |
 | `deployment-rollback.md` | rollback procedure |
 | `../../scripts/deploy-scavium-faucet-safe.sh` | safe deploy helper; review mode by default |
-| `../../scripts/migrate-scavium-faucet-phase30.sh` | Phase 30 production migration helper that stages through a user-writable temp dir, executes privileged VPS changes through `REMOTE_SUDO`, verifies pre-migration backup, archives the previous direct binary when needed, supports release-symlink and legacy direct-binary layouts, runs smoke checks from the VPS through the configured nginx/TLS URL with separate public/admin timeouts, and rolls back the symlink or binary on failure |
+| `../../scripts/migrate-scavium-faucet-phase30.sh` | Phase 30 production migration helper that stages through a user-writable temp dir, executes privileged VPS changes through `REMOTE_SUDO`, preserves live env/nginx/systemd config, prints an advisory Phase 30 config audit, verifies pre-migration backup, archives the previous direct binary when needed, supports release-symlink and legacy direct-binary layouts, runs smoke checks from the VPS through the configured nginx/TLS URL with separate public/admin timeouts, and rolls back the symlink or binary on failure |
 
 ## Review-first deployment flow
 
 For an existing production faucet moving to the Phase 30 binary, prefer the dedicated [Phase 30 production migration runbook](deployment-phase30-migration.md). It wraps the same release-layout assumptions with a verified pre-migration SQLite/config backup, post-activation smoke checks, and automatic symlink rollback if validation fails.
 
 1. Build the binary outside the server and decide a `RELEASE_ID`.
-2. Review and fill the environment example with real values **outside the repository**.
-3. Review and render the systemd and nginx templates with your final paths and domain.
+2. Review and fill the environment example with real values **outside the repository**. Existing production env files are not overwritten by migration helpers.
+3. Review and render the systemd and nginx templates with your final paths and domain only for first install or intentional config replacement. The Phase 30 binary migrator does not install these templates.
 4. Use `scripts/deploy-scavium-faucet-safe.sh --plan` to inspect the exact staging commands.
 5. If the plan looks correct, run the same script with `--execute`.
 6. Install the reviewed systemd and nginx files manually on the VPS.

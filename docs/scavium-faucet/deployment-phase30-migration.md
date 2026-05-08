@@ -116,6 +116,23 @@ REMOTE_SUDO=''
 
 If the VPS requires a sudo password, run the script from an interactive terminal so the `ssh -tt` privileged step can display the prompt. If sudo is not permitted for the deploy user, provision the required sudoers access before migration rather than making release paths world-writable.
 
+
+## Configuration audit and template handling
+
+The migration helper preserves production configuration by default. It does not overwrite `/etc/scavium-faucet/scavium-faucet.env`, nginx site files, certbot files, firewall rules, or the installed systemd unit. This is intentional: production values such as RPC URLs, funded private keys, captcha secrets, admin tokens, and nginx TLS paths must remain operator-owned.
+
+During `--execute`, `CONFIG_AUDIT=yes` stages the repository env example only as an audit reference and prints warnings for Phase 30 keys that are not present in the live env file. Missing `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` is not a hard failure: keep it absent for legacy/native-only rollout, or add exact browser origins before enabling browser wallet challenge/proof flows. The audit also prints the active systemd `ExecStart` line and reminds the operator that nginx is preserved.
+
+Useful knobs:
+
+```bash
+CONFIG_AUDIT=yes \
+LOCAL_ENV_EXAMPLE=docs/scavium-faucet/deployment/scavium-faucet.env.example \
+PHASE30_ENV_KEYS=SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS
+```
+
+`deployment/scavium-faucet.nginx.conf.template` and `deployment/scavium-faucet.service.template` remain first-install/review templates. The Phase 30 migration script does not generate or install them. If the VPS already proxies `location /` to the loopback backend, no nginx path change is required for the new wallet endpoints. Update nginx manually only if the live site uses a restrictive allow-list of API paths, custom CSP/connect-src rules for a separate browser app origin, or a different upstream bind address.
+
 ## Post-migration validation
 
 After the helper succeeds, perform a second manual validation pass:

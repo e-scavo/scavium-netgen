@@ -41,6 +41,9 @@ Optional environment:
   SMOKE_TIMEOUT_SECONDS       Timeout for public smoke requests. Default: 15
   SMOKE_ADMIN_TIMEOUT_SECONDS Timeout for admin smoke requests. Default: 30
   SMOKE_RETRIES               Retry count for transient smoke curl failures. Default: 1
+  CONFIG_AUDIT                yes/no. Default: yes. Prints non-destructive env/systemd/nginx config guidance.
+  LOCAL_ENV_EXAMPLE           Local env reference staged for audit only. Default: docs/scavium-faucet/deployment/scavium-faucet.env.example
+  PHASE30_ENV_KEYS            Space-separated env keys to audit. Default: SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS
   MIGRATION_CONFIRM           Must be yes for --execute.
   KEEP_FAILED_RELEASE         yes/no. Default: yes
 
@@ -54,7 +57,8 @@ Safety:
   - A remote backup is created and verified before activation.
   - The DB remains outside the release directory.
   - If post-activation smoke fails, the previous symlink or direct binary is restored and the service is restarted.
-  - This script does not edit nginx, certbot, firewall, or secrets.
+  - This script does not edit nginx, certbot, firewall, systemd templates, env files, or secrets.
+  - Config audit is advisory only: it preserves production config and reports Phase 30 keys that may need manual activation.
 USAGE
 }
 
@@ -178,12 +182,18 @@ FAILURE_JOURNAL_LINES="${FAILURE_JOURNAL_LINES:-80}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-15}"
 SMOKE_ADMIN_TIMEOUT_SECONDS="${SMOKE_ADMIN_TIMEOUT_SECONDS:-30}"
 SMOKE_RETRIES="${SMOKE_RETRIES:-1}"
+CONFIG_AUDIT="${CONFIG_AUDIT:-yes}"
+LOCAL_ENV_EXAMPLE="${LOCAL_ENV_EXAMPLE:-docs/scavium-faucet/deployment/scavium-faucet.env.example}"
+PHASE30_ENV_KEYS="${PHASE30_ENV_KEYS:-SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS}"
 
 require_value DEPLOY_HOST
 require_value DEPLOY_USER
 require_value APP_PATH
 require_value LOCAL_BINARY
 require_file "$LOCAL_BINARY"
+if [[ "$CONFIG_AUDIT" == "yes" ]]; then
+    require_file "$LOCAL_ENV_EXAMPLE"
+fi
 
 if [[ "$MODE" == "--execute" ]]; then
     [[ "${MIGRATION_CONFIRM:-no}" == "yes" ]] || die "set MIGRATION_CONFIRM=yes to execute migration"
@@ -196,6 +206,7 @@ REMOTE_BINARY="${RELEASE_PATH}/scavium-faucet"
 LEGACY_BINARY_PATH="${APP_PATH}/bin/scavium-faucet"
 REMOTE_STAGED_BINARY="${REMOTE_STAGE_DIR}/scavium-faucet"
 REMOTE_STAGED_SCRIPT="${REMOTE_STAGE_DIR}/phase30-migration.sh"
+REMOTE_STAGED_ENV_EXAMPLE="${REMOTE_STAGE_DIR}/scavium-faucet.env.example"
 REMOTE_BACKUP_ID="${RELEASE_ID}-pre"
 REMOTE_BACKUP_BUNDLE="${REMOTE_BACKUP_DIR}/scavium-faucet-backup-${REMOTE_BACKUP_ID}.tar.gz"
 
@@ -218,6 +229,8 @@ Smoke base URL:       $SMOKE_BASE_URL
 Failure journal:      $FAILURE_JOURNAL_LINES lines
 Smoke timeout:        ${SMOKE_TIMEOUT_SECONDS}s public / ${SMOKE_ADMIN_TIMEOUT_SECONDS}s admin
 Smoke retries:        $SMOKE_RETRIES
+Config audit:         $CONFIG_AUDIT
+Phase 30 env keys:    $PHASE30_ENV_KEYS
 ======================================
 SUMMARY
 
@@ -245,6 +258,9 @@ failure_journal_lines="__FAILURE_JOURNAL_LINES__"
 smoke_timeout="__SMOKE_TIMEOUT_SECONDS__"
 smoke_admin_timeout="__SMOKE_ADMIN_TIMEOUT_SECONDS__"
 smoke_retries="__SMOKE_RETRIES__"
+config_audit="__CONFIG_AUDIT__"
+staged_env_example="__REMOTE_STAGED_ENV_EXAMPLE__"
+phase30_env_keys="__PHASE30_ENV_KEYS__"
 activation_started_utc=""
 
 fail() {
@@ -277,6 +293,38 @@ curl_probe() {
     done
 }
 
+env_key_present() {
+    local file="$1"
+    local key="$2"
+    grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}=" "$file"
+}
+
+print_config_audit() {
+    [[ "$config_audit" == "yes" ]] || return 0
+
+    echo "[migrate] config audit: production env/nginx/systemd are preserved; no config file will be modified"
+    if [[ -f "$staged_env_example" ]]; then
+        echo "[migrate] config audit: env reference staged from repository: $staged_env_example"
+    else
+        echo "[migrate] config audit warning: env reference not staged; skipping reference-file comparison" >&2
+    fi
+
+    local key
+    for key in $phase30_env_keys; do
+        if env_key_present "$env_file" "$key"; then
+            echo "[migrate] config audit: present in production env: $key"
+        else
+            echo "[migrate] config audit warning: missing optional Phase 30 env key: $key" >&2
+            echo "[migrate] config audit warning: keep it unset for legacy/native-only rollout, or add exact browser origins before browser wallet proof flows go public" >&2
+        fi
+    done
+
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl cat "${svc}.service" 2>/dev/null | grep -E '^[[:space:]]*ExecStart=' | tail -1 | sed 's/^/[migrate] config audit: active systemd /' || true
+    fi
+    echo "[migrate] config audit: nginx is not rewritten by this migration; keep existing TLS/proxy config unless you intentionally apply the reviewed template manually"
+}
+
 print_failure_journal() {
     if [[ -n "$activation_started_utc" ]]; then
         echo "[migrate] service journal since activation ${activation_started_utc} (last ${failure_journal_lines} lines):" >&2
@@ -296,6 +344,8 @@ command -v tar >/dev/null 2>&1 || fail "tar not installed"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum not installed"
 command -v curl >/dev/null 2>&1 || fail "curl not installed"
 command -v systemctl >/dev/null 2>&1 || fail "systemctl not installed"
+
+print_config_audit
 
 activation_mode=""
 previous_target=""
@@ -472,10 +522,17 @@ REMOTE_SCRIPT=${REMOTE_SCRIPT//__FAILURE_JOURNAL_LINES__/$FAILURE_JOURNAL_LINES}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_TIMEOUT_SECONDS__/$SMOKE_TIMEOUT_SECONDS}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_ADMIN_TIMEOUT_SECONDS__/$SMOKE_ADMIN_TIMEOUT_SECONDS}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_RETRIES__/$SMOKE_RETRIES}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__CONFIG_AUDIT__/$CONFIG_AUDIT}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_STAGED_ENV_EXAMPLE__/$REMOTE_STAGED_ENV_EXAMPLE}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__PHASE30_ENV_KEYS__/$PHASE30_ENV_KEYS}
 
 run_remote "rm -rf $(quote_sq "$REMOTE_STAGE_DIR") && mkdir -p $(quote_sq "$REMOTE_STAGE_DIR") && chmod 0700 $(quote_sq "$REMOTE_STAGE_DIR")"
 copy_remote "$LOCAL_BINARY" "$REMOTE_STAGED_BINARY"
 run_remote "chmod 0755 $(quote_sq "$REMOTE_STAGED_BINARY")"
+if [[ "$CONFIG_AUDIT" == "yes" ]]; then
+    copy_remote "$LOCAL_ENV_EXAMPLE" "$REMOTE_STAGED_ENV_EXAMPLE"
+    run_remote "chmod 0600 $(quote_sq "$REMOTE_STAGED_ENV_EXAMPLE")"
+fi
 copy_text_remote "$REMOTE_SCRIPT" "$REMOTE_STAGED_SCRIPT"
 run_remote "chmod 0600 $(quote_sq "$REMOTE_STAGED_SCRIPT")"
 
