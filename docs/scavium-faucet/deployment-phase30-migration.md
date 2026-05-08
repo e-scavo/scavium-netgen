@@ -1,6 +1,6 @@
 # Phase 30 production migration runbook
 
-This runbook upgrades an existing production `scavium-faucet` deployment to the Phase 30 binary while preserving the durable SQLite database, the reviewed environment file, the nginx/TLS perimeter, and the previous binary release for rollback.
+This runbook upgrades an existing production `scavium-faucet` deployment to the Phase 30 binary while preserving the durable SQLite database, the reviewed environment file, the nginx/TLS perimeter, and the previous binary/release rollback material.
 
 Phase 30 adds optional wallet challenge/proof functionality. It does **not** break legacy claim clients: requests that omit `wallet_challenge_id` and `wallet_signature` continue through the existing claim path. Browser wallet integrations must use an explicitly allowed origin when the operator enables `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS`; native, desktop, mobile, CLI, and server-to-server clients that do not send `Origin` remain supported.
 
@@ -88,6 +88,7 @@ The helper performs the following sequence:
    - WAL/SHM companions when a direct copy fallback is needed
    - the reviewed environment file
    - manifest with previous/new release metadata
+   - previous direct binary as `binary/scavium-faucet.previous` when migrating a legacy/direct deployment
 6. repoints `current` to the new release when using the release layout; direct-binary deployments are already replaced in place
 7. restarts systemd
 8. smoke-checks `/health`, `/ready`, `/api/v1/status`, and `/api/v1/tokens` from the VPS against `SMOKE_BASE_URL` using `SMOKE_TIMEOUT_SECONDS` (default `15`) and `SMOKE_RETRIES` (default `1`)
@@ -154,7 +155,7 @@ curl -fsS https://faucet.testnet.scavium.network/health
 curl -fsS https://faucet.testnet.scavium.network/ready
 ```
 
-If data/config restoration is required, use the pre-migration backup bundle reported by the helper with `scripts/scavium-faucet-restore.sh` from the same source tree, while the service is stopped.
+If data/config restoration is required, use the pre-migration backup bundle reported by the helper with `scripts/scavium-faucet-restore.sh` from the same source tree, while the service is stopped. For legacy/direct binary deployments, the same backup bundle also contains `binary/scavium-faucet.previous`; extract it and install it back to `/opt/scavium-faucet/bin/scavium-faucet` with mode `0755` if a later manual binary rollback is needed after a successful migration.
 
 ## Edge cases to watch
 

@@ -333,6 +333,11 @@ work_dir="${backup_dir}/.work-${backup_id}"
 rm -rf "$work_dir"
 umask 077
 mkdir -p "$work_dir/db" "$work_dir/config" "$backup_dir"
+if [[ "$activation_mode" == "direct_binary" ]]; then
+    mkdir -p "$work_dir/binary"
+    cp -p "$previous_direct_backup" "$work_dir/binary/scavium-faucet.previous"
+    chmod 0755 "$work_dir/binary/scavium-faucet.previous"
+fi
 
 if command -v sqlite3 >/dev/null 2>&1; then
     sqlite3 "$db_path" ".backup '${work_dir}/db/scavium-faucet.db'"
@@ -354,6 +359,7 @@ activation_mode=$activation_mode
 previous_target=$previous_target
 new_release=$release_path
 legacy_binary=$legacy_binary
+previous_direct_binary_backup=binary/scavium-faucet.previous when activation_mode=direct_binary
 service=$svc
 notes=Backup may contain secrets from the env file. Keep it encrypted/restricted.
 MANIFEST
@@ -438,6 +444,9 @@ else
     echo "[migrate] active binary: $legacy_binary"
 fi
 echo "[migrate] rollback target: $previous_target"
+if [[ "$activation_mode" == "direct_binary" ]]; then
+    echo "[migrate] previous direct binary archived in backup bundle: binary/scavium-faucet.previous"
+fi
 echo "[migrate] backup bundle: $backup_bundle"
 REMOTE
 )
