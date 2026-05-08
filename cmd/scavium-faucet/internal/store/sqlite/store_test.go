@@ -52,6 +52,84 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	}
 }
 
+func TestMigrateHandlesPartiallyAppliedAddColumnMigrations(t *testing.T) {
+	db, err := sql.Open("sqlite", sqliteDSN(testDatabasePath(t, "partial.db")))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	// Reproduce a production database that has already received some ALTER TABLE
+	// columns but does not have the schema_migrations rows for those migrations.
+	// Phase 30 must finish the missing columns/indexes instead of crashing on the
+	// first duplicate column name.
+	_, err = db.Exec(`
+		CREATE TABLE requests (
+			id TEXT PRIMARY KEY,
+			address TEXT NOT NULL,
+			amount_wei TEXT NOT NULL,
+			status TEXT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			idempotency_key TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at TEXT,
+			token_id TEXT NOT NULL DEFAULT 'native',
+			UNIQUE(idempotency_key)
+		);
+		CREATE TABLE transactions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			request_id TEXT NOT NULL,
+			tx_hash TEXT NOT NULL UNIQUE,
+			from_address TEXT NOT NULL,
+			to_address TEXT NOT NULL,
+			value_wei TEXT NOT NULL,
+			status TEXT NOT NULL,
+			block_number INTEGER NOT NULL DEFAULT 0,
+			gas_used INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			token_id TEXT NOT NULL DEFAULT 'native'
+		);
+		CREATE TABLE rate_limits (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			limit_key TEXT NOT NULL,
+			window_start TEXT NOT NULL,
+			window_seconds INTEGER NOT NULL,
+			count INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE(limit_key, window_start, window_seconds)
+		);
+		CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+	`)
+	if err != nil {
+		t.Fatalf("seed partial schema: %v", err)
+	}
+
+	store := New(db)
+	if err := store.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate partial schema: %v", err)
+	}
+
+	for _, column := range []string{"token_id", "token_symbol", "token_type", "token_address", "token_decimals", "campaign_id", "invitation_code"} {
+		if !columnExists(t, db, "requests", column) {
+			t.Fatalf("requests.%s does not exist", column)
+		}
+	}
+	for _, column := range []string{"token_id", "token_symbol", "token_type", "token_address", "token_decimals"} {
+		if !columnExists(t, db, "transactions", column) {
+			t.Fatalf("transactions.%s does not exist", column)
+		}
+	}
+	for _, migration := range []string{"002_queue.sql", "004_token_claim_metadata.sql", "008_campaigns_allowlists_invites.sql"} {
+		if !migrationRecorded(t, db, migration) {
+			t.Fatalf("migration %s was not recorded", migration)
+		}
+	}
+}
+
 func TestCreateAndGetClaim(t *testing.T) {
 	store := openTempStore(t)
 	defer store.Close()
@@ -1022,6 +1100,43 @@ func indexExists(t *testing.T, db *sql.DB, index string) bool {
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&count); err != nil {
 		t.Fatalf("query index %s: %v", index, err)
+	}
+	return count == 1
+}
+
+func columnExists(t *testing.T, db *sql.DB, table string, column string) bool {
+	t.Helper()
+
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		t.Fatalf("query columns for %s: %v", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan column for %s: %v", table, err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate columns for %s: %v", table, err)
+	}
+	return false
+}
+
+func migrationRecorded(t *testing.T, db *sql.DB, migration string) bool {
+	t.Helper()
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name = ?`, migration).Scan(&count); err != nil {
+		t.Fatalf("query migration %s: %v", migration, err)
 	}
 	return count == 1
 }

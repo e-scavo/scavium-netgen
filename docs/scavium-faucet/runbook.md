@@ -685,3 +685,8 @@ curl -s -X DELETE -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
 ```
 
 After a change, check `/api/v1/config`, `/api/v1/tokens`, an address eligibility response, and `/api/v1/admin/audit?limit=20`. The public token catalog reflects runtime daily-budget overrides for the same claim-safe budget fields exposed by `/api/v1/config`, so it should not drift from policy enforcement after an admin update. Do not use runtime policy for secrets, RPC endpoints, token contract metadata, or signer configuration; those remain restart-managed.
+
+
+## Phase 30 SQLite migration startup failure
+
+If a Phase 30 migration causes nginx `502` responses and the service journal shows an error similar to `apply migration 004_token_claim_metadata.sql: duplicate column name: token_id`, the backend failed during SQLite startup migration. The migration runner in the current source handles partially applied `ALTER TABLE ... ADD COLUMN` migrations idempotently: it skips duplicate-column additions, applies remaining missing columns/indexes, and records the migration only after the full transaction succeeds. Rebuild the binary from this source and rerun `scripts/migrate-scavium-faucet-phase30.sh --execute`; the helper will keep taking a pre-migration backup and will roll back the previous binary if smoke still fails.

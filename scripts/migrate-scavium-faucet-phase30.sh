@@ -37,6 +37,7 @@ Optional environment:
                               Set explicitly to http://127.0.0.1:18080 only when the service is known to listen there.
   SMOKE_ADMIN_CHECKS          yes/no. Default: yes when ADMIN token can be read by root from REMOTE_ENV_FILE
   POST_ACTIVATION_SLEEP       Seconds to wait before smoke. Default: 2
+  FAILURE_JOURNAL_LINES       Journal lines printed before rollback on smoke failure. Default: 80
   MIGRATION_CONFIRM           Must be yes for --execute.
   KEEP_FAILED_RELEASE         yes/no. Default: yes
 
@@ -170,6 +171,7 @@ SMOKE_BASE_URL="${SMOKE_BASE_URL:-${LOCAL_BASE_URL:-https://${DEPLOY_HOST}}}"
 SMOKE_ADMIN_CHECKS="${SMOKE_ADMIN_CHECKS:-yes}"
 POST_ACTIVATION_SLEEP="${POST_ACTIVATION_SLEEP:-2}"
 KEEP_FAILED_RELEASE="${KEEP_FAILED_RELEASE:-yes}"
+FAILURE_JOURNAL_LINES="${FAILURE_JOURNAL_LINES:-80}"
 
 require_value DEPLOY_HOST
 require_value DEPLOY_USER
@@ -207,6 +209,7 @@ DB path:              $REMOTE_DB_PATH
 Env file:             $REMOTE_ENV_FILE
 Backup bundle:        $REMOTE_BACKUP_BUNDLE
 Smoke base URL:       $SMOKE_BASE_URL
+Failure journal:      $FAILURE_JOURNAL_LINES lines
 ======================================
 SUMMARY
 
@@ -230,6 +233,7 @@ smoke_admin="__SMOKE_ADMIN_CHECKS__"
 post_sleep="__POST_ACTIVATION_SLEEP__"
 keep_failed="__KEEP_FAILED_RELEASE__"
 remote_stage_dir="__REMOTE_STAGE_DIR__"
+failure_journal_lines="__FAILURE_JOURNAL_LINES__"
 
 fail() {
     echo "[migrate] ERROR: $*" >&2
@@ -242,6 +246,11 @@ curl_probe() {
     shift 2
     echo "[migrate] smoke: $name"
     curl -fsS --max-time 8 "$@" "$url" >/dev/null
+}
+
+print_failure_journal() {
+    echo "[migrate] service journal before rollback (last ${failure_journal_lines} lines):" >&2
+    journalctl -u "${svc}.service" -n "$failure_journal_lines" --no-pager >&2 || true
 }
 
 [[ "$(id -u)" -eq 0 ]] || fail "privileged migration script must run as root; set REMOTE_SUDO=sudo or run with a root DEPLOY_USER"
@@ -367,6 +376,7 @@ fi
 set -e
 
 if [[ "$health_rc" -ne 0 || "$ready_rc" -ne 0 || "$status_rc" -ne 0 || "$tokens_rc" -ne 0 || "$admin_rc" -ne 0 ]]; then
+    print_failure_journal
     if [[ "$activation_mode" == "release_symlink" ]]; then
         echo "[migrate] smoke failed; rolling back symlink to $previous_target" >&2
         ln -sfn "$previous_target" "$current_path"
@@ -414,6 +424,7 @@ REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_ADMIN_CHECKS__/$SMOKE_ADMIN_CHECKS}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__POST_ACTIVATION_SLEEP__/$POST_ACTIVATION_SLEEP}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__KEEP_FAILED_RELEASE__/$KEEP_FAILED_RELEASE}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_STAGE_DIR__/$REMOTE_STAGE_DIR}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__FAILURE_JOURNAL_LINES__/$FAILURE_JOURNAL_LINES}
 
 run_remote "rm -rf $(quote_sq "$REMOTE_STAGE_DIR") && mkdir -p $(quote_sq "$REMOTE_STAGE_DIR") && chmod 0700 $(quote_sq "$REMOTE_STAGE_DIR")"
 copy_remote "$LOCAL_BINARY" "$REMOTE_STAGED_BINARY"

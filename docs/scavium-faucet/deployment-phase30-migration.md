@@ -92,7 +92,8 @@ The helper performs the following sequence:
 7. restarts systemd
 8. smoke-checks `/health`, `/ready`, `/api/v1/status`, and `/api/v1/tokens` from the VPS against `SMOKE_BASE_URL`
 9. when the admin token is readable from the env file, smoke-checks `/api/v1/admin/runtime` and `/api/v1/admin/wallet`
-10. automatically restores the previous symlink or previous direct binary and restarts the service if smoke fails
+10. if smoke fails, prints the latest `journalctl -u scavium-faucet.service` lines before rollback so startup failures such as SQLite migration errors are visible in the operator terminal
+11. automatically restores the previous symlink or previous direct binary and restarts the service if smoke fails
 
 
 ## Sudo and non-root VPS users
@@ -158,7 +159,8 @@ If data/config restoration is required, use the pre-migration backup bundle repo
 ## Edge cases to watch
 
 - If `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` is set, browser challenge/proof requests from non-listed origins should fail; legacy claims without wallet proof fields should not be blocked by this setting.
-- If `/ready` fails after activation, inspect DB path permissions, RPC chain-id compatibility, faucet wallet balance, and watcher/worker logs before retrying.
+- If all smoke checks return nginx `502`, treat it as a backend startup/listen failure first. Inspect the journal lines printed by the migration helper; a common Phase 30 failure mode on older production databases is a partially applied SQLite migration without the corresponding `schema_migrations` row. The Phase 30 migrator now tolerates already-existing `ALTER TABLE ... ADD COLUMN` columns and continues adding any missing columns before recording the migration.
+- If `/ready` fails after activation while `/health` succeeds, inspect DB path permissions, RPC chain-id compatibility, faucet wallet balance, and watcher/worker logs before retrying.
 - If admin smoke is skipped because the env file is not readable by the SSH user, validate admin endpoints manually with the token from the operator secret store.
 - Do not move the SQLite database into the release directory; rollbacks must switch binaries without losing queue, challenge, audit, campaign, allowlist, invitation, runtime policy, or claim state.
 
@@ -171,3 +173,7 @@ SMOKE_BASE_URL=https://faucet.testnet.scavium.network
 ```
 
 `LOCAL_BASE_URL` remains accepted as a backward-compatible alias only.
+
+## SQLite migration idempotency note
+
+Production databases may have been upgraded by older binaries before `schema_migrations` was fully populated. In that state, columns such as `requests.token_id` can already exist while `004_token_claim_metadata.sql` is still considered pending. Phase 30's SQLite migration runner executes pending migration statements in a transaction and treats duplicate-column errors from `ALTER TABLE ... ADD COLUMN` as already-applied column additions, then continues with the remaining statements and records the migration only after the full migration completes. Non-duplicate DDL errors remain fatal and trigger the normal binary rollback path.

@@ -135,15 +135,61 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
-		if _, err := s.db.ExecContext(ctx, string(sqlText)); err != nil {
-			return fmt.Errorf("apply migration %s: %w", name, err)
-		}
-		if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, formatTime(time.Now().UTC())); err != nil {
-			return fmt.Errorf("record migration %s: %w", name, err)
+		if err := s.applyMigration(ctx, name, string(sqlText)); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func (s *Store) applyMigration(ctx context.Context, name string, sqlText string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration %s: %w", name, err)
+	}
+	defer tx.Rollback()
+
+	for _, stmt := range splitMigrationStatements(sqlText) {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			if isAlreadyAppliedAddColumn(stmt, err) {
+				continue
+			}
+			return fmt.Errorf("apply migration %s: %w", name, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, formatTime(time.Now().UTC())); err != nil {
+		return fmt.Errorf("record migration %s: %w", name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration %s: %w", name, err)
+	}
+	return nil
+}
+
+func splitMigrationStatements(sqlText string) []string {
+	parts := strings.Split(sqlText, ";")
+	statements := make([]string, 0, len(parts))
+	for _, part := range parts {
+		stmt := strings.TrimSpace(part)
+		if stmt == "" || strings.HasPrefix(stmt, "--") {
+			continue
+		}
+		statements = append(statements, stmt)
+	}
+	return statements
+}
+
+func isAlreadyAppliedAddColumn(stmt string, err error) bool {
+	if err == nil {
+		return false
+	}
+	normalized := strings.ToUpper(strings.Join(strings.Fields(stmt), " "))
+	if !strings.HasPrefix(normalized, "ALTER TABLE ") || !strings.Contains(normalized, " ADD COLUMN ") {
+		return false
+	}
+	errText := strings.ToLower(err.Error())
+	return strings.Contains(errText, "duplicate column name")
 }
 
 // RecordAbuseSignal persists a production-safe anti-abuse signal.  Signal

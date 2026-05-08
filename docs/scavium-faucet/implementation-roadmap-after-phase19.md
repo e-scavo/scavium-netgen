@@ -201,8 +201,8 @@ Closure scope:
 - Short-lived persisted challenges with expiry, replay resistance, and in-memory fallback behavior.
 - Optional Ethereum personal-sign verification on `POST /api/v1/claim` through `wallet_challenge_id` + `wallet_signature`; legacy clients remain compatible when both fields are omitted.
 - Configurable app-origin defense-in-depth through `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS`; missing `Origin` remains allowed for native/CLI clients.
-- Docs, OpenAPI, tests, and SQLite migration updated.
-- Phase 30 production migration helper and runbook added for replacing the live binary with verified pre-backup, smoke validation, and symlink rollback guardrails.
+- Docs, OpenAPI, tests, and SQLite migration updated; SQLite startup migrations are now defensive against partially applied `ALTER TABLE ... ADD COLUMN` migrations on production databases missing historical `schema_migrations` rows.
+- Phase 30 production migration helper and runbook added for replacing the live binary with verified pre-backup, smoke validation, journal-assisted failure diagnosis, and symlink/direct-binary rollback guardrails.
 - Post-Copilot audit fixes aligned `/api/v1/tokens` with runtime policy, protected failed enqueue attempts from leaving orphan `received` claims, hardened duplicate campaign/invitation race error mapping, tightened in-memory AddressStatus cooldown parity, and refreshed maintained documentation so the fix 7 hardening is discoverable and the Phase 30 closure status is consistent through fix 9.
 
 Deferred professional-scale wallet backlog remains explicit: multi-wallet UX negotiation, multi-network routing, external wallet-provider webhooks, HA/distributed challenge stores beyond SQLite, and production origin presets.
