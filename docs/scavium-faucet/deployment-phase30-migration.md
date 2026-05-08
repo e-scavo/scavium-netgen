@@ -117,21 +117,39 @@ REMOTE_SUDO=''
 If the VPS requires a sudo password, run the script from an interactive terminal so the `ssh -tt` privileged step can display the prompt. If sudo is not permitted for the deploy user, provision the required sudoers access before migration rather than making release paths world-writable.
 
 
-## Configuration audit and template handling
+## Configuration candidate migration
 
-The migration helper preserves production configuration by default. It does not overwrite `/etc/scavium-faucet/scavium-faucet.env`, nginx site files, certbot files, firewall rules, or the installed systemd unit. This is intentional: production values such as RPC URLs, funded private keys, captcha secrets, admin tokens, and nginx TLS paths must remain operator-owned.
+The migration helper treats production configuration as versioned operational state. By default it still preserves `/etc/scavium-faucet/scavium-faucet.env`, nginx site files, certbot files, firewall rules, and the installed systemd unit, but it now stages the repository env/nginx references on the VPS and generates root-readable candidates next to the active files. This gives operators an exact diff without copying secrets back to the workstation.
 
-During `--execute`, `CONFIG_AUDIT=yes` stages the repository env example only as an audit reference and prints warnings for Phase 30 keys that are not present in the live env file. Missing `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` is not a hard failure: keep it absent for legacy/native-only rollout, or add exact browser origins before enabling browser wallet challenge/proof flows. The audit also prints the active systemd `ExecStart` line and reminds the operator that nginx is preserved.
+For the env file, the candidate is produced from `docs/scavium-faucet/deployment/scavium-faucet.env.example`: active production values are carried forward when the same key exists in the current template, new template keys remain in their documented/default/commented form, and active production keys that no longer exist in the current template are appended as `# legacy:` comments. This leaves an audit trail of previous settings without silently keeping obsolete configuration live.
 
-Useful knobs:
+For nginx, the repository template is staged as `${REMOTE_NGINX_SITE}.phase30-candidate` so the operator can inspect security headers, CSP, upstream, timeout, and proxy differences. The systemd template remains first-install/reference material and is not generated or installed by the Phase 30 migrator unless a separate manual first-install flow is being followed.
+
+Default candidate-only flow:
 
 ```bash
-CONFIG_AUDIT=yes \
+CONFIG_CANDIDATES=yes \
 LOCAL_ENV_EXAMPLE=docs/scavium-faucet/deployment/scavium-faucet.env.example \
+LOCAL_NGINX_TEMPLATE=docs/scavium-faucet/deployment/scavium-faucet.nginx.conf.template \
+REMOTE_NGINX_SITE=/etc/nginx/sites-available/scavium-faucet \
 PHASE30_ENV_KEYS=SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS
 ```
 
-`deployment/scavium-faucet.nginx.conf.template` and `deployment/scavium-faucet.service.template` remain first-install/review templates. The Phase 30 migration script does not generate or install them. If the VPS already proxies `location /` to the loopback backend, no nginx path change is required for the new wallet endpoints. Update nginx manually only if the live site uses a restrictive allow-list of API paths, custom CSP/connect-src rules for a separate browser app origin, or a different upstream bind address.
+After a successful run, review on the VPS:
+
+```bash
+sudo diff -u /etc/scavium-faucet/scavium-faucet.env /etc/scavium-faucet/scavium-faucet.env.phase30-candidate
+sudo diff -u /etc/nginx/sites-available/scavium-faucet /etc/nginx/sites-available/scavium-faucet.phase30-candidate
+```
+
+Optional apply mode is explicit:
+
+```bash
+APPLY_ENV_CANDIDATE=yes       # install generated env candidate before service restart
+APPLY_NGINX_CANDIDATE=yes     # install staged nginx candidate, run nginx -t, then reload nginx
+```
+
+If smoke validation fails after candidates were applied, the helper restores the previous env/nginx files from staging before rolling back the binary/symlink and restarting the service. The pre-migration backup bundle also includes the live env, live nginx site when present, and generated candidates for later manual recovery/review. Missing `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` remains non-fatal: keep it absent for legacy/native-only rollout, or add exact browser origins before enabling browser wallet challenge/proof flows.
 
 ## Post-migration validation
 

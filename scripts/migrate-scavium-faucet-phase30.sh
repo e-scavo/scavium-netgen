@@ -41,8 +41,13 @@ Optional environment:
   SMOKE_TIMEOUT_SECONDS       Timeout for public smoke requests. Default: 15
   SMOKE_ADMIN_TIMEOUT_SECONDS Timeout for admin smoke requests. Default: 30
   SMOKE_RETRIES               Retry count for transient smoke curl failures. Default: 1
-  CONFIG_AUDIT                yes/no. Default: yes. Prints non-destructive env/systemd/nginx config guidance.
-  LOCAL_ENV_EXAMPLE           Local env reference staged for audit only. Default: docs/scavium-faucet/deployment/scavium-faucet.env.example
+  CONFIG_AUDIT                yes/no. Default: yes. Backward-compatible alias for config candidate generation.
+  CONFIG_CANDIDATES           yes/no. Default: CONFIG_AUDIT. Stages current repository env/nginx templates and generates VPS-side candidates.
+  APPLY_ENV_CANDIDATE         yes/no. Default: no. When yes, installs the generated env candidate after backup and before restart.
+  APPLY_NGINX_CANDIDATE       yes/no. Default: no. When yes, installs the staged nginx candidate, validates nginx -t, and reloads nginx.
+  REMOTE_NGINX_SITE           Active nginx site to compare/apply. Default: /etc/nginx/sites-available/scavium-faucet
+  LOCAL_ENV_EXAMPLE           Local env reference used for candidate merge. Default: docs/scavium-faucet/deployment/scavium-faucet.env.example
+  LOCAL_NGINX_TEMPLATE        Local nginx reference staged as candidate. Default: docs/scavium-faucet/deployment/scavium-faucet.nginx.conf.template
   PHASE30_ENV_KEYS            Space-separated env keys to audit. Default: SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS
   MIGRATION_CONFIRM           Must be yes for --execute.
   KEEP_FAILED_RELEASE         yes/no. Default: yes
@@ -57,8 +62,10 @@ Safety:
   - A remote backup is created and verified before activation.
   - The DB remains outside the release directory.
   - If post-activation smoke fails, the previous symlink or direct binary is restored and the service is restarted.
-  - This script does not edit nginx, certbot, firewall, systemd templates, env files, or secrets.
-  - Config audit is advisory only: it preserves production config and reports Phase 30 keys that may need manual activation.
+  - By default this script does not overwrite nginx, certbot, firewall, systemd templates, env files, or secrets.
+  - It can generate root-readable env/nginx candidate files on the VPS so operators can review exact differences without copying secrets back locally.
+  - Env candidates preserve active values for keys still present in the new template, keep new template keys as-is, and append legacy active keys as comments when they no longer exist in the new template.
+  - Env/nginx candidates are applied only with APPLY_ENV_CANDIDATE=yes and/or APPLY_NGINX_CANDIDATE=yes.
 USAGE
 }
 
@@ -183,7 +190,12 @@ SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-15}"
 SMOKE_ADMIN_TIMEOUT_SECONDS="${SMOKE_ADMIN_TIMEOUT_SECONDS:-30}"
 SMOKE_RETRIES="${SMOKE_RETRIES:-1}"
 CONFIG_AUDIT="${CONFIG_AUDIT:-yes}"
+CONFIG_CANDIDATES="${CONFIG_CANDIDATES:-$CONFIG_AUDIT}"
+APPLY_ENV_CANDIDATE="${APPLY_ENV_CANDIDATE:-no}"
+APPLY_NGINX_CANDIDATE="${APPLY_NGINX_CANDIDATE:-no}"
+REMOTE_NGINX_SITE="${REMOTE_NGINX_SITE:-/etc/nginx/sites-available/scavium-faucet}"
 LOCAL_ENV_EXAMPLE="${LOCAL_ENV_EXAMPLE:-docs/scavium-faucet/deployment/scavium-faucet.env.example}"
+LOCAL_NGINX_TEMPLATE="${LOCAL_NGINX_TEMPLATE:-docs/scavium-faucet/deployment/scavium-faucet.nginx.conf.template}"
 PHASE30_ENV_KEYS="${PHASE30_ENV_KEYS:-SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS}"
 
 require_value DEPLOY_HOST
@@ -191,8 +203,9 @@ require_value DEPLOY_USER
 require_value APP_PATH
 require_value LOCAL_BINARY
 require_file "$LOCAL_BINARY"
-if [[ "$CONFIG_AUDIT" == "yes" ]]; then
+if [[ "$CONFIG_CANDIDATES" == "yes" ]]; then
     require_file "$LOCAL_ENV_EXAMPLE"
+    require_file "$LOCAL_NGINX_TEMPLATE"
 fi
 
 if [[ "$MODE" == "--execute" ]]; then
@@ -207,6 +220,7 @@ LEGACY_BINARY_PATH="${APP_PATH}/bin/scavium-faucet"
 REMOTE_STAGED_BINARY="${REMOTE_STAGE_DIR}/scavium-faucet"
 REMOTE_STAGED_SCRIPT="${REMOTE_STAGE_DIR}/phase30-migration.sh"
 REMOTE_STAGED_ENV_EXAMPLE="${REMOTE_STAGE_DIR}/scavium-faucet.env.example"
+REMOTE_STAGED_NGINX_TEMPLATE="${REMOTE_STAGE_DIR}/scavium-faucet.nginx.conf.template"
 REMOTE_BACKUP_ID="${RELEASE_ID}-pre"
 REMOTE_BACKUP_BUNDLE="${REMOTE_BACKUP_DIR}/scavium-faucet-backup-${REMOTE_BACKUP_ID}.tar.gz"
 
@@ -229,7 +243,10 @@ Smoke base URL:       $SMOKE_BASE_URL
 Failure journal:      $FAILURE_JOURNAL_LINES lines
 Smoke timeout:        ${SMOKE_TIMEOUT_SECONDS}s public / ${SMOKE_ADMIN_TIMEOUT_SECONDS}s admin
 Smoke retries:        $SMOKE_RETRIES
-Config audit:         $CONFIG_AUDIT
+Config candidates:    $CONFIG_CANDIDATES
+Apply env candidate:  $APPLY_ENV_CANDIDATE
+Apply nginx candidate:$APPLY_NGINX_CANDIDATE
+Nginx site:           $REMOTE_NGINX_SITE
 Phase 30 env keys:    $PHASE30_ENV_KEYS
 ======================================
 SUMMARY
@@ -260,8 +277,19 @@ smoke_admin_timeout="__SMOKE_ADMIN_TIMEOUT_SECONDS__"
 smoke_retries="__SMOKE_RETRIES__"
 config_audit="__CONFIG_AUDIT__"
 staged_env_example="__REMOTE_STAGED_ENV_EXAMPLE__"
+staged_nginx_template="__REMOTE_STAGED_NGINX_TEMPLATE__"
+remote_nginx_site="__REMOTE_NGINX_SITE__"
+config_candidates="__CONFIG_CANDIDATES__"
+apply_env_candidate="__APPLY_ENV_CANDIDATE__"
+apply_nginx_candidate="__APPLY_NGINX_CANDIDATE__"
 phase30_env_keys="__PHASE30_ENV_KEYS__"
 activation_started_utc=""
+env_candidate=""
+nginx_candidate=""
+env_pre_apply_backup="${remote_stage_dir}/scavium-faucet.env.pre-apply"
+nginx_pre_apply_backup="${remote_stage_dir}/scavium-faucet.nginx.pre-apply"
+env_candidate_applied="no"
+nginx_candidate_applied="no"
 
 fail() {
     echo "[migrate] ERROR: $*" >&2
@@ -300,13 +328,18 @@ env_key_present() {
 }
 
 print_config_audit() {
-    [[ "$config_audit" == "yes" ]] || return 0
+    [[ "$config_candidates" == "yes" ]] || return 0
 
-    echo "[migrate] config audit: production env/nginx/systemd are preserved; no config file will be modified"
+    echo "[migrate] config candidates: production env/nginx/systemd are preserved unless APPLY_ENV_CANDIDATE=yes or APPLY_NGINX_CANDIDATE=yes"
     if [[ -f "$staged_env_example" ]]; then
-        echo "[migrate] config audit: env reference staged from repository: $staged_env_example"
+        echo "[migrate] config candidates: env reference staged from repository: $staged_env_example"
     else
-        echo "[migrate] config audit warning: env reference not staged; skipping reference-file comparison" >&2
+        echo "[migrate] config candidates warning: env reference not staged; skipping env candidate generation" >&2
+    fi
+    if [[ -f "$staged_nginx_template" ]]; then
+        echo "[migrate] config candidates: nginx reference staged from repository: $staged_nginx_template"
+    else
+        echo "[migrate] config candidates warning: nginx reference not staged; skipping nginx candidate generation" >&2
     fi
 
     local key
@@ -322,7 +355,126 @@ print_config_audit() {
     if command -v systemctl >/dev/null 2>&1; then
         systemctl cat "${svc}.service" 2>/dev/null | grep -E '^[[:space:]]*ExecStart=' | tail -1 | sed 's/^/[migrate] config audit: active systemd /' || true
     fi
-    echo "[migrate] config audit: nginx is not rewritten by this migration; keep existing TLS/proxy config unless you intentionally apply the reviewed template manually"
+}
+
+generate_env_candidate() {
+    [[ "$config_candidates" == "yes" ]] || return 0
+    [[ -f "$staged_env_example" ]] || return 0
+
+    env_candidate="${env_file}.phase30-candidate"
+    awk '
+    function extract_key(line, x, p) {
+        x=line
+        sub(/^[[:space:]]+/, "", x)
+        if (x ~ /^#/) {
+            sub(/^#[[:space:]]*/, "", x)
+        }
+        sub(/^export[[:space:]]+/, "", x)
+        if (x ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+            p=index(x, "=")
+            return substr(x, 1, p-1)
+        }
+        return ""
+    }
+    FNR==NR {
+        k=extract_key($0)
+        active=$0
+        sub(/^[[:space:]]+/, "", active)
+        if (k != "" && active !~ /^#/) {
+            live[k]=$0
+            live_order[++live_count]=k
+        }
+        next
+    }
+    {
+        k=extract_key($0)
+        if (k != "") {
+            template[k]=1
+            if ((k in live) && !used[k]) {
+                print live[k]
+                used[k]=1
+                next
+            }
+        }
+        print $0
+    }
+    END {
+        legacy_header=0
+        for (i=1; i<=live_count; i++) {
+            k=live_order[i]
+            if (!(k in template)) {
+                if (!legacy_header) {
+                    print ""
+                    print "# Legacy active settings found in the previous production env but absent from the current repository template."
+                    print "# They are intentionally commented here so operators can audit whether they are obsolete before deleting them."
+                    legacy_header=1
+                }
+                print "# legacy: " live[k]
+            }
+        }
+    }' "$env_file" "$staged_env_example" > "$env_candidate"
+    chmod 0600 "$env_candidate"
+    echo "[migrate] config candidate: generated env candidate at $env_candidate"
+    echo "[migrate] config candidate: review on VPS with: sudo diff -u $env_file $env_candidate"
+}
+
+generate_nginx_candidate() {
+    [[ "$config_candidates" == "yes" ]] || return 0
+    [[ -f "$staged_nginx_template" ]] || return 0
+
+    nginx_candidate="${remote_nginx_site}.phase30-candidate"
+    install -m 0644 "$staged_nginx_template" "$nginx_candidate"
+    echo "[migrate] config candidate: staged nginx candidate at $nginx_candidate"
+    if [[ -f "$remote_nginx_site" ]]; then
+        echo "[migrate] config candidate: review on VPS with: sudo diff -u $remote_nginx_site $nginx_candidate"
+    else
+        echo "[migrate] config candidate warning: active nginx site not found at $remote_nginx_site; candidate can be used for first install" >&2
+    fi
+}
+
+apply_config_candidates_if_requested() {
+    if [[ "$apply_env_candidate" == "yes" ]]; then
+        [[ -n "${env_candidate:-}" && -f "$env_candidate" ]] || fail "env candidate missing; cannot apply"
+        cp -p "$env_file" "$env_pre_apply_backup"
+        install -m 0600 "$env_candidate" "$env_file"
+        env_candidate_applied="yes"
+        echo "[migrate] config apply: installed env candidate to $env_file"
+    fi
+
+    if [[ "$apply_nginx_candidate" == "yes" ]]; then
+        [[ -n "${nginx_candidate:-}" && -f "$nginx_candidate" ]] || fail "nginx candidate missing; cannot apply"
+        local nginx_backup="${remote_nginx_site}.pre-${backup_id}"
+        if [[ -f "$remote_nginx_site" ]]; then
+            cp -p "$remote_nginx_site" "$nginx_backup"
+            cp -p "$remote_nginx_site" "$nginx_pre_apply_backup"
+        fi
+        install -m 0644 "$nginx_candidate" "$remote_nginx_site"
+        if nginx -t; then
+            systemctl reload nginx
+            nginx_candidate_applied="yes"
+            echo "[migrate] config apply: installed nginx candidate to $remote_nginx_site and reloaded nginx"
+        else
+            echo "[migrate] config apply: nginx -t failed; restoring previous nginx site" >&2
+            if [[ -f "$nginx_backup" ]]; then
+                install -m 0644 "$nginx_backup" "$remote_nginx_site"
+                nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+            fi
+            fail "nginx candidate failed validation"
+        fi
+    fi
+}
+
+restore_applied_config_candidates() {
+    if [[ "$env_candidate_applied" == "yes" && -f "$env_pre_apply_backup" ]]; then
+        echo "[migrate] rollback: restoring previous env file to $env_file" >&2
+        install -m 0600 "$env_pre_apply_backup" "$env_file"
+    fi
+
+    if [[ "$nginx_candidate_applied" == "yes" && -f "$nginx_pre_apply_backup" ]]; then
+        echo "[migrate] rollback: restoring previous nginx site to $remote_nginx_site" >&2
+        install -m 0644 "$nginx_pre_apply_backup" "$remote_nginx_site"
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+    fi
 }
 
 print_failure_journal() {
@@ -346,6 +498,8 @@ command -v curl >/dev/null 2>&1 || fail "curl not installed"
 command -v systemctl >/dev/null 2>&1 || fail "systemctl not installed"
 
 print_config_audit
+generate_env_candidate
+generate_nginx_candidate
 
 activation_mode=""
 previous_target=""
@@ -400,11 +554,24 @@ else
     done
 fi
 cp -p "$env_file" "$work_dir/config/scavium-faucet.env"
+if [[ -f "$remote_nginx_site" ]]; then
+    cp -p "$remote_nginx_site" "$work_dir/config/scavium-faucet.nginx.conf"
+fi
+if [[ -n "${env_candidate:-}" && -f "$env_candidate" ]]; then
+    cp -p "$env_candidate" "$work_dir/config/scavium-faucet.env.phase30-candidate"
+fi
+if [[ -n "${nginx_candidate:-}" && -f "$nginx_candidate" ]]; then
+    cp -p "$nginx_candidate" "$work_dir/config/scavium-faucet.nginx.conf.phase30-candidate"
+fi
 cat > "$work_dir/MANIFEST.txt" <<MANIFEST
 scavium-faucet phase30 pre-migration backup
 created_utc=$backup_id
 database_source=$db_path
 env_source=$env_file
+nginx_source=$remote_nginx_site
+config_candidates=$config_candidates
+apply_env_candidate=$apply_env_candidate
+apply_nginx_candidate=$apply_nginx_candidate
 activation_mode=$activation_mode
 previous_target=$previous_target
 new_release=$release_path
@@ -426,6 +593,7 @@ rm -rf "$work_dir"
     (cd "$verify_dir" && sha256sum -c SHA256SUMS >/dev/null)
 )
 echo "[migrate] backup verified: $backup_bundle"
+apply_config_candidates_if_requested
 
 if [[ "$activation_mode" == "release_symlink" ]]; then
     ln -sfn "$release_path" "$current_path"
@@ -468,6 +636,7 @@ set -e
 
 if [[ "$health_rc" -ne 0 || "$ready_rc" -ne 0 || "$status_rc" -ne 0 || "$tokens_rc" -ne 0 || "$admin_rc" -ne 0 ]]; then
     print_failure_journal
+    restore_applied_config_candidates
     if [[ "$activation_mode" == "release_symlink" ]]; then
         echo "[migrate] smoke failed; rolling back symlink to $previous_target" >&2
         ln -sfn "$previous_target" "$current_path"
@@ -523,15 +692,22 @@ REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_TIMEOUT_SECONDS__/$SMOKE_TIMEOUT_SECONDS}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_ADMIN_TIMEOUT_SECONDS__/$SMOKE_ADMIN_TIMEOUT_SECONDS}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_RETRIES__/$SMOKE_RETRIES}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__CONFIG_AUDIT__/$CONFIG_AUDIT}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__CONFIG_CANDIDATES__/$CONFIG_CANDIDATES}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__APPLY_ENV_CANDIDATE__/$APPLY_ENV_CANDIDATE}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__APPLY_NGINX_CANDIDATE__/$APPLY_NGINX_CANDIDATE}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_NGINX_SITE__/$REMOTE_NGINX_SITE}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_STAGED_ENV_EXAMPLE__/$REMOTE_STAGED_ENV_EXAMPLE}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_STAGED_NGINX_TEMPLATE__/$REMOTE_STAGED_NGINX_TEMPLATE}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__PHASE30_ENV_KEYS__/$PHASE30_ENV_KEYS}
 
 run_remote "rm -rf $(quote_sq "$REMOTE_STAGE_DIR") && mkdir -p $(quote_sq "$REMOTE_STAGE_DIR") && chmod 0700 $(quote_sq "$REMOTE_STAGE_DIR")"
 copy_remote "$LOCAL_BINARY" "$REMOTE_STAGED_BINARY"
 run_remote "chmod 0755 $(quote_sq "$REMOTE_STAGED_BINARY")"
-if [[ "$CONFIG_AUDIT" == "yes" ]]; then
+if [[ "$CONFIG_CANDIDATES" == "yes" ]]; then
     copy_remote "$LOCAL_ENV_EXAMPLE" "$REMOTE_STAGED_ENV_EXAMPLE"
     run_remote "chmod 0600 $(quote_sq "$REMOTE_STAGED_ENV_EXAMPLE")"
+    copy_remote "$LOCAL_NGINX_TEMPLATE" "$REMOTE_STAGED_NGINX_TEMPLATE"
+    run_remote "chmod 0644 $(quote_sq "$REMOTE_STAGED_NGINX_TEMPLATE")"
 fi
 copy_text_remote "$REMOTE_SCRIPT" "$REMOTE_STAGED_SCRIPT"
 run_remote "chmod 0600 $(quote_sq "$REMOTE_STAGED_SCRIPT")"
