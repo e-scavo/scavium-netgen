@@ -678,4 +678,4 @@ curl -s -X DELETE -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
   http://127.0.0.1:18080/api/v1/admin/policy
 ```
 
-After a change, check `/api/v1/config`, an address eligibility response, and `/api/v1/admin/audit?limit=20`. Do not use runtime policy for secrets, RPC endpoints, token contract metadata, or signer configuration; those remain restart-managed.
+After a change, check `/api/v1/config`, `/api/v1/tokens`, an address eligibility response, and `/api/v1/admin/audit?limit=20`. The public token catalog reflects runtime daily-budget overrides for the same claim-safe budget fields exposed by `/api/v1/config`, so it should not drift from policy enforcement after an admin update. Do not use runtime policy for secrets, RPC endpoints, token contract metadata, or signer configuration; those remain restart-managed.
