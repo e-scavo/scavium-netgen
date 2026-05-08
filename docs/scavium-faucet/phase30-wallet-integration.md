@@ -35,7 +35,7 @@ The following remain outside Phase 30 and should be scheduled explicitly later:
 
 ## Validation notes
 
-Phase 30 has been closure-audited through fix 6 final audit. The latest operator baseline supplied with the Phase 30 fix series reports `go test ./...` passing on Go 1.24. Static review in this environment also rechecked formatting, script syntax, OpenAPI YAML parsing, backup plan wiring, runtime/API compatibility, SQLite persistence, in-memory fallback behavior, and wallet-origin semantics. Local `go test`/`go build` execution remains blocked in this ChatGPT environment because the module requires Go 1.24 and the toolchain download from `proxy.golang.org` is unavailable.
+Phase 30 has been closure-audited through fix 7 post-Copilot audit. The latest operator baseline supplied with the Phase 30 fix series reports `go test ./...` passing on Go 1.24. Static review in this environment also rechecked formatting, script syntax, OpenAPI YAML parsing, backup plan wiring, runtime/API compatibility, SQLite persistence, in-memory fallback behavior, and wallet-origin semantics. Local `go test`/`go build` execution remains blocked in this ChatGPT environment because the module requires Go 1.24 and the toolchain download from `proxy.golang.org` is unavailable.
 
 ## Post-implementation audit fixes
 
@@ -46,3 +46,5 @@ Phase 30 has been closure-audited through fix 6 final audit. The latest operator
 - Fix 4: closure documentation was refreshed after the fix 3 compatibility audit so the roadmap and Phase 30 notes accurately reflect the current implementation baseline and do not leave stale validation language behind.
 - Fix 5: the post-fix documentation baseline was refreshed again after the full Phase 30 implementation bundle was re-applied, ensuring roadmap status and closure notes consistently describe the current operator-validated implementation with `go test ./...` passing on Go 1.24.
 - Fix 6: final audit of the Phase 30 fix 5 implementation confirmed no remaining code-level feature gaps for challenge issuance, SQLite persistence, replay/expiry handling, optional personal-sign verification, legacy claim compatibility, fallback parity, app-origin semantics, OpenAPI coverage, and operational script compatibility. This fix only refreshes closure status so docs match the verified implementation baseline.
+
+- Fix 7: the post-Copilot audit closed cross-phase consistency gaps discovered while validating Phases 25–30 together. Persistent `/api/v1/tokens` now reports runtime policy budget overrides like `/api/v1/config`, failed durable enqueue attempts best-effort mark the freshly persisted claim as `rejected` with `enqueue_failed` instead of leaving an orphan `received` claim, SQLite-backed duplicate campaign/invitation writes map constraint races to validated admin errors, and the in-memory fallback address status now reports cooldown eligibility with token-level cooldown metadata for closer SQLite parity.

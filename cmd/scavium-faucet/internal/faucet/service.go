@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strings"
@@ -256,10 +257,19 @@ func (s *InMemoryReadService) AddressStatus(_ context.Context, address common.Ad
 	}
 	s.mu.RUnlock()
 
+	remaining, nextEligible := inMemoryCooldown(s.cfg.CooldownSeconds, claims, address, "", s.now())
+	if remaining > 0 {
+		response.Eligible = false
+		response.Reason = "cooldown_active"
+		response.CooldownRemainingSeconds = remaining
+		response.NextEligibleTime = nextEligible.UTC().Format(time.RFC3339)
+	}
+
 	response.DailyBudget = inMemoryBudgetStatus(s.cfg.DailyBudgetWei, claims, "", s.now())
 	if budgetExhausted(response.DailyBudget) {
 		response.Eligible = false
 		response.Reason = "daily_budget_exceeded"
+		response.NextEligibleTime = ""
 	}
 	for _, token := range tokens {
 		amountWei := ""
@@ -267,15 +277,26 @@ func (s *InMemoryReadService) AddressStatus(_ context.Context, address common.Ad
 			amountWei = token.AmountWei.String()
 		}
 		budget := inMemoryBudgetStatus(inMemoryDailyBudgetForTokenID(s.cfg, token.ID), claims, token.ID, s.now())
-		eligible := true
+		tokenRemaining, tokenNextEligible := inMemoryCooldown(s.cfg.CooldownSeconds, claims, address, token.ID, s.now())
+		eligible := tokenRemaining == 0
 		reason := "eligible"
+		next := ""
+		if tokenRemaining > 0 {
+			reason = "cooldown_active"
+			next = tokenNextEligible.UTC().Format(time.RFC3339)
+		}
 		if budgetExhausted(budget) {
 			eligible = false
 			reason = "daily_budget_exceeded"
+			next = ""
+		}
+		if !eligible && response.Reason == "eligible" {
+			response.Eligible = false
+			response.Reason = reason
 		}
 		response.Tokens = append(response.Tokens, TokenStatus{
 			TokenID: token.ID, Symbol: token.Symbol, Type: string(token.Type), Eligible: eligible, Reason: reason,
-			AmountWei: amountWei, DailyBudget: budget,
+			AmountWei: amountWei, DailyBudget: budget, CooldownRemainingSeconds: tokenRemaining, NextEligibleTime: next,
 		})
 	}
 	return response, nil
@@ -472,6 +493,34 @@ func inMemoryBudgetStatus(budget *big.Int, claims []domain.Claim, tokenID string
 		remaining = big.NewInt(0)
 	}
 	return &BudgetStatus{BudgetWei: budget.String(), UsedWei: used.String(), RemainingWei: remaining.String()}
+}
+
+func inMemoryCooldown(cooldownSeconds int, claims []domain.Claim, address common.Address, tokenID string, now time.Time) (int, time.Time) {
+	if cooldownSeconds <= 0 {
+		return 0, time.Time{}
+	}
+	var latest *domain.Claim
+	for i := range claims {
+		claim := claims[i]
+		if claim.Address != address {
+			continue
+		}
+		if tokenID != "" && claim.TokenID != tokenID {
+			continue
+		}
+		if latest == nil || claim.CreatedAt.After(latest.CreatedAt) {
+			latest = &claims[i]
+		}
+	}
+	if latest == nil {
+		return 0, time.Time{}
+	}
+	nextEligible := latest.CreatedAt.Add(time.Duration(cooldownSeconds) * time.Second)
+	remaining := nextEligible.Sub(now)
+	if remaining <= 0 {
+		return 0, nextEligible
+	}
+	return int(math.Ceil(remaining.Seconds())), nextEligible
 }
 
 func budgetExhausted(budget *BudgetStatus) bool {

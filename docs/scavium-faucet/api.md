@@ -116,7 +116,7 @@ Alias routes for public faucet configuration.
 ### `GET /api/v1/tokens`
 ### `GET /api/v1/faucet/tokens`
 
-Alias routes for the public faucet token catalog. These endpoints expose only claim-safe token metadata derived from runtime configuration. They do not expose private keys, admin tokens, RPC credentials, or any operational secret. They are the canonical post-restart validation point after registering testnet tokens through `SCAVIUM_FAUCET_TOKENS_JSON`.
+Alias routes for the public faucet token catalog. These endpoints expose only claim-safe token metadata derived from runtime configuration. They do not expose private keys, admin tokens, RPC credentials, or any operational secret. They are the canonical post-restart validation point after registering testnet tokens through `SCAVIUM_FAUCET_TOKENS_JSON`. Runtime policy daily-budget overrides are reflected here for the same public token budget fields exposed by `/api/v1/config`, so clients do not observe budget drift after an admin policy change.
 
 ```json
 {
@@ -337,7 +337,7 @@ Current behavior:
 - the daily budget is enforced for the selected token when token-scoped configuration is available; legacy deployments keep the existing faucet-wide budget behavior
 - captcha is verified when `SCAVIUM_FAUCET_CAPTCHA_PROVIDER` is not `disabled`; missing or failed verification returns `422 captcha_failed`
 - risk evaluation runs when a risk engine is configured; Phase 27 composes persisted negative-signal counts, same-IP bursts across successful and failed intake records, rotating-IP fingerprint behavior, address clustering, optional honeypot state, and bounded manual-review hints into deterministic operator diagnostics
-- the accepted claim is persisted to SQLite with initial status `received`, then enqueued as `queued`
+- the accepted claim is persisted to SQLite with initial status `received`, then enqueued as `queued`; if durable enqueue fails after persistence, the service best-effort marks that new claim as `rejected` with reason `enqueue_failed` so operators do not inherit an orphan `received` claim
 - repeated requests with the same `Idempotency-Key` return the same persisted claim without creating a duplicate
 
 Common errors:

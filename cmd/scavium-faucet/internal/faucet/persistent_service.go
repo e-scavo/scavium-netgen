@@ -195,8 +195,12 @@ func tokenResponsesWithRuntimePolicy(tokens []config.TokenConfig, policy domain.
 
 // Tokens returns the public faucet token catalog. It intentionally exposes only
 // claim-safe metadata and never includes private keys or operational secrets.
-func (s *PersistentReadService) Tokens(context.Context) ([]TokenResponse, error) {
-	return tokenResponses(s.cfg.NormalizedTokens()), nil
+func (s *PersistentReadService) Tokens(ctx context.Context) ([]TokenResponse, error) {
+	policy, err := s.runtimePolicy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return tokenResponsesWithRuntimePolicy(s.cfg.NormalizedTokens(), policy), nil
 }
 
 func (s *PersistentReadService) AddressStatus(ctx context.Context, address common.Address) (AddressStatusResponse, error) {
@@ -547,6 +551,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 	s.recordAbuseSignal(ctx, request, domain.AbuseSignalClaimAccepted, created.ID, "", 0)
 
 	if err := s.queue.Enqueue(ctx, created.ID); err != nil {
+		_, _ = s.claims.UpdateClaimStatus(ctx, created.ID, domain.ClaimStatusRejected, "enqueue_failed")
 		return ClaimResponse{}, fmt.Errorf("enqueue claim: %w", err)
 	}
 
