@@ -211,6 +211,12 @@ Operator sequence:
 
 Do not publish private keys, captcha secrets, admin bearer tokens, or raw environment files while documenting registered tokens. Publicly safe token fields are the fields returned by the token catalog endpoints.
 
+## Phase 30 binary migration
+
+Use `scripts/migrate-scavium-faucet-phase30.sh` when replacing the current production binary with the Phase 30 build. The helper is plan-first and expects an already-reviewed local binary plus the existing release layout (`APP_PATH/current -> APP_PATH/releases/<release>`). It creates and verifies a remote SQLite/config backup before activation, restarts systemd, validates `/health`, `/ready`, `/api/v1/status`, `/api/v1/tokens`, and admin runtime/wallet endpoints when the token is readable, then restores the previous symlink if smoke validation fails.
+
+Detailed operator steps are documented in [deployment-phase30-migration.md](deployment-phase30-migration.md). Keep `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` unset for legacy-only rollout, or set it to exact browser application origins before enabling browser wallet challenge/proof flows. Missing `Origin` remains valid for native, desktop, mobile, CLI, and server-to-server clients.
+
 ## Deployment notes
 
 1. Bind the service to loopback.

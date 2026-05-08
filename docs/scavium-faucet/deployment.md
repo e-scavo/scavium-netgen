@@ -101,8 +101,11 @@ Recommended placeholder mapping:
 | `deployment-firewall.md` | VPS and edge firewall guide |
 | `deployment-rollback.md` | rollback procedure |
 | `../../scripts/deploy-scavium-faucet-safe.sh` | safe deploy helper; review mode by default |
+| `../../scripts/migrate-scavium-faucet-phase30.sh` | Phase 30 production migration helper that stages a binary, verifies pre-migration backup, activates, smokes, and rolls back the symlink on failure |
 
 ## Review-first deployment flow
+
+For an existing production faucet moving to the Phase 30 binary, prefer the dedicated [Phase 30 production migration runbook](deployment-phase30-migration.md). It wraps the same release-layout assumptions with a verified pre-migration SQLite/config backup, post-activation smoke checks, and automatic symlink rollback if validation fails.
 
 1. Build the binary outside the server and decide a `RELEASE_ID`.
 2. Review and fill the environment example with real values **outside the repository**.

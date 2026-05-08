@@ -10,7 +10,7 @@ This directory documents the **implemented project surface**, not the full roadm
 
 Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility. Phase 28 Runtime Policy is CLOSED with durable non-secret budget/throttle overrides reflected by public config, token catalog, and enforcement paths. Phase 29 Campaigns, allowlists, and invitation codes are CLOSED with durable admin APIs, runtime enforcement, bounded exports, rollback, and audit behavior. Phase 30 Wallet Integration is CLOSED through fix 9 post-Copilot final documentation audit, adding optional wallet challenges/proofs with SQLite persistence, replay resistance, fallback parity, legacy claim compatibility, and documentation discoverability for the fix 7 cross-phase hardening plus fix 8/9 closure alignment.
 
-The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin-protected Prometheus-compatible metrics text export, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, alerting guidance, local smoke tests, and enriched health/readiness probes, review-first SQLite/config backup and restore scripts, and wallet refill/rotation runbooks.
+The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin-protected Prometheus-compatible metrics text export, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, alerting guidance, local smoke tests, and enriched health/readiness probes, review-first SQLite/config backup and restore scripts, Phase 30 binary migration helper, and wallet refill/rotation runbooks.
 
 ## Documentation
 
@@ -24,6 +24,7 @@ The service is production-ready for the current testnet scope, including validat
 | [deployment-certbot.md](deployment-certbot.md) | Manual ACME and certbot guide for TLS issuance and renewal |
 | [deployment-firewall.md](deployment-firewall.md) | Public exposure and firewall policy for VPS and cloud edge |
 | [deployment-rollback.md](deployment-rollback.md) | Rollback procedure for release symlinks and service recovery |
+| [deployment-phase30-migration.md](deployment-phase30-migration.md) | Phase 30 binary migration runbook with pre-backup, activation, smoke validation, and rollback guardrails |
 | [runbook.md](runbook.md) | Build, run, health checks, backup/restore, wallet refill/rotation, and operational caveats |
 | [security.md](security.md) | Current security properties, gaps, and deployment guidance |
 | [token-registration.md](token-registration.md) | Phase 17.2 testnet token registration guide for native and ERC20 faucet assets |
@@ -58,6 +59,7 @@ The service is production-ready for the current testnet scope, including validat
 - Admin audit entries and structured admin-action logs avoid admin-token leakage; actor attribution uses trusted-proxy-aware real IP extraction.
 - `/health` includes uptime and build metadata; `/ready` includes per-check duration and aggregate readiness summary while keeping the real DB/queue/RPC/wallet probes.
 - `scripts/scavium-faucet-backup.sh` and `scripts/scavium-faucet-restore.sh` provide plan-first backup/restore flows for SQLite and reviewed configuration.
+- `scripts/migrate-scavium-faucet-phase30.sh` stages a new binary release, verifies a pre-migration SQLite/config backup, activates the release, performs local smoke checks, and restores the previous symlink if validation fails.
 - Wallet refill and rotation remain manual runbook operations; no automatic treasury refill or fund-transfer automation is introduced.
 
 ## Quick start
