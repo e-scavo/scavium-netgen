@@ -30,6 +30,8 @@ Optional environment:
   REMOTE_DB_PATH              SQLite DB path. Default: /var/lib/scavium-faucet/scavium-faucet.db
   REMOTE_BACKUP_DIR           Remote backup dir. Default: /var/backups/scavium-faucet
   REMOTE_STAGE_DIR            User-writable remote staging dir. Default: /tmp/scavium-faucet-migration-RELEASE_ID
+  ACTIVE_BINARY_PATH          Legacy/direct active binary path used when APP_PATH/current is absent.
+                              Default: APP_PATH/bin/scavium-faucet
   REMOTE_SUDO                 Privilege escalation command. Default: sudo
                               Use "sudo -n" for non-interactive sudo, or empty when DEPLOY_USER is root.
   LOCAL_BASE_URL              Health base URL on VPS. Default: http://127.0.0.1:18080
@@ -43,10 +45,11 @@ Safety:
   - --execute requires MIGRATION_CONFIRM=yes.
   - The local binary and generated migration script are first copied to REMOTE_STAGE_DIR.
   - Privileged filesystem/systemd work is performed remotely through REMOTE_SUDO.
-  - The current symlink target is captured before activation.
+  - Existing deployments with APP_PATH/current are upgraded through release symlink activation.
+  - Existing legacy/direct deployments without APP_PATH/current are upgraded by atomically replacing ACTIVE_BINARY_PATH.
   - A remote backup is created and verified before activation.
   - The DB remains outside the release directory.
-  - If post-activation smoke fails, the previous symlink is restored and the service is restarted.
+  - If post-activation smoke fails, the previous symlink or previous direct binary is restored and the service is restarted.
   - This script does not edit nginx, certbot, firewall, or secrets.
 USAGE
 }
@@ -163,6 +166,7 @@ REMOTE_DB_PATH="${REMOTE_DB_PATH:-/var/lib/scavium-faucet/scavium-faucet.db}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-/var/backups/scavium-faucet}"
 REMOTE_STAGE_DIR="${REMOTE_STAGE_DIR:-/tmp/scavium-faucet-migration-${RELEASE_ID}}"
 REMOTE_SUDO="${REMOTE_SUDO-sudo}"
+ACTIVE_BINARY_PATH="${ACTIVE_BINARY_PATH:-${APP_PATH}/bin/scavium-faucet}"
 LOCAL_BASE_URL="${LOCAL_BASE_URL:-http://127.0.0.1:18080}"
 SMOKE_ADMIN_CHECKS="${SMOKE_ADMIN_CHECKS:-yes}"
 POST_ACTIVATION_SLEEP="${POST_ACTIVATION_SLEEP:-2}"
@@ -198,6 +202,7 @@ Service:              $SERVICE_NAME
 Release ID:           $RELEASE_ID
 Release path:         $RELEASE_PATH
 Current symlink path: $CURRENT_PATH
+Legacy binary path:   $ACTIVE_BINARY_PATH
 DB path:              $REMOTE_DB_PATH
 Env file:             $REMOTE_ENV_FILE
 Backup bundle:        $REMOTE_BACKUP_BUNDLE
@@ -213,6 +218,7 @@ app_path="__APP_PATH__"
 release_path="__RELEASE_PATH__"
 current_path="__CURRENT_PATH__"
 remote_binary="__REMOTE_BINARY__"
+active_binary_path="__ACTIVE_BINARY_PATH__"
 staged_binary="__REMOTE_STAGED_BINARY__"
 db_path="__REMOTE_DB_PATH__"
 env_file="__REMOTE_ENV_FILE__"
@@ -248,25 +254,33 @@ command -v sha256sum >/dev/null 2>&1 || fail "sha256sum not installed"
 command -v curl >/dev/null 2>&1 || fail "curl not installed"
 command -v systemctl >/dev/null 2>&1 || fail "systemctl not installed"
 
+activation_mode=""
 previous_target=""
+rollback_binary=""
 if [[ -L "$current_path" ]]; then
+    activation_mode="release_symlink"
     previous_target="$(readlink -f "$current_path")"
+    [[ -x "$previous_target/scavium-faucet" ]] || fail "previous release binary is not executable: $previous_target/scavium-faucet"
 elif [[ -e "$current_path" ]]; then
     fail "$current_path exists but is not a symlink"
+elif [[ -x "$active_binary_path" ]]; then
+    activation_mode="direct_binary"
+    previous_target="$active_binary_path"
+else
+    fail "no supported active binary found; expected either $current_path symlink or executable ACTIVE_BINARY_PATH=$active_binary_path"
 fi
-[[ -n "$previous_target" ]] || fail "current release symlink does not exist: $current_path"
-[[ -x "$previous_target/scavium-faucet" ]] || fail "previous release binary is not executable: $previous_target/scavium-faucet"
-
-echo "[migrate] previous release: $previous_target"
 
 install -d -m 0755 "$release_path"
 install -m 0755 "$staged_binary" "$remote_binary"
 [[ -x "$remote_binary" ]] || fail "new binary is missing or not executable after install: $remote_binary"
 
+echo "[migrate] activation mode: $activation_mode"
+echo "[migrate] previous target: $previous_target"
+
 work_dir="${backup_dir}/.work-${backup_id}"
 rm -rf "$work_dir"
 umask 077
-mkdir -p "$work_dir/db" "$work_dir/config" "$backup_dir"
+mkdir -p "$work_dir/db" "$work_dir/config" "$work_dir/bin" "$backup_dir"
 
 if command -v sqlite3 >/dev/null 2>&1; then
     sqlite3 "$db_path" ".backup '${work_dir}/db/scavium-faucet.db'"
@@ -279,12 +293,18 @@ else
     done
 fi
 cp -p "$env_file" "$work_dir/config/scavium-faucet.env"
+if [[ "$activation_mode" == "direct_binary" ]]; then
+    cp -p "$active_binary_path" "$work_dir/bin/scavium-faucet.previous"
+    rollback_binary="$work_dir/bin/scavium-faucet.previous"
+fi
 cat > "$work_dir/MANIFEST.txt" <<MANIFEST
 scavium-faucet phase30 pre-migration backup
 created_utc=$backup_id
 database_source=$db_path
 env_source=$env_file
-previous_release=$previous_target
+activation_mode=$activation_mode
+previous_target=$previous_target
+active_binary_path=$active_binary_path
 new_release=$release_path
 service=$svc
 notes=Backup may contain secrets from the env file. Keep it encrypted/restricted.
@@ -303,7 +323,15 @@ rm -rf "$work_dir"
 )
 echo "[migrate] backup verified: $backup_bundle"
 
-ln -sfn "$release_path" "$current_path"
+if [[ "$activation_mode" == "release_symlink" ]]; then
+    ln -sfn "$release_path" "$current_path"
+else
+    previous_copy="${backup_dir}/scavium-faucet-${backup_id}.previous"
+    install -m 0755 "$active_binary_path" "$previous_copy"
+    tmp_active="${active_binary_path}.new-${backup_id}"
+    install -m 0755 "$remote_binary" "$tmp_active"
+    mv -f "$tmp_active" "$active_binary_path"
+fi
 systemctl restart "${svc}.service"
 systemctl is-active --quiet "${svc}.service"
 sleep "$post_sleep"
@@ -337,8 +365,15 @@ fi
 set -e
 
 if [[ "$health_rc" -ne 0 || "$ready_rc" -ne 0 || "$status_rc" -ne 0 || "$tokens_rc" -ne 0 || "$admin_rc" -ne 0 ]]; then
-    echo "[migrate] smoke failed; rolling back symlink to $previous_target" >&2
-    ln -sfn "$previous_target" "$current_path"
+    if [[ "$activation_mode" == "release_symlink" ]]; then
+        echo "[migrate] smoke failed; rolling back symlink to $previous_target" >&2
+        ln -sfn "$previous_target" "$current_path"
+    else
+        echo "[migrate] smoke failed; restoring previous direct binary to $active_binary_path" >&2
+        previous_copy="${backup_dir}/scavium-faucet-${backup_id}.previous"
+        [[ -x "$previous_copy" ]] || fail "rollback binary missing: $previous_copy"
+        install -m 0755 "$previous_copy" "$active_binary_path"
+    fi
     systemctl restart "${svc}.service"
     systemctl is-active --quiet "${svc}.service" || true
     if [[ "$keep_failed" != "yes" ]]; then
@@ -350,7 +385,11 @@ fi
 rm -rf "$remote_stage_dir"
 
 echo "[migrate] migration completed"
-echo "[migrate] active release: $(readlink -f "$current_path")"
+if [[ "$activation_mode" == "release_symlink" ]]; then
+    echo "[migrate] active release: $(readlink -f "$current_path")"
+else
+    echo "[migrate] active binary: $active_binary_path"
+fi
 echo "[migrate] rollback target: $previous_target"
 echo "[migrate] backup bundle: $backup_bundle"
 REMOTE
@@ -361,6 +400,7 @@ REMOTE_SCRIPT=${REMOTE_SCRIPT//__APP_PATH__/$APP_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__RELEASE_PATH__/$RELEASE_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__CURRENT_PATH__/$CURRENT_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_BINARY__/$REMOTE_BINARY}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__ACTIVE_BINARY_PATH__/$ACTIVE_BINARY_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_STAGED_BINARY__/$REMOTE_STAGED_BINARY}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_DB_PATH__/$REMOTE_DB_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_ENV_FILE__/$REMOTE_ENV_FILE}

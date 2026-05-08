@@ -6,8 +6,9 @@ Phase 30 adds optional wallet challenge/proof functionality. It does **not** bre
 
 ## Operator assumptions
 
-- The current production service uses the release layout documented in `deployment.md`:
-  - `APP_PATH/current -> APP_PATH/releases/<release>`
+- The current production service may use either supported binary layout:
+  - release symlink: `APP_PATH/current -> APP_PATH/releases/<release>`
+  - legacy/direct binary: `APP_PATH/bin/scavium-faucet` with no `APP_PATH/current` symlink
   - SQLite at `/var/lib/scavium-faucet/scavium-faucet.db` or another durable path outside releases
   - real environment file outside the repository, normally `/etc/scavium-faucet/scavium-faucet.env`
 - The new binary has already been built and reviewed locally.
@@ -38,7 +39,7 @@ Phase 30 adds optional wallet challenge/proof functionality. It does **not** bre
 
    ```bash
    systemctl status scavium-faucet.service --no-pager
-   readlink -f /opt/scavium-faucet/current
+   readlink -f /opt/scavium-faucet/current || test -x /opt/scavium-faucet/bin/scavium-faucet
    test -f /var/lib/scavium-faucet/scavium-faucet.db
    test -f /etc/scavium-faucet/scavium-faucet.env
    ```
@@ -52,6 +53,7 @@ Phase 30 adds optional wallet challenge/proof functionality. It does **not** bre
    LOCAL_BINARY=./scavium-faucet \
    SERVICE_NAME=scavium-faucet \
    REMOTE_SUDO=sudo \
+   ACTIVE_BINARY_PATH=/opt/scavium-faucet/bin/scavium-faucet \
    scripts/migrate-scavium-faucet-phase30.sh --plan
    ```
 
@@ -68,6 +70,7 @@ APP_PATH=/opt/scavium-faucet \
 LOCAL_BINARY=./scavium-faucet \
 SERVICE_NAME=scavium-faucet \
 REMOTE_SUDO=sudo \
+ACTIVE_BINARY_PATH=/opt/scavium-faucet/bin/scavium-faucet \
 MIGRATION_CONFIRM=yes \
 scripts/migrate-scavium-faucet-phase30.sh --execute
 ```
@@ -76,23 +79,34 @@ The helper performs the following sequence:
 
 1. stages the new binary and generated migration script in a user-writable remote temp directory (`REMOTE_STAGE_DIR`)
 2. enters the privileged section through `REMOTE_SUDO`
-3. installs the new binary into `APP_PATH/releases/RELEASE_ID/scavium-faucet`
-4. captures the previous `current` symlink target
+3. installs the new binary into `APP_PATH/releases/RELEASE_ID/scavium-faucet` for auditability
+4. detects activation mode:
+   - `release_symlink` when `APP_PATH/current` exists and points to a previous release
+   - `direct_binary` when `APP_PATH/current` is absent and `ACTIVE_BINARY_PATH` is executable
 5. creates and verifies a remote pre-migration backup bundle containing:
    - SQLite database copied through `sqlite3 .backup` when available
    - WAL/SHM companions when a direct copy fallback is needed
    - the reviewed environment file
-   - manifest with previous/new release metadata
-6. repoints `current` to the new release
+   - previous direct binary copy when the server uses `direct_binary` mode
+   - manifest with activation mode and previous/new release metadata
+6. activates the new binary:
+   - repoints `current` to the new release in `release_symlink` mode
+   - atomically replaces `ACTIVE_BINARY_PATH` in `direct_binary` mode
 7. restarts systemd
 8. smoke-checks `/health`, `/ready`, `/api/v1/status`, and `/api/v1/tokens`
 9. when the admin token is readable from the env file, smoke-checks `/api/v1/admin/runtime` and `/api/v1/admin/wallet`
-10. automatically restores the previous symlink and restarts the service if smoke fails
+10. automatically restores the previous symlink or previous direct binary and restarts the service if smoke fails
 
+
+## Existing server without `/opt/scavium-faucet/current`
+
+Some already-running VPS installs use the systemd template path `ExecStart=/opt/scavium-faucet/bin/scavium-faucet` and do not yet have a `current` release symlink. This is supported. Leave `APP_PATH=/opt/scavium-faucet` and either rely on the default `ACTIVE_BINARY_PATH=/opt/scavium-faucet/bin/scavium-faucet` or set it explicitly. In this mode the helper keeps the immutable release copy for auditability, backs up the current direct binary, atomically replaces the direct binary, and restores that previous binary on failed smoke checks.
+
+Do not create `/opt/scavium-faucet/current` manually just to satisfy the migration; the script detects the real active layout and uses the matching rollback strategy.
 
 ## Sudo and non-root VPS users
 
-By default the helper assumes the VPS is accessed with a normal SSH user and escalates the privileged phase with `REMOTE_SUDO=sudo`. The local binary and generated migration script are copied first to `REMOTE_STAGE_DIR` under `/tmp`, avoiding direct `scp` writes to `/opt`, `/etc`, or `/var`. The privileged phase then installs the binary into the release directory, creates the backup, flips the symlink, restarts systemd, runs smoke checks, and performs rollback if needed.
+By default the helper assumes the VPS is accessed with a normal SSH user and escalates the privileged phase with `REMOTE_SUDO=sudo`. The local binary and generated migration script are copied first to `REMOTE_STAGE_DIR` under `/tmp`, avoiding direct `scp` writes to `/opt`, `/etc`, or `/var`. The privileged phase then installs the binary into the release directory, creates the backup, activates the detected layout, restarts systemd, runs smoke checks, and performs rollback if needed.
 
 Use one of these modes explicitly:
 
@@ -137,7 +151,7 @@ Use a real wallet address for live validation. The response should include a cha
 
 ## Rollback
 
-If the helper detects a failed smoke check, it automatically reactivates the previous symlink and restarts the service.
+If the helper detects a failed smoke check, it automatically reactivates the previous symlink or restores the previous direct binary and restarts the service.
 
 Manual rollback remains available:
 
