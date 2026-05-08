@@ -13,6 +13,7 @@ Phase 30 adds optional wallet challenge/proof functionality. It does **not** bre
 - The new binary has already been built and reviewed locally.
 - The service remains loopback-only behind nginx.
 - The migration is performed from an operator workstation with SSH access to the VPS.
+- The SSH account may be a normal user. Privileged remote filesystem and systemd operations are executed through `REMOTE_SUDO`, which defaults to `sudo`.
 
 ## Pre-migration checklist
 
@@ -50,6 +51,7 @@ Phase 30 adds optional wallet challenge/proof functionality. It does **not** bre
    APP_PATH=/opt/scavium-faucet \
    LOCAL_BINARY=./scavium-faucet \
    SERVICE_NAME=scavium-faucet \
+   REMOTE_SUDO=sudo \
    scripts/migrate-scavium-faucet-phase30.sh --plan
    ```
 
@@ -65,24 +67,47 @@ DEPLOY_USER=deploy \
 APP_PATH=/opt/scavium-faucet \
 LOCAL_BINARY=./scavium-faucet \
 SERVICE_NAME=scavium-faucet \
+REMOTE_SUDO=sudo \
 MIGRATION_CONFIRM=yes \
 scripts/migrate-scavium-faucet-phase30.sh --execute
 ```
 
 The helper performs the following sequence:
 
-1. stages the new binary into `APP_PATH/releases/RELEASE_ID/scavium-faucet`
-2. captures the previous `current` symlink target
-3. creates and verifies a remote pre-migration backup bundle containing:
+1. stages the new binary and generated migration script in a user-writable remote temp directory (`REMOTE_STAGE_DIR`)
+2. enters the privileged section through `REMOTE_SUDO`
+3. installs the new binary into `APP_PATH/releases/RELEASE_ID/scavium-faucet`
+4. captures the previous `current` symlink target
+5. creates and verifies a remote pre-migration backup bundle containing:
    - SQLite database copied through `sqlite3 .backup` when available
    - WAL/SHM companions when a direct copy fallback is needed
    - the reviewed environment file
    - manifest with previous/new release metadata
-4. repoints `current` to the new release
-5. restarts systemd
-6. smoke-checks `/health`, `/ready`, `/api/v1/status`, and `/api/v1/tokens`
-7. when the admin token is readable from the env file, smoke-checks `/api/v1/admin/runtime` and `/api/v1/admin/wallet`
-8. automatically restores the previous symlink and restarts the service if smoke fails
+6. repoints `current` to the new release
+7. restarts systemd
+8. smoke-checks `/health`, `/ready`, `/api/v1/status`, and `/api/v1/tokens`
+9. when the admin token is readable from the env file, smoke-checks `/api/v1/admin/runtime` and `/api/v1/admin/wallet`
+10. automatically restores the previous symlink and restarts the service if smoke fails
+
+
+## Sudo and non-root VPS users
+
+By default the helper assumes the VPS is accessed with a normal SSH user and escalates the privileged phase with `REMOTE_SUDO=sudo`. The local binary and generated migration script are copied first to `REMOTE_STAGE_DIR` under `/tmp`, avoiding direct `scp` writes to `/opt`, `/etc`, or `/var`. The privileged phase then installs the binary into the release directory, creates the backup, flips the symlink, restarts systemd, runs smoke checks, and performs rollback if needed.
+
+Use one of these modes explicitly:
+
+```bash
+# Normal interactive VPS account; sudo may prompt for a password.
+REMOTE_SUDO=sudo
+
+# CI/passwordless sudo; fail immediately if sudo would prompt.
+REMOTE_SUDO='sudo -n'
+
+# Root SSH account only.
+REMOTE_SUDO=''
+```
+
+If the VPS requires a sudo password, run the script from an interactive terminal so the `ssh -tt` privileged step can display the prompt. If sudo is not permitted for the deploy user, provision the required sudoers access before migration rather than making release paths world-writable.
 
 ## Post-migration validation
 

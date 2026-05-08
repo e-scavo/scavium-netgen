@@ -101,7 +101,7 @@ Recommended placeholder mapping:
 | `deployment-firewall.md` | VPS and edge firewall guide |
 | `deployment-rollback.md` | rollback procedure |
 | `../../scripts/deploy-scavium-faucet-safe.sh` | safe deploy helper; review mode by default |
-| `../../scripts/migrate-scavium-faucet-phase30.sh` | Phase 30 production migration helper that stages a binary, verifies pre-migration backup, activates, smokes, and rolls back the symlink on failure |
+| `../../scripts/migrate-scavium-faucet-phase30.sh` | Phase 30 production migration helper that stages through a user-writable temp dir, executes privileged VPS changes through `REMOTE_SUDO`, verifies pre-migration backup, activates, smokes, and rolls back the symlink on failure |
 
 ## Review-first deployment flow
 

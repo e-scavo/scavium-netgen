@@ -19,7 +19,7 @@ Purpose:
 
 Required environment:
   DEPLOY_HOST                 Target VPS hostname or IP.
-  DEPLOY_USER                 SSH user.
+  DEPLOY_USER                 SSH user. May be a non-root sudo-capable user.
   APP_PATH                    Release root, e.g. /opt/scavium-faucet.
   LOCAL_BINARY                Already-built new scavium-faucet binary.
 
@@ -29,6 +29,9 @@ Optional environment:
   REMOTE_ENV_FILE             Reviewed env file. Default: /etc/scavium-faucet/scavium-faucet.env
   REMOTE_DB_PATH              SQLite DB path. Default: /var/lib/scavium-faucet/scavium-faucet.db
   REMOTE_BACKUP_DIR           Remote backup dir. Default: /var/backups/scavium-faucet
+  REMOTE_STAGE_DIR            User-writable remote staging dir. Default: /tmp/scavium-faucet-migration-RELEASE_ID
+  REMOTE_SUDO                 Privilege escalation command. Default: sudo
+                              Use "sudo -n" for non-interactive sudo, or empty when DEPLOY_USER is root.
   LOCAL_BASE_URL              Health base URL on VPS. Default: http://127.0.0.1:18080
   SMOKE_ADMIN_CHECKS          yes/no. Default: yes when ADMIN token can be read by root from REMOTE_ENV_FILE
   POST_ACTIVATION_SLEEP       Seconds to wait before smoke. Default: 2
@@ -38,6 +41,8 @@ Optional environment:
 Safety:
   - --plan prints the remote plan and does not copy or modify anything.
   - --execute requires MIGRATION_CONFIRM=yes.
+  - The local binary and generated migration script are first copied to REMOTE_STAGE_DIR.
+  - Privileged filesystem/systemd work is performed remotely through REMOTE_SUDO.
   - The current symlink target is captured before activation.
   - A remote backup is created and verified before activation.
   - The DB remains outside the release directory.
@@ -94,6 +99,40 @@ copy_remote() {
     scp "$source" "$REMOTE:$destination"
 }
 
+copy_text_remote() {
+    local text="$1"
+    local destination="$2"
+    if [[ "$MODE" == "--plan" ]]; then
+        printf '+ scp <generated migration script> %q\n' "$REMOTE:$destination"
+        return
+    fi
+    local tmp_file
+    tmp_file="$(mktemp)"
+    trap 'rm -f "$tmp_file"' RETURN
+    printf '%s\n' "$text" > "$tmp_file"
+    scp "$tmp_file" "$REMOTE:$destination"
+    rm -f "$tmp_file"
+    trap - RETURN
+}
+
+run_remote_privileged_script() {
+    local remote_script_path="$1"
+    local remote_cmd
+    if [[ -n "$REMOTE_SUDO" ]]; then
+        remote_cmd="$REMOTE_SUDO bash $(quote_sq "$remote_script_path")"
+    else
+        remote_cmd="bash $(quote_sq "$remote_script_path")"
+    fi
+
+    if [[ "$MODE" == "--plan" ]]; then
+        printf '+ ssh -tt %q %s\n' "$REMOTE" "$(quote_sq "$remote_cmd")"
+        return
+    fi
+
+    # -tt allows sudo password prompts for operators whose VPS user is not passwordless sudo.
+    ssh -tt "$REMOTE" "$remote_cmd"
+}
+
 MODE="${1:---plan}"
 case "$MODE" in
     --plan|--execute) ;;
@@ -110,6 +149,7 @@ esac
 if [[ "$MODE" == "--execute" ]]; then
     require_cmd ssh
     require_cmd scp
+    require_cmd mktemp
 fi
 
 DEPLOY_HOST="${DEPLOY_HOST:-DEPLOY_HOST}"
@@ -121,6 +161,8 @@ RELEASE_ID="${RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)-phase30}"
 REMOTE_ENV_FILE="${REMOTE_ENV_FILE:-/etc/scavium-faucet/scavium-faucet.env}"
 REMOTE_DB_PATH="${REMOTE_DB_PATH:-/var/lib/scavium-faucet/scavium-faucet.db}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-/var/backups/scavium-faucet}"
+REMOTE_STAGE_DIR="${REMOTE_STAGE_DIR:-/tmp/scavium-faucet-migration-${RELEASE_ID}}"
+REMOTE_SUDO="${REMOTE_SUDO-sudo}"
 LOCAL_BASE_URL="${LOCAL_BASE_URL:-http://127.0.0.1:18080}"
 SMOKE_ADMIN_CHECKS="${SMOKE_ADMIN_CHECKS:-yes}"
 POST_ACTIVATION_SLEEP="${POST_ACTIVATION_SLEEP:-2}"
@@ -140,6 +182,8 @@ REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
 RELEASE_PATH="${APP_PATH}/releases/${RELEASE_ID}"
 CURRENT_PATH="${APP_PATH}/current"
 REMOTE_BINARY="${RELEASE_PATH}/scavium-faucet"
+REMOTE_STAGED_BINARY="${REMOTE_STAGE_DIR}/scavium-faucet"
+REMOTE_STAGED_SCRIPT="${REMOTE_STAGE_DIR}/phase30-migration.sh"
 REMOTE_BACKUP_ID="${RELEASE_ID}-pre"
 REMOTE_BACKUP_BUNDLE="${REMOTE_BACKUP_DIR}/scavium-faucet-backup-${REMOTE_BACKUP_ID}.tar.gz"
 
@@ -148,6 +192,8 @@ cat <<SUMMARY
 SCAVIUM FAUCET PHASE 30 MIGRATION
 Mode:                 $MODE
 Remote:               $REMOTE
+Remote sudo:          ${REMOTE_SUDO:-<none>}
+Remote stage dir:     $REMOTE_STAGE_DIR
 Service:              $SERVICE_NAME
 Release ID:           $RELEASE_ID
 Release path:         $RELEASE_PATH
@@ -167,6 +213,7 @@ app_path="__APP_PATH__"
 release_path="__RELEASE_PATH__"
 current_path="__CURRENT_PATH__"
 remote_binary="__REMOTE_BINARY__"
+staged_binary="__REMOTE_STAGED_BINARY__"
 db_path="__REMOTE_DB_PATH__"
 env_file="__REMOTE_ENV_FILE__"
 backup_dir="__REMOTE_BACKUP_DIR__"
@@ -176,6 +223,7 @@ base_url="__LOCAL_BASE_URL__"
 smoke_admin="__SMOKE_ADMIN_CHECKS__"
 post_sleep="__POST_ACTIVATION_SLEEP__"
 keep_failed="__KEEP_FAILED_RELEASE__"
+remote_stage_dir="__REMOTE_STAGE_DIR__"
 
 fail() {
     echo "[migrate] ERROR: $*" >&2
@@ -190,12 +238,15 @@ curl_probe() {
     curl -fsS --max-time 8 "$@" "$url" >/dev/null
 }
 
-[[ -x "$remote_binary" ]] || fail "new binary is missing or not executable: $remote_binary"
+[[ "$(id -u)" -eq 0 ]] || fail "privileged migration script must run as root; set REMOTE_SUDO=sudo or run with a root DEPLOY_USER"
+[[ -x "$staged_binary" ]] || fail "staged binary is missing or not executable: $staged_binary"
 [[ -f "$env_file" ]] || fail "env file missing: $env_file"
 [[ -f "$db_path" ]] || fail "database missing: $db_path"
+command -v install >/dev/null 2>&1 || fail "install not installed"
 command -v tar >/dev/null 2>&1 || fail "tar not installed"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum not installed"
 command -v curl >/dev/null 2>&1 || fail "curl not installed"
+command -v systemctl >/dev/null 2>&1 || fail "systemctl not installed"
 
 previous_target=""
 if [[ -L "$current_path" ]]; then
@@ -207,6 +258,10 @@ fi
 [[ -x "$previous_target/scavium-faucet" ]] || fail "previous release binary is not executable: $previous_target/scavium-faucet"
 
 echo "[migrate] previous release: $previous_target"
+
+install -d -m 0755 "$release_path"
+install -m 0755 "$staged_binary" "$remote_binary"
+[[ -x "$remote_binary" ]] || fail "new binary is missing or not executable after install: $remote_binary"
 
 work_dir="${backup_dir}/.work-${backup_id}"
 rm -rf "$work_dir"
@@ -249,8 +304,8 @@ rm -rf "$work_dir"
 echo "[migrate] backup verified: $backup_bundle"
 
 ln -sfn "$release_path" "$current_path"
-sudo systemctl restart "${svc}.service"
-sudo systemctl is-active --quiet "${svc}.service"
+systemctl restart "${svc}.service"
+systemctl is-active --quiet "${svc}.service"
 sleep "$post_sleep"
 
 set +e
@@ -284,13 +339,15 @@ set -e
 if [[ "$health_rc" -ne 0 || "$ready_rc" -ne 0 || "$status_rc" -ne 0 || "$tokens_rc" -ne 0 || "$admin_rc" -ne 0 ]]; then
     echo "[migrate] smoke failed; rolling back symlink to $previous_target" >&2
     ln -sfn "$previous_target" "$current_path"
-    sudo systemctl restart "${svc}.service"
-    sudo systemctl is-active --quiet "${svc}.service" || true
+    systemctl restart "${svc}.service"
+    systemctl is-active --quiet "${svc}.service" || true
     if [[ "$keep_failed" != "yes" ]]; then
         rm -rf "$release_path"
     fi
     fail "migration failed and previous release was reactivated"
 fi
+
+rm -rf "$remote_stage_dir"
 
 echo "[migrate] migration completed"
 echo "[migrate] active release: $(readlink -f "$current_path")"
@@ -304,6 +361,7 @@ REMOTE_SCRIPT=${REMOTE_SCRIPT//__APP_PATH__/$APP_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__RELEASE_PATH__/$RELEASE_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__CURRENT_PATH__/$CURRENT_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_BINARY__/$REMOTE_BINARY}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_STAGED_BINARY__/$REMOTE_STAGED_BINARY}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_DB_PATH__/$REMOTE_DB_PATH}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_ENV_FILE__/$REMOTE_ENV_FILE}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_BACKUP_DIR__/$REMOTE_BACKUP_DIR}
@@ -313,18 +371,23 @@ REMOTE_SCRIPT=${REMOTE_SCRIPT//__LOCAL_BASE_URL__/$LOCAL_BASE_URL}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_ADMIN_CHECKS__/$SMOKE_ADMIN_CHECKS}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__POST_ACTIVATION_SLEEP__/$POST_ACTIVATION_SLEEP}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__KEEP_FAILED_RELEASE__/$KEEP_FAILED_RELEASE}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_STAGE_DIR__/$REMOTE_STAGE_DIR}
 
-run_remote "mkdir -p $(quote_sq "$RELEASE_PATH")"
-copy_remote "$LOCAL_BINARY" "$REMOTE_BINARY"
-run_remote "chmod 0755 $(quote_sq "$REMOTE_BINARY")"
+run_remote "rm -rf $(quote_sq "$REMOTE_STAGE_DIR") && mkdir -p $(quote_sq "$REMOTE_STAGE_DIR") && chmod 0700 $(quote_sq "$REMOTE_STAGE_DIR")"
+copy_remote "$LOCAL_BINARY" "$REMOTE_STAGED_BINARY"
+run_remote "chmod 0755 $(quote_sq "$REMOTE_STAGED_BINARY")"
+copy_text_remote "$REMOTE_SCRIPT" "$REMOTE_STAGED_SCRIPT"
+run_remote "chmod 0600 $(quote_sq "$REMOTE_STAGED_SCRIPT")"
 
 if [[ "$MODE" == "--plan" ]]; then
-    printf '+ ssh %q %s\n' "$REMOTE" "'bash -s' <<'REMOTE_MIGRATION'"
-    printf '%s\n' "$REMOTE_SCRIPT"
-    printf '%s\n' 'REMOTE_MIGRATION'
     echo ""
-    echo "Plan only. No remote changes were made."
-    exit 0
+    echo "The generated remote script will be executed through REMOTE_SUDO."
+    echo "Use REMOTE_SUDO='sudo -n' for passwordless/non-interactive sudo checks, REMOTE_SUDO='sudo' for an interactive sudo prompt, or REMOTE_SUDO='' when DEPLOY_USER is root."
 fi
 
-ssh "$REMOTE" 'bash -s' <<<"$REMOTE_SCRIPT"
+run_remote_privileged_script "$REMOTE_STAGED_SCRIPT"
+
+if [[ "$MODE" == "--plan" ]]; then
+    echo ""
+    echo "Plan only. No remote changes were made."
+fi
