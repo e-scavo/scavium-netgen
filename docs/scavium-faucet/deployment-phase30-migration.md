@@ -90,9 +90,9 @@ The helper performs the following sequence:
    - manifest with previous/new release metadata
 6. repoints `current` to the new release when using the release layout; direct-binary deployments are already replaced in place
 7. restarts systemd
-8. smoke-checks `/health`, `/ready`, `/api/v1/status`, and `/api/v1/tokens` from the VPS against `SMOKE_BASE_URL`
-9. when the admin token is readable from the env file, smoke-checks `/api/v1/admin/runtime` and `/api/v1/admin/wallet`
-10. if smoke fails, prints the latest `journalctl -u scavium-faucet.service` lines before rollback so startup failures such as SQLite migration errors are visible in the operator terminal
+8. smoke-checks `/health`, `/ready`, `/api/v1/status`, and `/api/v1/tokens` from the VPS against `SMOKE_BASE_URL` using `SMOKE_TIMEOUT_SECONDS` (default `15`) and `SMOKE_RETRIES` (default `1`)
+9. when the admin token is readable from the env file, smoke-checks `/api/v1/admin/runtime` and `/api/v1/admin/wallet` with the larger `SMOKE_ADMIN_TIMEOUT_SECONDS` window (default `30`) because admin wallet reads can be slower than public health/catalog endpoints
+10. if smoke fails, prints `journalctl -u scavium-faucet.service` lines from the activation window before rollback so startup failures such as SQLite migration errors are visible in the operator terminal without being buried under older crawler traffic
 11. automatically restores the previous symlink or previous direct binary and restarts the service if smoke fails
 
 
@@ -173,6 +173,27 @@ SMOKE_BASE_URL=https://faucet.testnet.scavium.network
 ```
 
 `LOCAL_BASE_URL` remains accepted as a backward-compatible alias only.
+
+
+## Smoke timeout tuning
+
+The helper treats public and admin smoke checks differently. Public endpoints should answer quickly, while `/api/v1/admin/wallet` may require a slower wallet/RPC-backed read and can legitimately approach the old 8 second curl limit. The defaults are therefore:
+
+```bash
+SMOKE_TIMEOUT_SECONDS=15
+SMOKE_ADMIN_TIMEOUT_SECONDS=30
+SMOKE_RETRIES=1
+```
+
+If the journal shows a smoke endpoint returned `status:200` just before rollback but curl reported `Operation timed out`, rerun with the current helper or explicitly increase the admin timeout:
+
+```bash
+SMOKE_ADMIN_TIMEOUT_SECONDS=45 \
+MIGRATION_CONFIRM=yes \
+scripts/migrate-scavium-faucet-phase30.sh --execute
+```
+
+Do not work around a real startup failure by increasing timeouts. If nginx returns `502` or the journal contains `create application failed`, fix the backend startup issue first.
 
 ## SQLite migration idempotency note
 

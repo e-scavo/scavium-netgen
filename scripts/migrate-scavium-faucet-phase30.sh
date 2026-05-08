@@ -38,6 +38,9 @@ Optional environment:
   SMOKE_ADMIN_CHECKS          yes/no. Default: yes when ADMIN token can be read by root from REMOTE_ENV_FILE
   POST_ACTIVATION_SLEEP       Seconds to wait before smoke. Default: 2
   FAILURE_JOURNAL_LINES       Journal lines printed before rollback on smoke failure. Default: 80
+  SMOKE_TIMEOUT_SECONDS       Timeout for public smoke requests. Default: 15
+  SMOKE_ADMIN_TIMEOUT_SECONDS Timeout for admin smoke requests. Default: 30
+  SMOKE_RETRIES               Retry count for transient smoke curl failures. Default: 1
   MIGRATION_CONFIRM           Must be yes for --execute.
   KEEP_FAILED_RELEASE         yes/no. Default: yes
 
@@ -172,6 +175,9 @@ SMOKE_ADMIN_CHECKS="${SMOKE_ADMIN_CHECKS:-yes}"
 POST_ACTIVATION_SLEEP="${POST_ACTIVATION_SLEEP:-2}"
 KEEP_FAILED_RELEASE="${KEEP_FAILED_RELEASE:-yes}"
 FAILURE_JOURNAL_LINES="${FAILURE_JOURNAL_LINES:-80}"
+SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-15}"
+SMOKE_ADMIN_TIMEOUT_SECONDS="${SMOKE_ADMIN_TIMEOUT_SECONDS:-30}"
+SMOKE_RETRIES="${SMOKE_RETRIES:-1}"
 
 require_value DEPLOY_HOST
 require_value DEPLOY_USER
@@ -210,6 +216,8 @@ Env file:             $REMOTE_ENV_FILE
 Backup bundle:        $REMOTE_BACKUP_BUNDLE
 Smoke base URL:       $SMOKE_BASE_URL
 Failure journal:      $FAILURE_JOURNAL_LINES lines
+Smoke timeout:        ${SMOKE_TIMEOUT_SECONDS}s public / ${SMOKE_ADMIN_TIMEOUT_SECONDS}s admin
+Smoke retries:        $SMOKE_RETRIES
 ======================================
 SUMMARY
 
@@ -234,6 +242,10 @@ post_sleep="__POST_ACTIVATION_SLEEP__"
 keep_failed="__KEEP_FAILED_RELEASE__"
 remote_stage_dir="__REMOTE_STAGE_DIR__"
 failure_journal_lines="__FAILURE_JOURNAL_LINES__"
+smoke_timeout="__SMOKE_TIMEOUT_SECONDS__"
+smoke_admin_timeout="__SMOKE_ADMIN_TIMEOUT_SECONDS__"
+smoke_retries="__SMOKE_RETRIES__"
+activation_started_utc=""
 
 fail() {
     echo "[migrate] ERROR: $*" >&2
@@ -242,15 +254,37 @@ fail() {
 
 curl_probe() {
     local name="$1"
-    local url="$2"
-    shift 2
+    local timeout="$2"
+    local url="$3"
+    shift 3
+    local attempt=0
+    local rc=0
+
     echo "[migrate] smoke: $name"
-    curl -fsS --max-time 8 "$@" "$url" >/dev/null
+    while true; do
+        rc=0
+        curl -fsS --max-time "$timeout" "$@" "$url" >/dev/null || rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            return 0
+        fi
+        if [[ "$attempt" -ge "$smoke_retries" ]]; then
+            echo "[migrate] smoke failed: ${name} rc=${rc} url=${url} timeout=${timeout}s attempts=$((attempt + 1))" >&2
+            return "$rc"
+        fi
+        attempt=$((attempt + 1))
+        echo "[migrate] smoke retry: ${name} attempt=$((attempt + 1))" >&2
+        sleep 1
+    done
 }
 
 print_failure_journal() {
-    echo "[migrate] service journal before rollback (last ${failure_journal_lines} lines):" >&2
-    journalctl -u "${svc}.service" -n "$failure_journal_lines" --no-pager >&2 || true
+    if [[ -n "$activation_started_utc" ]]; then
+        echo "[migrate] service journal since activation ${activation_started_utc} (last ${failure_journal_lines} lines):" >&2
+        journalctl -u "${svc}.service" --since "$activation_started_utc" -n "$failure_journal_lines" --no-pager >&2 || true
+    else
+        echo "[migrate] service journal before rollback (last ${failure_journal_lines} lines):" >&2
+        journalctl -u "${svc}.service" -n "$failure_journal_lines" --no-pager >&2 || true
+    fi
 }
 
 [[ "$(id -u)" -eq 0 ]] || fail "privileged migration script must run as root; set REMOTE_SUDO=sudo or run with a root DEPLOY_USER"
@@ -343,18 +377,19 @@ else
     install -m 0755 "$staged_binary" "$legacy_binary"
     [[ -x "$legacy_binary" ]] || fail "new binary is missing or not executable after direct install: $legacy_binary"
 fi
+activation_started_utc="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 systemctl restart "${svc}.service"
 systemctl is-active --quiet "${svc}.service"
 sleep "$post_sleep"
 
 set +e
-curl_probe health "$base_url/health"
+curl_probe health "$smoke_timeout" "$base_url/health"
 health_rc=$?
-curl_probe ready "$base_url/ready"
+curl_probe ready "$smoke_timeout" "$base_url/ready"
 ready_rc=$?
-curl_probe status "$base_url/api/v1/status"
+curl_probe status "$smoke_timeout" "$base_url/api/v1/status"
 status_rc=$?
-curl_probe tokens "$base_url/api/v1/tokens"
+curl_probe tokens "$smoke_timeout" "$base_url/api/v1/tokens"
 tokens_rc=$?
 admin_rc=0
 if [[ "$smoke_admin" == "yes" ]]; then
@@ -363,10 +398,10 @@ if [[ "$smoke_admin" == "yes" ]]; then
         admin_token="$(grep -E '^SCAVIUM_FAUCET_ADMIN_TOKEN=' "$env_file" | tail -1 | cut -d= -f2- || true)"
     fi
     if [[ -n "$admin_token" ]]; then
-        curl_probe admin-runtime "$base_url/api/v1/admin/runtime" -H "Authorization: Bearer ${admin_token}"
+        curl_probe admin-runtime "$smoke_admin_timeout" "$base_url/api/v1/admin/runtime" -H "Authorization: Bearer ${admin_token}"
         admin_rc=$?
         if [[ "$admin_rc" -eq 0 ]]; then
-            curl_probe admin-wallet "$base_url/api/v1/admin/wallet" -H "Authorization: Bearer ${admin_token}"
+            curl_probe admin-wallet "$smoke_admin_timeout" "$base_url/api/v1/admin/wallet" -H "Authorization: Bearer ${admin_token}"
             admin_rc=$?
         fi
     else
@@ -425,6 +460,9 @@ REMOTE_SCRIPT=${REMOTE_SCRIPT//__POST_ACTIVATION_SLEEP__/$POST_ACTIVATION_SLEEP}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__KEEP_FAILED_RELEASE__/$KEEP_FAILED_RELEASE}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__REMOTE_STAGE_DIR__/$REMOTE_STAGE_DIR}
 REMOTE_SCRIPT=${REMOTE_SCRIPT//__FAILURE_JOURNAL_LINES__/$FAILURE_JOURNAL_LINES}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_TIMEOUT_SECONDS__/$SMOKE_TIMEOUT_SECONDS}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_ADMIN_TIMEOUT_SECONDS__/$SMOKE_ADMIN_TIMEOUT_SECONDS}
+REMOTE_SCRIPT=${REMOTE_SCRIPT//__SMOKE_RETRIES__/$SMOKE_RETRIES}
 
 run_remote "rm -rf $(quote_sq "$REMOTE_STAGE_DIR") && mkdir -p $(quote_sq "$REMOTE_STAGE_DIR") && chmod 0700 $(quote_sq "$REMOTE_STAGE_DIR")"
 copy_remote "$LOCAL_BINARY" "$REMOTE_STAGED_BINARY"

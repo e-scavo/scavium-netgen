@@ -213,7 +213,7 @@ Do not publish private keys, captcha secrets, admin bearer tokens, or raw enviro
 
 ## Phase 30 binary migration
 
-Use `scripts/migrate-scavium-faucet-phase30.sh` when replacing the current production binary with the Phase 30 build. The helper is plan-first and expects an already-reviewed local binary and supports both the preferred release layout (`APP_PATH/current -> APP_PATH/releases/<release>`) and the current legacy/direct binary layout (`APP_PATH/bin/scavium-faucet`). It supports normal non-root VPS users by copying artifacts to `REMOTE_STAGE_DIR` first and executing privileged release/backup/systemd work through `REMOTE_SUDO` (`sudo` by default). It creates and verifies a remote SQLite/config backup before activation, restarts systemd, validates `/health`, `/ready`, `/api/v1/status`, `/api/v1/tokens`, and admin runtime/wallet endpoints when the token is readable from the VPS against `SMOKE_BASE_URL` (default `https://DEPLOY_HOST`), then restores the previous symlink or direct binary if smoke validation fails.
+Use `scripts/migrate-scavium-faucet-phase30.sh` when replacing the current production binary with the Phase 30 build. The helper is plan-first and expects an already-reviewed local binary and supports both the preferred release layout (`APP_PATH/current -> APP_PATH/releases/<release>`) and the current legacy/direct binary layout (`APP_PATH/bin/scavium-faucet`). It supports normal non-root VPS users by copying artifacts to `REMOTE_STAGE_DIR` first and executing privileged release/backup/systemd work through `REMOTE_SUDO` (`sudo` by default). It creates and verifies a remote SQLite/config backup before activation, restarts systemd, validates `/health`, `/ready`, `/api/v1/status`, `/api/v1/tokens`, and admin runtime/wallet endpoints when the token is readable from the VPS against `SMOKE_BASE_URL` (default `https://DEPLOY_HOST`), using separate public/admin smoke timeouts so slow admin wallet reads do not cause false rollbacks, then restores the previous symlink or direct binary if smoke validation fails.
 
 Detailed operator steps are documented in [deployment-phase30-migration.md](deployment-phase30-migration.md). Keep `SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS` unset for legacy-only rollout, or set it to exact browser application origins before enabling browser wallet challenge/proof flows. Missing `Origin` remains valid for native, desktop, mobile, CLI, and server-to-server clients.
 
@@ -686,6 +686,11 @@ curl -s -X DELETE -H "Authorization: Bearer $SCAVIUM_FAUCET_ADMIN_TOKEN" \
 
 After a change, check `/api/v1/config`, `/api/v1/tokens`, an address eligibility response, and `/api/v1/admin/audit?limit=20`. The public token catalog reflects runtime daily-budget overrides for the same claim-safe budget fields exposed by `/api/v1/config`, so it should not drift from policy enforcement after an admin update. Do not use runtime policy for secrets, RPC endpoints, token contract metadata, or signer configuration; those remain restart-managed.
 
+
+
+## Phase 30 smoke timeout false rollback
+
+If the migration reaches `/api/v1/admin/wallet`, the service journal records `status:200`, and the helper still rolls back with `curl: (28) Operation timed out`, the backend is running but the admin wallet smoke exceeded the curl timeout. The current helper uses `SMOKE_ADMIN_TIMEOUT_SECONDS=30` and one retry by default. Rerun the migration with the current source; if the wallet/RPC path is still slow, set a larger explicit value such as `SMOKE_ADMIN_TIMEOUT_SECONDS=45`. Keep public endpoint failures and nginx `502` responses as hard rollback signals.
 
 ## Phase 30 SQLite migration startup failure
 
