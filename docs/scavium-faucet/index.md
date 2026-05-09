@@ -8,9 +8,9 @@ This directory documents the **implemented project surface**, not the full roadm
 
 `scavium-faucet` is deployed and operational on Debian 13 at `https://faucet.testnet.scavium.network` behind nginx with certbot-managed TLS and a systemd-managed backend process.
 
-Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility.
+Phase 14 deployment work is COMPLETED for the testnet public faucet target. Phase 15 Abuse Protection is CLOSED for the public testnet scope, with captcha, durable abuse signals, progressive enforcement, and retention documented as the active production baseline. Phase 16 Observability & Operations is CLOSED as the first operator-facing visibility layer over the same deployed service. Phase 17 Token Support is CLOSED as the complete multi-token faucet layer, including config-driven native/ERC20 registration, strict token-aware claim validation, token-scoped enforcement and metrics, browser-side token selection, and the Phase 17.5 post-audit fixes. Phase 18 Admin Control is CLOSED after the Phase 18.7 post-audit fix pass: the admin surface exposes metrics, runtime visibility, queue visibility/control, claim retry/cancel, blocklist management, mode control, and audit trail behavior while preserving public API compatibility. Phase 28 Runtime Policy is CLOSED with durable non-secret budget/throttle overrides reflected by public config, token catalog, and enforcement paths. Phase 29 Campaigns, allowlists, and invitation codes are CLOSED with durable admin APIs, runtime enforcement, bounded exports, rollback, and audit behavior. Phase 30 Wallet Integration is CLOSED through the production migration hardening pass, adding optional wallet challenges/proofs with SQLite persistence, replay resistance, fallback parity, legacy claim compatibility, partially applied SQLite migration recovery, journal-assisted migration failure diagnostics, and documentation discoverability for the fix 7 cross-phase hardening plus fix 8/9 closure alignment.
 
-The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin-protected Prometheus-compatible metrics text export, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, alerting guidance, local smoke tests, and enriched health/readiness probes, review-first SQLite/config backup and restore scripts, and wallet refill/rotation runbooks.
+The service is production-ready for the current testnet scope, including validated TLS auto-renewal, active firewall policy, loopback-isolated backend exposure, request correlation, structured claim-flow logs, admin-protected runtime metrics, admin-protected Prometheus-compatible metrics text export, admin runtime/queue visibility, admin queue controls, runtime-effective faucet mode control, alerting guidance, local smoke tests, and enriched health/readiness probes, review-first SQLite/config backup and restore scripts, Phase 30 binary migration helper, and wallet refill/rotation runbooks.
 
 ## Documentation
 
@@ -24,6 +24,7 @@ The service is production-ready for the current testnet scope, including validat
 | [deployment-certbot.md](deployment-certbot.md) | Manual ACME and certbot guide for TLS issuance and renewal |
 | [deployment-firewall.md](deployment-firewall.md) | Public exposure and firewall policy for VPS and cloud edge |
 | [deployment-rollback.md](deployment-rollback.md) | Rollback procedure for release symlinks and service recovery |
+| [deployment-phase30-migration.md](deployment-phase30-migration.md) | Phase 30 binary migration runbook with pre-backup, activation, smoke validation, and rollback guardrails |
 | [runbook.md](runbook.md) | Build, run, health checks, backup/restore, wallet refill/rotation, and operational caveats |
 | [security.md](security.md) | Current security properties, gaps, and deployment guidance |
 | [token-registration.md](token-registration.md) | Phase 17.2 testnet token registration guide for native and ERC20 faucet assets |
@@ -31,13 +32,16 @@ The service is production-ready for the current testnet scope, including validat
 | [phase26-public-frontend-closure-audit.md](phase26-public-frontend-closure-audit.md) | Phase 26 closure audit and deferred-work boundary |
 | [phase27-advanced-anti-abuse-closure-audit.md](phase27-advanced-anti-abuse-closure-audit.md) | Phase 27 advanced anti-abuse implementation and closure audit |
 | [phase27-fix4-completion.md](phase27-fix4-completion.md) | Phase 27 Fix4 completion note for manual-review/risk-rejection ordering |
+| [phase28-config-budget-control.md](phase28-config-budget-control.md) | Phase 28 durable runtime policy overrides for budget and throttling controls |
+| [phase29-campaigns-allowlists-invitation-codes.md](phase29-campaigns-allowlists-invitation-codes.md) | Phase 29 campaign, invitation-code, allowlist, export, audit, and rollback closure |
+| [phase30-wallet-integration.md](phase30-wallet-integration.md) | Phase 30 wallet challenge/proof closure note and deferred wallet backlog |
 
 ## Current implementation snapshot
 
 - The binary loads environment config and listens on `127.0.0.1:18080` by default.
 - Non-API paths serve the embedded frontend; `/api/*` paths return JSON.
-- Public endpoints support health, readiness, status, config, token catalog discovery, claim creation, claim lookup, address eligibility, and version.
-- Claim data and abuse-signal observations are persisted in SQLite (WAL mode). Restarting the process does not lose queued or in-flight claims or recorded claim-intake signals.
+- Public endpoints support health, readiness, status, config, token catalog discovery, wallet challenge issuance, claim creation, claim lookup, address eligibility, and version.
+- Claim data, wallet challenges, and abuse-signal observations are persisted in SQLite (WAL mode). Restarting the process does not lose queued or in-flight claims, short-lived wallet challenges, or recorded claim-intake signals.
 - The background worker processes the SQLite claim queue and dispatches the configured sender (dry-run or real).
 - Readiness checks are real probes against the database and queue; RPC and wallet checks activate when not in dry-run mode.
 - `AdminToken` is wired from config into the HTTP handler; setting `SCAVIUM_FAUCET_ADMIN_TOKEN` enables the `/api/v1/admin/*` endpoints.
@@ -55,6 +59,7 @@ The service is production-ready for the current testnet scope, including validat
 - Admin audit entries and structured admin-action logs avoid admin-token leakage; actor attribution uses trusted-proxy-aware real IP extraction.
 - `/health` includes uptime and build metadata; `/ready` includes per-check duration and aggregate readiness summary while keeping the real DB/queue/RPC/wallet probes.
 - `scripts/scavium-faucet-backup.sh` and `scripts/scavium-faucet-restore.sh` provide plan-first backup/restore flows for SQLite and reviewed configuration.
+- `scripts/migrate-scavium-faucet-phase30.sh` stages a new binary through a user-writable remote temp dir, executes privileged VPS operations through `REMOTE_SUDO`, generates VPS-side env/nginx candidate files, optionally applies them with explicit flags, verifies a pre-migration SQLite/config backup, archives the previous direct binary in the backup bundle for legacy layouts, supports release-symlink and legacy direct-binary layouts, performs VPS-side smoke checks through `SMOKE_BASE_URL` (default `https://DEPLOY_HOST`) with separate public/admin timeouts, prints activation-window service journal excerpts on smoke failure, and restores applied config plus the previous symlink or direct binary if validation fails.
 - Wallet refill and rotation remain manual runbook operations; no automatic treasury refill or fund-transfer automation is introduced.
 
 ## Quick start

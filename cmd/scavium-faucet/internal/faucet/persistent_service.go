@@ -195,8 +195,12 @@ func tokenResponsesWithRuntimePolicy(tokens []config.TokenConfig, policy domain.
 
 // Tokens returns the public faucet token catalog. It intentionally exposes only
 // claim-safe metadata and never includes private keys or operational secrets.
-func (s *PersistentReadService) Tokens(context.Context) ([]TokenResponse, error) {
-	return tokenResponses(s.cfg.NormalizedTokens()), nil
+func (s *PersistentReadService) Tokens(ctx context.Context) ([]TokenResponse, error) {
+	policy, err := s.runtimePolicy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return tokenResponsesWithRuntimePolicy(s.cfg.NormalizedTokens(), policy), nil
 }
 
 func (s *PersistentReadService) AddressStatus(ctx context.Context, address common.Address) (AddressStatusResponse, error) {
@@ -389,6 +393,55 @@ func (s *PersistentReadService) dailyBudgetStatus(ctx context.Context, tokenID s
 	return &BudgetStatus{BudgetWei: budget.String(), UsedWei: used.String(), RemainingWei: remaining.String()}, nil
 }
 
+func (s *PersistentReadService) CreateWalletChallenge(ctx context.Context, request WalletChallengeRequest) (WalletChallengeResponse, error) {
+	challenge, err := newWalletChallenge(request.Address, s.now())
+	if err != nil {
+		return WalletChallengeResponse{}, err
+	}
+	store, ok := s.claims.(walletChallengeStore)
+	if !ok {
+		return WalletChallengeResponse{}, errors.New("wallet challenge store unavailable")
+	}
+	created, err := store.CreateWalletChallenge(ctx, challenge)
+	if err != nil {
+		return WalletChallengeResponse{}, err
+	}
+	return walletChallengeResponse(created), nil
+}
+
+func (s *PersistentReadService) verifyOptionalWalletProof(ctx context.Context, request ClaimRequest) error {
+	challengeID := strings.TrimSpace(request.WalletChallengeID)
+	sig := strings.TrimSpace(request.WalletSignature)
+	if challengeID == "" && sig == "" {
+		return nil
+	}
+	if challengeID == "" || sig == "" {
+		return claimError(ErrClaimRejected, "wallet_proof_incomplete")
+	}
+	store, ok := s.claims.(walletChallengeStore)
+	if !ok {
+		return errors.New("wallet challenge store unavailable")
+	}
+	challenge, err := store.GetWalletChallenge(ctx, challengeID, request.Address, s.now())
+	if err != nil {
+		if errors.Is(err, ErrWalletChallengeInvalid) || errors.Is(err, domain.ErrNotFound) {
+			return claimError(ErrClaimRejected, "invalid_wallet_challenge")
+		}
+		return err
+	}
+	if err := verifyWalletSignature(request.Address, challenge.Message, sig); err != nil {
+		return err
+	}
+	_, err = store.ConsumeWalletChallenge(ctx, challengeID, request.Address, s.now())
+	if err != nil {
+		if errors.Is(err, ErrWalletChallengeInvalid) || errors.Is(err, domain.ErrNotFound) {
+			return claimError(ErrClaimRejected, "invalid_wallet_challenge")
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRequest) (ClaimResponse, error) {
 	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
 	if idempotencyKey != "" {
@@ -401,6 +454,9 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 				return ClaimResponse{}, err
 			}
 		}
+	}
+	if err := s.verifyOptionalWalletProof(ctx, request); err != nil {
+		return ClaimResponse{}, err
 	}
 
 	modeStatus := configuredStatus(s.faucetMode())
@@ -495,6 +551,7 @@ func (s *PersistentReadService) CreateClaim(ctx context.Context, request ClaimRe
 	s.recordAbuseSignal(ctx, request, domain.AbuseSignalClaimAccepted, created.ID, "", 0)
 
 	if err := s.queue.Enqueue(ctx, created.ID); err != nil {
+		_, _ = s.claims.UpdateClaimStatus(ctx, created.ID, domain.ClaimStatusRejected, "enqueue_failed")
 		return ClaimResponse{}, fmt.Errorf("enqueue claim: %w", err)
 	}
 

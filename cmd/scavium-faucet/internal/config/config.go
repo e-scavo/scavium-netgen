@@ -49,6 +49,7 @@ const (
 	EnvAbuseSignalRetentionDays             = "SCAVIUM_FAUCET_ABUSE_SIGNAL_RETENTION_DAYS"
 	EnvTrustedProxy                         = "SCAVIUM_FAUCET_TRUSTED_PROXY"
 	EnvCORSAllowedOrigins                   = "SCAVIUM_FAUCET_CORS_ALLOWED_ORIGINS"
+	EnvWalletAllowedOrigins                 = "SCAVIUM_FAUCET_WALLET_ALLOWED_ORIGINS"
 	EnvWorkerEnabled                        = "SCAVIUM_FAUCET_WORKER_ENABLED"
 	EnvWorkerPollSeconds                    = "SCAVIUM_FAUCET_WORKER_POLL_SECONDS"
 	EnvWatcherEnabled                       = "SCAVIUM_FAUCET_WATCHER_ENABLED"
@@ -129,6 +130,7 @@ type Config struct {
 	AbuseSignalRetentionDays             int
 	TrustedProxy                         string
 	CORSAllowedOrigins                   []string
+	WalletAllowedOrigins                 []string
 	WorkerEnabled                        bool
 	WorkerPollSeconds                    int
 	WatcherEnabled                       bool
@@ -334,6 +336,7 @@ func FromEnv(lookup func(string) string) (Config, error) {
 
 	cfg.TrustedProxy = strings.TrimSpace(lookup(EnvTrustedProxy))
 	cfg.CORSAllowedOrigins = splitCommaList(lookup(EnvCORSAllowedOrigins))
+	cfg.WalletAllowedOrigins = splitCommaList(lookup(EnvWalletAllowedOrigins))
 	cfg.PrivateKeyHex = strings.TrimSpace(lookup(EnvPrivateKey))
 
 	if raw := strings.TrimSpace(lookup(EnvWorkerEnabled)); raw != "" {
@@ -416,6 +419,7 @@ func Defaults() Config {
 		AbuseSignalRetentionDays:             30,
 		TrustedProxy:                         "",
 		CORSAllowedOrigins:                   nil,
+		WalletAllowedOrigins:                 nil,
 		WorkerEnabled:                        true,
 		WorkerPollSeconds:                    5,
 		WatcherEnabled:                       false,
@@ -503,6 +507,11 @@ func (c Config) Validate() error {
 	for _, origin := range c.CORSAllowedOrigins {
 		if strings.TrimSpace(origin) == "*" {
 			errs = append(errs, errors.New("CORS allowed origins must not contain wildcard"))
+		}
+	}
+	for _, origin := range c.WalletAllowedOrigins {
+		if strings.TrimSpace(origin) == "*" {
+			errs = append(errs, errors.New("wallet allowed origins must not contain wildcard"))
 		}
 	}
 	provider := strings.TrimSpace(strings.ToLower(c.CaptchaProvider))

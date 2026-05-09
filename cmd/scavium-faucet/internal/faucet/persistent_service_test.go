@@ -1338,3 +1338,88 @@ func TestPersistentReadServiceRejectsCreatedInviteClaimWhenConsumeFails(t *testi
 		t.Fatalf("claim status/reason = %q/%q, want rejected/invalid_campaign", claims[0].Status, claims[0].Reason)
 	}
 }
+
+type failingQueueStore struct{}
+
+func (failingQueueStore) Enqueue(context.Context, string) error {
+	return errors.New("queue unavailable")
+}
+func (failingQueueStore) DequeueBatch(context.Context, int) ([]domain.Claim, error) { return nil, nil }
+func (failingQueueStore) Ack(context.Context, string, domain.Transaction) error     { return nil }
+func (failingQueueStore) Fail(context.Context, string, string, int) error           { return nil }
+
+func TestPersistentReadServiceRejectsClaimWhenEnqueueFails(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	service := NewPersistentReadServiceWithClock(cfg, store, failingQueueStore{}, store, func() time.Time { return persistentTestNow() })
+	service.SetCampaignStore(store)
+	service.SetClaimIDGenerator(func() (string, error) { return "claim_enqueue_fail", nil })
+
+	_, err := service.CreateClaim(context.Background(), ClaimRequest{Address: persistentTestAddress()})
+	if err == nil {
+		t.Fatal("CreateClaim returned nil error, want enqueue failure")
+	}
+
+	stored, getErr := store.GetClaim(context.Background(), "claim_enqueue_fail")
+	if getErr != nil {
+		t.Fatalf("get persisted claim: %v", getErr)
+	}
+	if stored.Status != domain.ClaimStatusRejected || stored.Reason != "enqueue_failed" {
+		t.Fatalf("stored claim status/reason = %s/%q, want rejected/enqueue_failed", stored.Status, stored.Reason)
+	}
+}
+
+func TestPersistentReadServiceTokensReportsRuntimePolicy(t *testing.T) {
+	store := openPersistentTestStore(t, "")
+	defer store.Close()
+	cfg := persistentTestConfig()
+	cfg.DailyBudgetWei = big.NewInt(1000)
+	cfg.Tokens = []config.TokenConfig{
+		{ID: "native", Symbol: "SCAV", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(42), DailyBudgetWei: big.NewInt(1000)},
+		{ID: "bonus", Symbol: "BON", Type: domain.TokenTypeNative, Decimals: 18, AmountWei: big.NewInt(7), DailyBudgetWei: big.NewInt(800)},
+	}
+	if err := store.SetRuntimePolicy(context.Background(), domain.RuntimePolicy{
+		DailyBudgetWei:      big.NewInt(500),
+		TokenDailyBudgetWei: map[string]*big.Int{"bonus": big.NewInt(125)},
+	}); err != nil {
+		t.Fatalf("set runtime policy: %v", err)
+	}
+	service := newPersistentTestService(t, store, cfg, persistentTestNow())
+
+	got, err := service.Tokens(context.Background())
+	if err != nil {
+		t.Fatalf("tokens: %v", err)
+	}
+	budgets := map[string]string{}
+	for _, token := range got {
+		budgets[token.ID] = token.DailyBudgetWei
+	}
+	if budgets["native"] != "500" || budgets["bonus"] != "125" {
+		t.Fatalf("runtime token budgets = %#v, want native=500 bonus=125", budgets)
+	}
+}
+
+func TestInMemoryAddressStatusReportsCooldownParity(t *testing.T) {
+	cfg := persistentTestConfig()
+	cfg.CooldownSeconds = 600
+	now := persistentTestNow()
+	service := NewInMemoryReadServiceWithClock(cfg, func() time.Time { return now })
+	service.SetClaimIDGenerator(func() (string, error) { return "claim_memory_cooldown", nil })
+	addr := persistentTestAddress()
+
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: addr}); err != nil {
+		t.Fatalf("create claim: %v", err)
+	}
+	now = now.Add(time.Minute)
+	status, err := service.AddressStatus(context.Background(), addr)
+	if err != nil {
+		t.Fatalf("address status: %v", err)
+	}
+	if status.Eligible || status.Reason != "cooldown_active" || status.CooldownRemainingSeconds != 540 || status.NextEligibleTime == "" {
+		t.Fatalf("status = %#v, want cooldown_active with 540 seconds", status)
+	}
+	if len(status.Tokens) == 0 || status.Tokens[0].Eligible || status.Tokens[0].Reason != "cooldown_active" || status.Tokens[0].CooldownRemainingSeconds != 540 {
+		t.Fatalf("token status = %#v, want cooldown_active with 540 seconds", status.Tokens)
+	}
+}

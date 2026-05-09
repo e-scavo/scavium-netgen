@@ -1150,6 +1150,14 @@ func (s *InMemoryAdminService) AddAllowlistEntry(_ context.Context, req Allowlis
 	return nil
 }
 
+func isDuplicateOrConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "constraint") || strings.Contains(msg, "unique") || strings.Contains(msg, "foreign key") || strings.Contains(msg, "duplicate")
+}
+
 func (s *SQLiteReadAdminService) CreateCampaign(ctx context.Context, req CampaignRequest, actor string) (domain.Campaign, error) {
 	store, ok := s.reads.(CampaignStore)
 	if !ok {
@@ -1166,6 +1174,9 @@ func (s *SQLiteReadAdminService) CreateCampaign(ctx context.Context, req Campaig
 	}
 	created, err := store.CreateCampaign(ctx, campaign)
 	if err != nil {
+		if isDuplicateOrConstraintError(err) {
+			return domain.Campaign{}, ErrInvalidCampaign
+		}
 		return domain.Campaign{}, err
 	}
 	if err := s.appendAudit(ctx, AuditEntry{Action: "campaign_create", Actor: actor, Target: created.ID, CreatedAt: s.now().UTC().Format(time.RFC3339)}); err != nil {
@@ -1300,6 +1311,9 @@ func (s *SQLiteReadAdminService) CreateInvitationCode(ctx context.Context, req I
 	}
 	created, err := store.CreateInvitationCode(ctx, code)
 	if err != nil {
+		if isDuplicateOrConstraintError(err) {
+			return domain.InvitationCode{}, ErrInvalidCampaign
+		}
 		return domain.InvitationCode{}, err
 	}
 	if err := s.appendAudit(ctx, AuditEntry{Action: "invitation_create", Actor: actor, Target: created.Code, Detail: created.CampaignID, CreatedAt: now.Format(time.RFC3339)}); err != nil {

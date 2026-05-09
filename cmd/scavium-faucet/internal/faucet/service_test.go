@@ -2,6 +2,7 @@ package faucet
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"testing"
@@ -9,6 +10,9 @@ import (
 
 	"scavium-netgen/cmd/scavium-faucet/internal/config"
 	"scavium-netgen/cmd/scavium-faucet/internal/domain"
+
+	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func testConfig() config.Config {
@@ -265,5 +269,40 @@ func TestInMemoryReadServiceRejectsInvalidToken(t *testing.T) {
 	}
 	if claimErr.Reason != "invalid_token" {
 		t.Fatalf("reason = %q, want invalid_token", claimErr.Reason)
+	}
+}
+
+func TestInMemoryWalletChallengeAllowsOptionalSignature(t *testing.T) {
+	service := NewInMemoryReadService(testConfig())
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	challenge, err := service.CreateWalletChallenge(context.Background(), WalletChallengeRequest{Address: address})
+	if err != nil {
+		t.Fatalf("challenge: %v", err)
+	}
+	sig, err := crypto.Sign(accounts.TextHash([]byte(challenge.Message)), key)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	claim, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address, TokenID: "native", WalletChallengeID: challenge.ID, WalletSignature: "0x" + hex.EncodeToString(sig)})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claim.Address != address.Hex() {
+		t.Fatalf("claim address = %q", claim.Address)
+	}
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address, TokenID: "native", WalletChallengeID: challenge.ID, WalletSignature: "0x" + hex.EncodeToString(sig)}); !errors.Is(err, ErrClaimRejected) {
+		t.Fatalf("replay err = %v, want claim rejected", err)
+	}
+}
+
+func TestInMemoryWalletProofIsOptionalForLegacyClaim(t *testing.T) {
+	service := NewInMemoryReadService(testConfig())
+	address := domain.MustValidateAddress("0x52908400098527886E0F7030069857D2E4169EE7")
+	if _, err := service.CreateClaim(context.Background(), ClaimRequest{Address: address, TokenID: "native"}); err != nil {
+		t.Fatalf("legacy claim: %v", err)
 	}
 }

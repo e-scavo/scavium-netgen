@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: SCAVIUM Faucet API
-  version: phase-29
+  version: phase-30
   description: |
     Lightweight maintained contract for the implemented SCAVIUM Faucet HTTP API.
     This document mirrors real code and intentionally avoids generator dependencies.
@@ -70,6 +70,24 @@ paths:
         '400': { description: Invalid address or pagination }
   /api/v1/faucet/address/{address}/history:
     $ref: '#/paths/~1api~1v1~1address~1{address}~1history'
+  /api/v1/wallet/challenge:
+    post:
+      summary: Issue a short-lived wallet challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WalletChallengeRequest' }
+      responses:
+        '201':
+          description: Wallet challenge issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WalletChallenge' }
+        '400': { description: Invalid JSON or address }
+        '403': { description: Origin not allowed }
+  /api/v1/faucet/wallet/challenge:
+    $ref: '#/paths/~1api~1v1~1wallet~1challenge'
   /api/v1/claim:
     post:
       summary: Create a faucet claim
@@ -330,6 +348,21 @@ components:
         message: { type: string }
         details: { type: object, additionalProperties: true }
         request_id: { type: string }
+    WalletChallengeRequest:
+      type: object
+      required: [address]
+      properties:
+        address: { type: string }
+    WalletChallenge:
+      type: object
+      required: [id, address, nonce, message, expires_at, created_at]
+      properties:
+        id: { type: string }
+        address: { type: string }
+        nonce: { type: string }
+        message: { type: string }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
     ClaimRequest:
       type: object
       required: [address]
@@ -338,6 +371,8 @@ components:
         token_id: { type: string }
         campaign_id: { type: string }
         invitation_code: { type: string }
+        wallet_challenge_id: { type: string }
+        wallet_signature: { type: string }
         captcha_token: { type: string }
         fingerprint: { type: string }
         website: { type: string, description: "Optional honeypot field; omit or leave empty." }

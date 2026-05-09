@@ -135,15 +135,61 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
-		if _, err := s.db.ExecContext(ctx, string(sqlText)); err != nil {
-			return fmt.Errorf("apply migration %s: %w", name, err)
-		}
-		if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, formatTime(time.Now().UTC())); err != nil {
-			return fmt.Errorf("record migration %s: %w", name, err)
+		if err := s.applyMigration(ctx, name, string(sqlText)); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func (s *Store) applyMigration(ctx context.Context, name string, sqlText string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration %s: %w", name, err)
+	}
+	defer tx.Rollback()
+
+	for _, stmt := range splitMigrationStatements(sqlText) {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			if isAlreadyAppliedAddColumn(stmt, err) {
+				continue
+			}
+			return fmt.Errorf("apply migration %s: %w", name, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, formatTime(time.Now().UTC())); err != nil {
+		return fmt.Errorf("record migration %s: %w", name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration %s: %w", name, err)
+	}
+	return nil
+}
+
+func splitMigrationStatements(sqlText string) []string {
+	parts := strings.Split(sqlText, ";")
+	statements := make([]string, 0, len(parts))
+	for _, part := range parts {
+		stmt := strings.TrimSpace(part)
+		if stmt == "" || strings.HasPrefix(stmt, "--") {
+			continue
+		}
+		statements = append(statements, stmt)
+	}
+	return statements
+}
+
+func isAlreadyAppliedAddColumn(stmt string, err error) bool {
+	if err == nil {
+		return false
+	}
+	normalized := strings.ToUpper(strings.Join(strings.Fields(stmt), " "))
+	if !strings.HasPrefix(normalized, "ALTER TABLE ") || !strings.Contains(normalized, " ADD COLUMN ") {
+		return false
+	}
+	errText := strings.ToLower(err.Error())
+	return strings.Contains(errText, "duplicate column name")
 }
 
 // RecordAbuseSignal persists a production-safe anti-abuse signal.  Signal
@@ -2159,4 +2205,122 @@ func nullableTime(t *time.Time) any {
 		return nil
 	}
 	return formatTime(*t)
+}
+
+// CreateWalletChallenge stores a short-lived non-secret wallet challenge.
+func (s *Store) CreateWalletChallenge(ctx context.Context, challenge domain.WalletChallenge) (domain.WalletChallenge, error) {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO wallet_challenges (id, address, nonce, message, expires_at, consumed_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, challenge.ID, challenge.Address.Hex(), challenge.Nonce, challenge.Message, formatTime(challenge.ExpiresAt), nullableTime(challenge.ConsumedAt), formatTime(challenge.CreatedAt))
+	if err != nil {
+		return domain.WalletChallenge{}, fmt.Errorf("create wallet challenge: %w", err)
+	}
+	return challenge, nil
+}
+
+// GetWalletChallenge returns an unexpired, unconsumed challenge without consuming it.
+func (s *Store) GetWalletChallenge(ctx context.Context, id string, address common.Address, now time.Time) (domain.WalletChallenge, error) {
+	var c domain.WalletChallenge
+	var addressText, expiresAt, consumedAt, createdAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, address, nonce, message, expires_at, COALESCE(consumed_at, ''), created_at
+		FROM wallet_challenges
+		WHERE id = ?
+	`, strings.TrimSpace(id)).Scan(&c.ID, &addressText, &c.Nonce, &c.Message, &expiresAt, &consumedAt, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
+	}
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	if !common.IsHexAddress(addressText) {
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
+	}
+	c.Address = common.HexToAddress(addressText)
+	c.ExpiresAt, err = parseTime(expiresAt)
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	c.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	if consumedAt != "" {
+		t, err := parseTime(consumedAt)
+		if err != nil {
+			return domain.WalletChallenge{}, err
+		}
+		c.ConsumedAt = &t
+	}
+	if c.Address != address || c.ConsumedAt != nil || !now.UTC().Before(c.ExpiresAt) {
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
+	}
+	return c, nil
+}
+
+// ConsumeWalletChallenge atomically marks an unexpired challenge as consumed.
+func (s *Store) ConsumeWalletChallenge(ctx context.Context, id string, address common.Address, now time.Time) (domain.WalletChallenge, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	defer tx.Rollback()
+
+	var c domain.WalletChallenge
+	var addressText, expiresAt, consumedAt, createdAt string
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, address, nonce, message, expires_at, COALESCE(consumed_at, ''), created_at
+		FROM wallet_challenges
+		WHERE id = ?
+	`, strings.TrimSpace(id)).Scan(&c.ID, &addressText, &c.Nonce, &c.Message, &expiresAt, &consumedAt, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
+	}
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	if !common.IsHexAddress(addressText) {
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
+	}
+	c.Address = common.HexToAddress(addressText)
+	c.ExpiresAt, err = parseTime(expiresAt)
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	c.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	if consumedAt != "" {
+		t, err := parseTime(consumedAt)
+		if err != nil {
+			return domain.WalletChallenge{}, err
+		}
+		c.ConsumedAt = &t
+	}
+	if c.Address != address || c.ConsumedAt != nil || !now.UTC().Before(c.ExpiresAt) {
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
+	}
+	consumed := now.UTC()
+	res, err := tx.ExecContext(ctx, `
+		UPDATE wallet_challenges
+		SET consumed_at = ?
+		WHERE id = ? AND consumed_at IS NULL AND expires_at > ?
+	`, formatTime(consumed), c.ID, formatTime(now.UTC()))
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	if n != 1 {
+		return domain.WalletChallenge{}, domain.ErrWalletChallengeInvalid
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.WalletChallenge{}, err
+	}
+	c.ConsumedAt = &consumed
+	return c, nil
 }
